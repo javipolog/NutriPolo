@@ -1,0 +1,37 @@
+# Dependències Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build frontend (Vite)
+dist/
+dist-ssr/
+
+# Build backend (Rust)
+src-tauri/target/
+
+# Variables d'entorn
+.env
+.env.local
+.env.*.local
+
+# Configuració local (editor, IDE, Claude Code)
+.claude/settings.local.json
+*.local
+
+# Logs
+logs/
+*.log
+
+# Sistema operatiu
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.vscode/settings.json
+.idea/
+
+# Tauri: binaris generats
+src-tauri/gen/
