@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, createContext, useContext } from 'react';
-import { X, TrendingUp, TrendingDown, CheckCircle, AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { X, TrendingUp, TrendingDown, CheckCircle, AlertCircle, AlertTriangle, Info, RefreshCw } from 'lucide-react';
 
 // ============================================
 // TOAST NOTIFICATION SYSTEM
@@ -113,6 +113,54 @@ export const Toast = ({ message, type = 'info', onClose }) => {
     </div>
   );
 };
+
+// ============================================
+// ERROR BOUNDARY (#23)
+// Atrapa errors de rendering i mostra missatge amigable
+// ============================================
+export class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('ErrorBoundary caught error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center max-w-md px-6">
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={32} className="text-red-400" />
+            </div>
+            <h2 className="text-xl font-bold text-white mb-2">Ha ocurrido un error</h2>
+            <p className="text-slate-400 mb-1 text-sm">
+              {this.state.error?.message || 'Error desconocido'}
+            </p>
+            <p className="text-slate-600 mb-6 text-xs">
+              Si el problema persiste, exporta tus datos desde Configuración.
+            </p>
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors text-sm font-medium"
+            >
+              <RefreshCw size={14} />
+              Reintentar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ============================================
 // CONFIRM MODAL (Reemplaça confirm() natiu)
@@ -369,13 +417,19 @@ export const StatusBadge = ({ status }) => {
     borrador: 'bg-slate-700 text-slate-300',
     emitida: 'bg-amber-900/50 text-amber-400 border border-amber-700',
     pagada: 'bg-emerald-900/50 text-emerald-400 border border-emerald-700',
-    anulada: 'bg-red-900/50 text-red-400 border border-red-700'
+    anulada: 'bg-red-900/50 text-red-400 border border-red-700',
+    parcial: 'bg-blue-900/50 text-blue-300 border border-blue-700',
+    presupuesto: 'bg-purple-900/50 text-purple-300 border border-purple-700',
+    rectificativa: 'bg-orange-900/50 text-orange-300 border border-orange-700',
   };
-  const labels = { borrador: 'Borrador', emitida: 'Pendiente', pagada: 'Pagada', anulada: 'Anulada' };
+  const labels = {
+    borrador: 'Borrador', emitida: 'Pendiente', pagada: 'Pagada', anulada: 'Anulada',
+    parcial: 'Parcial', presupuesto: 'Presupuesto', rectificativa: 'Rectificativa',
+  };
 
   return (
-    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${styles[status]}`}>
-      {labels[status]}
+    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${styles[status] || styles.borrador}`}>
+      {labels[status] || status}
     </span>
   );
 };
