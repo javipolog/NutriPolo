@@ -67,8 +67,21 @@ export const useStore = create(
 
       // Invoices
       invoices: [],
+      invoiceCounters: {}, // Comptador persistent per sèrie (mai decreix): { "YY_COD": lastSeq }
       setInvoices: (invoices) => set({ invoices }),
-      addInvoice: (invoice) => set((state) => ({ invoices: [...state.invoices, invoice] })),
+      addInvoice: (invoice) => set((state) => {
+        // Actualitzar el comptador de sèrie al crear factura nova
+        const parts = (invoice.numero || '').split('_');
+        let newCounters = state.invoiceCounters;
+        if (parts.length >= 3) {
+          const seq = parseInt(parts[parts.length - 1], 10);
+          const series = parts.slice(0, -1).join('_');
+          if (!isNaN(seq) && series) {
+            newCounters = { ...state.invoiceCounters, [series]: Math.max(state.invoiceCounters[series] || 0, seq) };
+          }
+        }
+        return { invoices: [...state.invoices, invoice], invoiceCounters: newCounters };
+      }),
       updateInvoice: (id, data) => set((state) => ({
         invoices: state.invoices.map((i) => (i.id === id ? { ...i, ...data } : i))
       })),
@@ -157,6 +170,7 @@ export const useStore = create(
         config: state.config,
         clients: state.clients,
         invoices: state.invoices,
+        invoiceCounters: state.invoiceCounters,
         expenses: state.expenses,
         invoiceSearch: state.invoiceSearch,
         invoiceFilters: state.invoiceFilters,
@@ -189,11 +203,11 @@ export const generateClientCode = (name) => {
   return words.slice(0, 3).map((w) => w[0]).join('');
 };
 
-export const generateInvoiceNumber = (clients, invoices, clientId, date) => {
+export const generateInvoiceNumber = (clients, invoices, clientId, date, counters = {}) => {
   const year = new Date(date).getFullYear().toString().slice(-2);
   const client = clients.find((c) => c.id === clientId);
 
-  // Determine Acronym
+  // Determinar acrònim del client
   let code = 'XXX';
   if (client) {
     if (client.codigo && client.codigo.length === 3) {
@@ -203,12 +217,26 @@ export const generateInvoiceNumber = (clients, invoices, clientId, date) => {
     }
   }
 
-  const yearInvoices = invoices.filter((i) => {
-    const invYear = new Date(i.fecha).getFullYear().toString().slice(-2);
-    return i.clienteId === clientId && invYear === year;
-  });
-  const seq = String(yearInvoices.length + 1).padStart(3, '0');
-  return `${year}_${code}_${seq}`;
+  const series = `${year}_${code}`;
+
+  // Màxim del comptador persistent (mai decreix)
+  const persistentMax = counters[series] || 0;
+
+  // Màxim dels números existents per a aquesta sèrie (per compatibilitat amb dades antigues)
+  const existingMax = invoices.reduce((max, i) => {
+    if (!i.numero) return max;
+    const parts = i.numero.split('_');
+    // La sèrie és tot menys l'últim segment
+    if (parts.length < 3) return max;
+    const invSeries = parts.slice(0, -1).join('_');
+    if (invSeries !== series) return max;
+    const seq = parseInt(parts[parts.length - 1], 10);
+    return isNaN(seq) ? max : Math.max(max, seq);
+  }, 0);
+
+  // Usar el màxim dels dos per garantir que mai hi hagi duplicats
+  const nextSeq = Math.max(persistentMax, existingMax) + 1;
+  return `${series}_${String(nextSeq).padStart(3, '0')}`;
 };
 
 export const calcularFactura = (tipo, data, ivaPct = 21, irpfPct = 15) => {

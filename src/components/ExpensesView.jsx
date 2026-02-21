@@ -188,14 +188,17 @@ export const ExpensesView = () => {
             );
             if (!exists) {
                 const ivaPorcentaje = item.ivaPorcentaje || 21;
+                // Calcular ivaImporte sempre des del percentatge per garantir consistència
+                const ivaImporte = parseFloat((item.baseImponible * (ivaPorcentaje / 100)).toFixed(2));
+                const total = parseFloat((item.baseImponible + ivaImporte).toFixed(2));
                 const expenseData = {
                     id: generateId(), fecha: item.fecha, proveedor: item.proveedor,
                     cifProveedor: item.cifProveedor || '',
                     concepto: item.concepto || item.filename || 'Gasto Importado',
                     categoria: item.categoria || defaultCategories[0],
                     baseImponible: item.baseImponible, ivaPorcentaje,
-                    ivaImporte: item.total - item.baseImponible,
-                    total: item.total, deducibleIrpf: true, deducibleIva: true, archivo: item.file
+                    ivaImporte,
+                    total, deducibleIrpf: true, deducibleIva: true, archivo: item.file
                 };
                 addExpense(expenseData);
                 count++;
@@ -270,8 +273,9 @@ export const ExpensesView = () => {
     const openEdit = (exp) => { setEditingExpense(exp); setShowModal(true); };
 
     const saveExpense = (data) => {
-        const ivaImporte = data.baseImponible * (data.ivaPorcentaje / 100);
-        const total = data.baseImponible + ivaImporte;
+        // Recalcular sempre ivaImporte i total des del percentatge per garantir persistència correcta
+        const ivaImporte = parseFloat((data.baseImponible * (data.ivaPorcentaje / 100)).toFixed(2));
+        const total = parseFloat((data.baseImponible + ivaImporte).toFixed(2));
         const finalData = { ...data, ivaImporte, total };
         if (editingExpense) {
             updateExpense(editingExpense.id, finalData);

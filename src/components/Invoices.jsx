@@ -10,9 +10,10 @@ import { useNotionStore } from '../stores/notionStore';
 import { InvoiceModal } from './InvoiceModal';
 import { InvoicePreviewModern } from './InvoicePreview';
 import { SendInvoiceModal } from './SendInvoiceModal';
-import { invoke } from '@tauri-apps/api/tauri';
 import { save } from '@tauri-apps/api/dialog';
 import { open as openUrl } from '@tauri-apps/api/shell';
+import { generateInvoicePDF, savePDF } from '../services/pdfGenerator';
+import { useToast } from './UI';
 
 export const Invoices = () => {
     const {
@@ -21,6 +22,7 @@ export const Invoices = () => {
         invoiceFilters: filters, setInvoiceFilters: setFilters
     } = useStore();
     const { autoSync, isConfigured, syncSingleInvoice, deleteFromNotion } = useNotionStore();
+    const toast = useToast();
 
     // Local State for UI only
     const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
@@ -209,17 +211,14 @@ export const Invoices = () => {
             });
 
             if (filePath) {
-                await invoke('generate_invoice_pdf', {
-                    invoice: inv,
-                    client: client,
-                    config: config,
-                    outputPath: filePath
-                });
-                alert('PDF generado correctamente');
+                // Generar PDF des del frontend amb el disseny real de l'editor visual
+                const pdfBytes = await generateInvoicePDF(inv, client, config);
+                await savePDF(pdfBytes, filePath);
+                toast.success('PDF generado correctamente con tu diseño personalizado');
             }
         } catch (e) {
             console.error('Error generating PDF:', e);
-            alert('Error al generar el PDF');
+            toast.error('Error al generar el PDF: ' + (e?.message || e));
         }
         setGenerating(false);
     };
