@@ -1,16 +1,16 @@
 /**
  * RulesManager.jsx
  * ================
- * Gestor visual de regles personalitzades de categorització.
- * Permet crear, editar, reordenar i desactivar regles que
- * detecten paraules clau i assignen categories automàticament.
+ * Gestor visual de regles personalitzades (v2 — conditions/actions).
+ * Cada regla pot sobreescriure: proveedor, categoria, IVA, CIF, concepte,
+ * deducibilitat i estratègia de data.
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-    Plus, Trash2, Edit2, Check, X, GripVertical,
+    Plus, Trash2, Edit2, Check, X,
     Tag, Zap, ToggleLeft, ToggleRight, ChevronDown,
-    AlertCircle, BookOpen, ArrowUp, ArrowDown, Copy
+    AlertCircle, BookOpen, ArrowUp, ArrowDown, Shield
 } from 'lucide-react';
 import { Modal, Button, Select } from './UI';
 import { useProviderMemory } from '../services/providerMemory';
@@ -22,14 +22,31 @@ import { defaultCategories } from '../stores/store';
 
 const MATCH_FIELD_OPTIONS = [
     { value: 'any',       label: 'Qualsevol camp' },
-    { value: 'proveedor', label: 'Sol proveïdor' },
+    { value: 'proveedor', label: 'Sol proveidor' },
     { value: 'concepto',  label: 'Sol concepte' },
     { value: 'filename',  label: 'Sol nom fitxer' },
+    { value: 'rawText',   label: 'Text complet PDF' },
+    { value: 'cif',       label: 'CIF/NIF del PDF' },
 ];
 
 const MATCH_MODE_OPTIONS = [
     { value: 'any', label: 'Almenys una paraula' },
     { value: 'all', label: 'Totes les paraules' },
+];
+
+const IVA_OPTIONS = [
+    { value: '',   label: '— Autodetectar —' },
+    { value: '21', label: '21%' },
+    { value: '10', label: '10%' },
+    { value: '4',  label: '4%' },
+    { value: '0',  label: '0% (exempt)' },
+];
+
+const DATE_STRATEGY_OPTIONS = [
+    { value: '',                    label: '— Autodetectar —' },
+    { value: 'nearest_to_keyword',  label: 'Mes propera a keyword' },
+    { value: 'first',               label: 'Primera data (mes antiga)' },
+    { value: 'last',                label: 'Ultima data (mes recent)' },
 ];
 
 const CATEGORY_COLORS = {
@@ -50,140 +67,329 @@ const CATEGORY_COLORS = {
 const getCatColor = (cat) => CATEGORY_COLORS[cat] || { bg: 'bg-slate-500/10', text: 'text-slate-400', dot: 'bg-slate-400' };
 
 // ============================================
-// EXEMPLE RULES PER ONBOARDING
+// HELPERS per convertir v1↔v2
+// ============================================
+
+/** Extrau les dades d'una regla (v1 o v2) a format pla per al formulari */
+const ruleToFormData = (rule) => {
+    if (!rule) return null;
+    const cond = rule.conditions || {};
+    const act = rule.actions || {};
+    return {
+        name: rule.name || '',
+        keywords: cond.keywords || rule.keywords || '',
+        matchField: cond.matchField || rule.matchField || 'any',
+        matchMode: cond.matchMode || rule.matchMode || 'any',
+        // Actions
+        proveedor: act.proveedor || '',
+        categoria: act.categoria || rule.categoria || '',
+        cifNif: act.cifNif || '',
+        ivaPorcentaje: act.ivaPorcentaje !== null && act.ivaPorcentaje !== undefined ? String(act.ivaPorcentaje) : '',
+        concepto: act.concepto || '',
+        deducible: act.deducible !== null && act.deducible !== undefined ? act.deducible : true,
+        deduciblePct: act.deduciblePct !== null && act.deduciblePct !== undefined ? String(act.deduciblePct) : '',
+        // Date strategy
+        datePrefer: act.dateStrategy?.prefer || '',
+        dateKeyword: act.dateStrategy?.keyword || '',
+        dateSkipKeywords: act.dateStrategy?.skipKeywords?.join(', ') || '',
+        dateDayOfMonth: act.dateStrategy?.dayOfMonth ? String(act.dateStrategy.dayOfMonth) : '',
+    };
+};
+
+/** Converteix dades del formulari al format v2 per al store */
+const formDataToRule = (form) => {
+    const dateStrategy = form.datePrefer ? {
+        prefer: form.datePrefer,
+        keyword: form.dateKeyword || null,
+        skipKeywords: form.dateSkipKeywords ? form.dateSkipKeywords.split(',').map(s => s.trim()).filter(Boolean) : [],
+        dayOfMonth: form.dateDayOfMonth ? parseInt(form.dateDayOfMonth) : null,
+    } : null;
+
+    return {
+        name: form.name,
+        conditions: {
+            keywords: form.keywords,
+            matchField: form.matchField,
+            matchMode: form.matchMode,
+        },
+        actions: {
+            proveedor: form.proveedor || null,
+            categoria: form.categoria || null,
+            ivaPorcentaje: form.ivaPorcentaje !== '' ? parseInt(form.ivaPorcentaje) : null,
+            cifNif: form.cifNif || null,
+            concepto: form.concepto || null,
+            deducible: form.deduciblePct !== '' ? form.deducible : null,
+            deduciblePct: form.deduciblePct !== '' ? parseInt(form.deduciblePct) : null,
+            dateStrategy,
+        },
+    };
+};
+
+// ============================================
+// EXEMPLE RULES V2 (ampliades)
 // ============================================
 
 const EXAMPLE_RULES = [
-    { name: 'Amazon', keywords: 'amazon', categoria: 'Material de oficina', matchField: 'any', matchMode: 'any' },
-    { name: 'Iberdrola / Endesa', keywords: 'iberdrola, endesa, naturgy, enel', categoria: 'Suministros', matchField: 'any', matchMode: 'any' },
-    { name: 'Telefónica / Movistar', keywords: 'telefonica, movistar', categoria: 'Telecomunicaciones', matchField: 'proveedor', matchMode: 'any' },
-    { name: 'Adobe', keywords: 'adobe', categoria: 'Software y suscripciones', matchField: 'proveedor', matchMode: 'any' },
-    { name: 'Google Workspace', keywords: 'google, workspace', categoria: 'Software y suscripciones', matchField: 'any', matchMode: 'all' },
-    { name: 'Renfe / Ave', keywords: 'renfe, ave, iryo', categoria: 'Transporte', matchField: 'any', matchMode: 'any' },
+    {
+        name: 'Iberdrola',
+        conditions: { keywords: 'iberdrola, i-de redes', matchField: 'any', matchMode: 'any' },
+        actions: { proveedor: 'Iberdrola S.A.', categoria: 'Suministros', ivaPorcentaje: 21, cifNif: 'A95075578' },
+    },
+    {
+        name: 'Endesa',
+        conditions: { keywords: 'endesa, enel', matchField: 'any', matchMode: 'any' },
+        actions: { proveedor: 'Endesa Energia S.A.', categoria: 'Suministros', ivaPorcentaje: 21, cifNif: 'A81948077' },
+    },
+    {
+        name: 'Movistar',
+        conditions: { keywords: 'movistar, telefonica, telefonica de espana', matchField: 'any', matchMode: 'any' },
+        actions: { proveedor: 'Telefonica de Espana S.A.U.', categoria: 'Telecomunicaciones', ivaPorcentaje: 21, cifNif: 'A82018474' },
+    },
+    {
+        name: 'Vodafone',
+        conditions: { keywords: 'vodafone', matchField: 'any', matchMode: 'any' },
+        actions: { proveedor: 'Vodafone Espana S.A.U.', categoria: 'Telecomunicaciones', ivaPorcentaje: 21, cifNif: 'A80907397' },
+    },
+    {
+        name: 'Adobe',
+        conditions: { keywords: 'adobe', matchField: 'any', matchMode: 'any' },
+        actions: { proveedor: 'Adobe Systems', categoria: 'Software y suscripciones', ivaPorcentaje: 21 },
+    },
+    {
+        name: 'Amazon (equips)',
+        conditions: { keywords: 'amazon', matchField: 'any', matchMode: 'any' },
+        actions: { proveedor: 'Amazon EU S.a r.l.', categoria: 'Equipos informaticos', ivaPorcentaje: 21 },
+    },
+    {
+        name: 'Seguretat Social / RETA',
+        conditions: { keywords: 'seguridad social, TGSS', matchField: 'any', matchMode: 'any' },
+        actions: { proveedor: 'Seguridad Social', categoria: 'Seguros', ivaPorcentaje: 0 },
+    },
+    {
+        name: 'Asseguranca RC',
+        conditions: { keywords: 'mapfre, axa, allianz, zurich, seguro profesional', matchField: 'any', matchMode: 'any' },
+        actions: { categoria: 'Seguros', ivaPorcentaje: 0 },
+    },
+    {
+        name: 'Gasolinera',
+        conditions: { keywords: 'repsol, cepsa, bp, shell, galp, gasolina, combustible', matchField: 'any', matchMode: 'any' },
+        actions: { categoria: 'Transporte', ivaPorcentaje: 21 },
+    },
+    {
+        name: 'Gestoria',
+        conditions: { keywords: 'gestoria, gestoria, asesoria, asesoria', matchField: 'any', matchMode: 'any' },
+        actions: { categoria: 'Gestoria y asesoria', ivaPorcentaje: 21 },
+    },
 ];
 
 // ============================================
-// FORM RULE (crear / editar)
+// FORM RULE (crear / editar — v2)
 // ============================================
 
-const EMPTY_RULE = {
-    name: '',
-    keywords: '',
-    categoria: defaultCategories[0],
-    matchField: 'any',
-    matchMode: 'any',
-    enabled: true,
+const EMPTY_FORM = {
+    name: '', keywords: '', matchField: 'any', matchMode: 'any',
+    proveedor: '', categoria: '', cifNif: '', ivaPorcentaje: '',
+    concepto: '', deducible: true, deduciblePct: '',
+    datePrefer: '', dateKeyword: '', dateSkipKeywords: '', dateDayOfMonth: '',
 };
 
-const RuleForm = ({ initial = EMPTY_RULE, onSave, onCancel }) => {
-    const [form, setForm] = useState({ ...EMPTY_RULE, ...initial });
+const RuleForm = ({ initial, onSave, onCancel }) => {
+    const initData = initial ? ruleToFormData(initial) : EMPTY_FORM;
+    const [form, setForm] = useState({ ...EMPTY_FORM, ...initData });
     const [error, setError] = useState('');
+    const [showAdvanced, setShowAdvanced] = useState(false);
+
+    // Fase 3.2 fix: re-inicialitzar el formulari quan `initial` canvia
+    // (useState només corre una vegada al muntar; useEffect detecta canvis posteriors)
+    useEffect(() => {
+        const newInitData = initial ? ruleToFormData(initial) : EMPTY_FORM;
+        setForm({ ...EMPTY_FORM, ...newInitData });
+        setError('');
+    }, [initial]);
 
     const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
     const handleSubmit = (e) => {
         e.preventDefault();
         if (!form.keywords.trim()) return setError('Cal almenys una paraula clau.');
-        if (!form.categoria) return setError('Selecciona una categoria.');
+        // Almenys una acció ha d'estar configurada
+        const hasAction = form.categoria || form.proveedor || form.cifNif ||
+            form.ivaPorcentaje !== '' || form.concepto || form.datePrefer;
+        if (!hasAction) return setError('Cal configurar almenys una accio (categoria, proveidor, IVA...).');
         setError('');
-        onSave(form);
+        onSave(formDataToRule(form));
     };
 
     const keywords = form.keywords.split(',').map(k => k.trim()).filter(Boolean);
 
+    // Comptar accions configurades
+    const actionCount = [
+        form.proveedor, form.categoria, form.cifNif,
+        form.ivaPorcentaje !== '' ? 'x' : '', form.concepto,
+        form.deduciblePct !== '' ? 'x' : '', form.datePrefer,
+    ].filter(Boolean).length;
+
     return (
         <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Nom de la regla */}
+            {/* Nom */}
             <div>
                 <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1.5 block">
-                    Nom de la regla <span className="text-slate-600 normal-case font-normal">(opcional, per identificar-la)</span>
+                    Nom de la regla <span className="text-slate-600 normal-case font-normal">(opcional)</span>
                 </label>
-                <input
-                    value={form.name}
-                    onChange={e => set('name', e.target.value)}
-                    placeholder="Ex: Amazon, Iberdrola, Adobe..."
-                    className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors"
-                />
+                <input value={form.name} onChange={e => set('name', e.target.value)}
+                    placeholder="Ex: Iberdrola, Adobe..."
+                    className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors" />
             </div>
 
-            {/* Paraules clau */}
-            <div>
-                <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1.5 block">
-                    Paraules clau <span className="text-red-400">*</span>
-                    <span className="text-slate-600 normal-case font-normal ml-1">— separades per comes</span>
-                </label>
-                <input
-                    value={form.keywords}
-                    onChange={e => set('keywords', e.target.value)}
-                    placeholder="Ex: amazon, aws, amazon web services"
-                    className="w-full bg-slate-800 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors font-mono"
-                    autoFocus
-                />
-                {/* Preview de tags */}
-                {keywords.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
-                        {keywords.map((kw, i) => (
-                            <span key={i} className="bg-blue-500/15 text-blue-400 border border-blue-500/25 text-xs px-2 py-0.5 rounded-full font-mono">
-                                {kw}
-                            </span>
-                        ))}
+            {/* ── QUAN DETECTAR ── */}
+            <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700/30">
+                <h5 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-3">Quan detectar</h5>
+                <div>
+                    <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1.5 block">
+                        Paraules clau <span className="text-red-400">*</span>
+                        <span className="text-slate-600 normal-case font-normal ml-1">— separades per comes</span>
+                    </label>
+                    <input value={form.keywords} onChange={e => set('keywords', e.target.value)}
+                        placeholder="Ex: iberdrola, i-de redes"
+                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500 font-mono"
+                        autoFocus />
+                    {keywords.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                            {keywords.map((kw, i) => (
+                                <span key={i} className="bg-blue-500/15 text-blue-400 border border-blue-500/25 text-xs px-2 py-0.5 rounded-full font-mono">{kw}</span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Cerca en</label>
+                        <Select value={form.matchField} onChange={e => set('matchField', e.target.value)}
+                            options={MATCH_FIELD_OPTIONS} className="bg-slate-900 border-slate-700 text-sm" />
                     </div>
-                )}
-            </div>
-
-            {/* Categoria */}
-            <div>
-                <label className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-1.5 block">
-                    Categoria assignada <span className="text-red-400">*</span>
-                </label>
-                <Select
-                    value={form.categoria}
-                    onChange={e => set('categoria', e.target.value)}
-                    options={defaultCategories.map(c => ({ value: c, label: c }))}
-                    className="bg-slate-800 border-slate-700"
-                />
-                {form.categoria && (
-                    <div className={`mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${getCatColor(form.categoria).bg} ${getCatColor(form.categoria).text}`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${getCatColor(form.categoria).dot}`} />
-                        {form.categoria}
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Condicio</label>
+                        <Select value={form.matchMode} onChange={e => set('matchMode', e.target.value)}
+                            options={MATCH_MODE_OPTIONS} className="bg-slate-900 border-slate-700 text-sm" />
                     </div>
-                )}
+                </div>
             </div>
 
-            {/* Opcions avançades */}
-            <details className="group">
-                <summary className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer select-none transition-colors list-none">
-                    <ChevronDown size={13} className="transition-transform group-open:rotate-180" />
-                    Opcions avançades
-                </summary>
-                <div className="mt-3 space-y-3 pl-4 border-l border-slate-800">
+            {/* ── QUE ASSIGNAR ── */}
+            <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700/30">
+                <h5 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest mb-3">
+                    Que assignar <span className="text-slate-600 normal-case font-normal">(deixar buit = autodetectar)</span>
+                    {actionCount > 0 && <span className="ml-2 text-blue-400">{actionCount} camp{actionCount > 1 ? 's' : ''}</span>}
+                </h5>
+
+                <div className="space-y-3">
+                    {/* Proveidor */}
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Proveidor</label>
+                        <input value={form.proveedor} onChange={e => set('proveedor', e.target.value)}
+                            placeholder="Ex: Iberdrola S.A."
+                            className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500" />
+                    </div>
+
+                    {/* Categoria */}
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Categoria</label>
+                        <Select value={form.categoria} onChange={e => set('categoria', e.target.value)}
+                            options={[{ value: '', label: '— Autodetectar —' }, ...defaultCategories.map(c => ({ value: c, label: c }))]}
+                            className="bg-slate-900 border-slate-700" />
+                        {form.categoria && (
+                            <div className={`mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${getCatColor(form.categoria).bg} ${getCatColor(form.categoria).text}`}>
+                                <div className={`w-1.5 h-1.5 rounded-full ${getCatColor(form.categoria).dot}`} />
+                                {form.categoria}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* CIF + IVA en línia */}
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Cerca en</label>
-                            <Select
-                                value={form.matchField}
-                                onChange={e => set('matchField', e.target.value)}
-                                options={MATCH_FIELD_OPTIONS}
-                                className="bg-slate-800 border-slate-700 text-sm"
-                            />
+                            <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">CIF/NIF</label>
+                            <input value={form.cifNif} onChange={e => set('cifNif', e.target.value.toUpperCase())}
+                                placeholder="A12345678"
+                                className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500 font-mono" />
                         </div>
                         <div>
-                            <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Condició</label>
-                            <Select
-                                value={form.matchMode}
-                                onChange={e => set('matchMode', e.target.value)}
-                                options={MATCH_MODE_OPTIONS}
-                                className="bg-slate-800 border-slate-700 text-sm"
-                            />
+                            <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">IVA</label>
+                            <Select value={form.ivaPorcentaje} onChange={e => set('ivaPorcentaje', e.target.value)}
+                                options={IVA_OPTIONS} className="bg-slate-900 border-slate-700" />
                         </div>
                     </div>
-                    <p className="text-xs text-slate-600">
-                        {form.matchMode === 'all'
-                            ? '⚡ Totes les paraules clau han d\'aparèixer en el text.'
-                            : '⚡ N\'hi ha prou amb que aparega qualsevol de les paraules clau.'}
-                    </p>
+
+                    {/* Concepte */}
+                    <div>
+                        <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Concepte</label>
+                        <input value={form.concepto} onChange={e => set('concepto', e.target.value)}
+                            placeholder="Ex: Subministrament electric"
+                            className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500" />
+                    </div>
                 </div>
-            </details>
+
+                {/* Avançat: Deduible + Data */}
+                <details className="mt-3 group" open={showAdvanced}>
+                    <summary onClick={e => { e.preventDefault(); setShowAdvanced(v => !v); }}
+                        className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 cursor-pointer select-none transition-colors list-none">
+                        <ChevronDown size={13} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+                        Opcions avancades (deduibilitat, data)
+                    </summary>
+                    {showAdvanced && (
+                        <div className="mt-3 space-y-3 pl-3 border-l border-slate-700/50">
+                            {/* Deduible */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Deduible IRPF</label>
+                                    <Select value={form.deduciblePct !== '' ? 'custom' : ''}
+                                        onChange={e => {
+                                            if (e.target.value === '') { set('deduciblePct', ''); set('deducible', true); }
+                                            else { set('deduciblePct', '100'); set('deducible', true); }
+                                        }}
+                                        options={[
+                                            { value: '', label: '— Autodetectar —' },
+                                            { value: 'custom', label: 'Personalitzat' },
+                                        ]}
+                                        className="bg-slate-900 border-slate-700 text-sm" />
+                                </div>
+                                {form.deduciblePct !== '' && (
+                                    <div>
+                                        <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">% Deduible</label>
+                                        <input type="number" min="0" max="100" value={form.deduciblePct}
+                                            onChange={e => set('deduciblePct', e.target.value)}
+                                            className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500 font-mono" />
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Data strategy */}
+                            <div>
+                                <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Estrategia de data</label>
+                                <Select value={form.datePrefer} onChange={e => set('datePrefer', e.target.value)}
+                                    options={DATE_STRATEGY_OPTIONS}
+                                    className="bg-slate-900 border-slate-700 text-sm" />
+                            </div>
+                            {form.datePrefer === 'nearest_to_keyword' && (
+                                <div>
+                                    <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Keyword de data</label>
+                                    <input value={form.dateKeyword} onChange={e => set('dateKeyword', e.target.value)}
+                                        placeholder="fecha emision, fecha factura..."
+                                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500" />
+                                </div>
+                            )}
+                            {form.datePrefer && (
+                                <div>
+                                    <label className="text-xs text-slate-500 uppercase font-semibold mb-1 block">Ignorar dates amb</label>
+                                    <input value={form.dateSkipKeywords} onChange={e => set('dateSkipKeywords', e.target.value)}
+                                        placeholder="vencimiento, periodo, entrega..."
+                                        className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none focus:border-blue-500 font-mono" />
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </details>
+            </div>
 
             {error && (
                 <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 text-xs p-2.5 rounded-lg">
@@ -192,7 +398,7 @@ const RuleForm = ({ initial = EMPTY_RULE, onSave, onCancel }) => {
             )}
 
             <div className="flex justify-end gap-2 pt-2">
-                <Button type="button" variant="ghost" onClick={onCancel} size="sm">Cancel·lar</Button>
+                <Button type="button" variant="ghost" onClick={onCancel} size="sm">Cancel-lar</Button>
                 <Button type="submit" size="sm" className="bg-blue-600 hover:bg-blue-500 px-5">
                     <Check size={14} className="mr-1.5" /> Guardar regla
                 </Button>
@@ -202,12 +408,26 @@ const RuleForm = ({ initial = EMPTY_RULE, onSave, onCancel }) => {
 };
 
 // ============================================
-// RULE CARD (llista)
+// RULE CARD (v2 — mostra accions configurades)
 // ============================================
 
 const RuleCard = ({ rule, index, total, onEdit, onDelete, onToggle, onMoveUp, onMoveDown }) => {
-    const colors = getCatColor(rule.categoria);
-    const keywords = (rule.keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+    const cond = rule.conditions || {};
+    const act = rule.actions || {};
+    const cat = act.categoria || rule.categoria || '';
+    const colors = getCatColor(cat);
+    const keywords = (cond.keywords || rule.keywords || '').split(',').map(k => k.trim()).filter(Boolean);
+    const matchField = cond.matchField || rule.matchField || 'any';
+    const matchMode = cond.matchMode || rule.matchMode || 'any';
+
+    // Resum de les accions configurades
+    const actionTags = [];
+    if (act.proveedor) actionTags.push({ label: act.proveedor, color: 'text-white' });
+    if (act.cifNif) actionTags.push({ label: `CIF: ${act.cifNif}`, color: 'text-slate-400' });
+    if (act.ivaPorcentaje !== null && act.ivaPorcentaje !== undefined) actionTags.push({ label: `IVA ${act.ivaPorcentaje}%`, color: 'text-yellow-400' });
+    if (act.concepto) actionTags.push({ label: act.concepto, color: 'text-slate-400' });
+    if (act.deduciblePct !== null && act.deduciblePct !== undefined) actionTags.push({ label: `Ded. ${act.deduciblePct}%`, color: 'text-green-400' });
+    if (act.dateStrategy) actionTags.push({ label: 'Data', color: 'text-purple-400' });
 
     return (
         <div className={`group flex items-center gap-3 p-3 rounded-xl border transition-all ${
@@ -215,7 +435,7 @@ const RuleCard = ({ rule, index, total, onEdit, onDelete, onToggle, onMoveUp, on
                 ? 'bg-slate-800/50 border-slate-700/50 hover:border-slate-600/50'
                 : 'bg-slate-900/40 border-slate-800/50 opacity-50'
         }`}>
-            {/* Drag handle + priority */}
+            {/* Priority */}
             <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
                 <button onClick={onMoveUp} disabled={index === 0}
                     className="text-slate-600 hover:text-slate-300 disabled:opacity-20 transition-colors p-0.5">
@@ -231,36 +451,33 @@ const RuleCard = ({ rule, index, total, onEdit, onDelete, onToggle, onMoveUp, on
             {/* Contingut */}
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                    {/* Nom */}
-                    {rule.name && (
-                        <span className="text-white text-sm font-semibold">{rule.name}</span>
-                    )}
-                    {/* Keywords */}
+                    {rule.name && <span className="text-white text-sm font-semibold">{rule.name}</span>}
                     <div className="flex flex-wrap gap-1">
                         {keywords.slice(0, 4).map((kw, i) => (
-                            <span key={i} className="bg-slate-700/80 text-slate-300 text-[10px] px-1.5 py-0.5 rounded font-mono border border-slate-600/30">
-                                {kw}
-                            </span>
+                            <span key={i} className="bg-slate-700/80 text-slate-300 text-[10px] px-1.5 py-0.5 rounded font-mono border border-slate-600/30">{kw}</span>
                         ))}
-                        {keywords.length > 4 && (
-                            <span className="text-slate-500 text-[10px] px-1">+{keywords.length - 4}</span>
-                        )}
+                        {keywords.length > 4 && <span className="text-slate-500 text-[10px] px-1">+{keywords.length - 4}</span>}
                     </div>
                 </div>
-                <div className="flex items-center gap-2 mt-1.5">
-                    {/* Fletxa → categoria */}
-                    <span className="text-slate-600 text-xs">→</span>
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${colors.bg} ${colors.text}`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${colors.dot}`} />
-                        {rule.categoria}
-                    </span>
-                    {/* Metadades opcionals */}
-                    {(rule.matchField && rule.matchField !== 'any') && (
-                        <span className="text-slate-600 text-[10px]">
-                            en {MATCH_FIELD_OPTIONS.find(o => o.value === rule.matchField)?.label?.toLowerCase()}
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                    <span className="text-slate-600 text-xs">-&gt;</span>
+                    {cat && (
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ${colors.bg} ${colors.text}`}>
+                            <div className={`w-1.5 h-1.5 rounded-full ${colors.dot}`} />
+                            {cat}
                         </span>
                     )}
-                    {rule.matchMode === 'all' && (
+                    {actionTags.map((tag, i) => (
+                        <span key={i} className={`text-[10px] ${tag.color} bg-slate-700/40 px-1.5 py-0.5 rounded border border-slate-700/50`}>
+                            {tag.label}
+                        </span>
+                    ))}
+                    {matchField !== 'any' && (
+                        <span className="text-slate-600 text-[10px]">
+                            en {MATCH_FIELD_OPTIONS.find(o => o.value === matchField)?.label?.toLowerCase()}
+                        </span>
+                    )}
+                    {matchMode === 'all' && (
                         <span className="text-slate-600 text-[10px] border border-slate-700 px-1 rounded">TOTES</span>
                     )}
                 </div>
@@ -268,8 +485,7 @@ const RuleCard = ({ rule, index, total, onEdit, onDelete, onToggle, onMoveUp, on
 
             {/* Accions */}
             <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={onToggle}
-                    title={rule.enabled !== false ? 'Desactivar' : 'Activar'}
+                <button onClick={onToggle} title={rule.enabled !== false ? 'Desactivar' : 'Activar'}
                     className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors">
                     {rule.enabled !== false ? <ToggleRight size={16} className="text-emerald-400" /> : <ToggleLeft size={16} />}
                 </button>
@@ -290,7 +506,7 @@ const RuleCard = ({ rule, index, total, onEdit, onDelete, onToggle, onMoveUp, on
 // MAIN COMPONENT
 // ============================================
 
-export const RulesManager = ({ open, onClose }) => {
+export const RulesManager = ({ open, onClose, initialRule }) => {
     const {
         customRules,
         addCustomRule,
@@ -300,8 +516,25 @@ export const RulesManager = ({ open, onClose }) => {
     } = useProviderMemory();
 
     const [showForm, setShowForm] = useState(false);
-    const [editingRule, setEditingRule] = useState(null); // null = nou, object = editar
+    const [editingRule, setEditingRule] = useState(null);
+    // Fase 3.2: prefillData per obrir el formulari pre-omplert des del ScanResultModal
+    const [prefillData, setPrefillData] = useState(null);
     const [showExamples, setShowExamples] = useState(false);
+
+    // Fase 3.2: quan s'obre el modal amb initialRule, obrir formulari pre-omplert
+    useEffect(() => {
+        if (open && initialRule) {
+            setEditingRule(null);
+            setPrefillData(initialRule);
+            setShowForm(true);
+            setShowExamples(false);
+        }
+        if (!open) {
+            setPrefillData(null);
+            setShowForm(false);
+            setEditingRule(null);
+        }
+    }, [open, initialRule]);
 
     const sortedRules = [...customRules].sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
 
@@ -313,16 +546,16 @@ export const RulesManager = ({ open, onClose }) => {
         }
         setShowForm(false);
         setEditingRule(null);
+        setPrefillData(null);
     };
 
     const handleEdit = (rule) => {
         setEditingRule(rule);
+        setPrefillData(null);
         setShowForm(true);
     };
 
-    const handleDelete = (id) => {
-        removeCustomRule(id);
-    };
+    const handleDelete = (id) => removeCustomRule(id);
 
     const handleToggle = (rule) => {
         updateCustomRule(rule.id, { enabled: rule.enabled === false ? true : false });
@@ -342,52 +575,61 @@ export const RulesManager = ({ open, onClose }) => {
         reorderCustomRules(ids);
     };
 
-    const handleAddExample = (example) => {
-        addCustomRule(example);
-    };
+    const handleAddExample = (example) => addCustomRule(example);
 
     const handleCancelForm = () => {
         setShowForm(false);
         setEditingRule(null);
+        setPrefillData(null);
     };
 
     const activeCount = sortedRules.filter(r => r.enabled !== false).length;
 
+    // Helper per comparar si una regla d'exemple ja existeix
+    const isExampleAdded = (ex) => {
+        return sortedRules.some(r => {
+            const rName = r.name?.toLowerCase();
+            const exName = ex.name?.toLowerCase();
+            const rKeywords = (r.conditions?.keywords || r.keywords || '').toLowerCase();
+            const exKeywords = (ex.conditions?.keywords || '').toLowerCase();
+            return rName === exName || rKeywords === exKeywords;
+        });
+    };
+
     return (
-        <Modal open={open} onClose={onClose} title="Regles de Categorització" size="md">
+        <Modal open={open} onClose={onClose} title="Regles de Categoritzacio" size="lg">
             <div className="space-y-4">
 
-                {/* Capçalera informativa */}
+                {/* Capcalera */}
                 <div className="flex items-start gap-3 bg-blue-500/8 border border-blue-500/15 rounded-xl p-3">
-                    <Zap size={16} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                    <Shield size={16} className="text-blue-400 mt-0.5 flex-shrink-0" />
                     <div>
                         <p className="text-sm text-slate-300 leading-relaxed">
-                            Les regles s'apliquen <strong className="text-white">per ordre de prioritat</strong> quan es detecta un PDF. Si el text del document conté les paraules clau, s'assigna automàticament la categoria corresponent.
+                            Les regles s'apliquen <strong className="text-white">per ordre de prioritat</strong> i poden forcar
+                            <strong className="text-blue-400"> proveidor, categoria, IVA, CIF</strong> i mes.
+                            Els camps no configurats es detecten automaticament.
                         </p>
                         {sortedRules.length > 0 && (
                             <p className="text-xs text-slate-500 mt-1">
-                                {activeCount} regla{activeCount !== 1 ? 's' : ''} activa{activeCount !== 1 ? 's' : ''} · {sortedRules.length} en total
+                                {activeCount} regla{activeCount !== 1 ? 's' : ''} activa{activeCount !== 1 ? 's' : ''} de {sortedRules.length}
                             </p>
                         )}
                     </div>
                 </div>
 
-                {/* FORM (crear / editar) */}
+                {/* FORM */}
                 {showForm ? (
                     <div className="bg-slate-900/60 border border-slate-700/50 rounded-xl p-4">
                         <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
                             {editingRule ? <Edit2 size={14} className="text-blue-400" /> : <Plus size={14} className="text-blue-400" />}
-                            {editingRule ? 'Editar regla' : 'Nova regla'}
+                            {editingRule ? 'Editar regla' : prefillData ? 'Nova regla (pre-omplerta)' : 'Nova regla'}
                         </h4>
-                        <RuleForm
-                            initial={editingRule || EMPTY_RULE}
-                            onSave={handleSave}
-                            onCancel={handleCancelForm}
-                        />
+                        {/* Fase 3.2: passar prefillData com a initial quan editingRule és null */}
+                        <RuleForm initial={editingRule || prefillData} onSave={handleSave} onCancel={handleCancelForm} />
                     </div>
                 ) : (
                     <Button
-                        onClick={() => { setEditingRule(null); setShowForm(true); }}
+                        onClick={() => { setEditingRule(null); setPrefillData(null); setShowForm(true); }}
                         icon={Plus}
                         className="w-full bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/20 hover:border-blue-500/40 justify-center"
                         variant="ghost"
@@ -396,21 +638,16 @@ export const RulesManager = ({ open, onClose }) => {
                     </Button>
                 )}
 
-                {/* LLISTA DE REGLES */}
+                {/* LLISTA */}
                 {sortedRules.length > 0 ? (
                     <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1 custom-scrollbar">
                         {sortedRules.map((rule, idx) => (
-                            <RuleCard
-                                key={rule.id}
-                                rule={rule}
-                                index={idx}
-                                total={sortedRules.length}
+                            <RuleCard key={rule.id} rule={rule} index={idx} total={sortedRules.length}
                                 onEdit={() => handleEdit(rule)}
                                 onDelete={() => handleDelete(rule.id)}
                                 onToggle={() => handleToggle(rule)}
                                 onMoveUp={() => handleMoveUp(idx)}
-                                onMoveDown={() => handleMoveDown(idx)}
-                            />
+                                onMoveDown={() => handleMoveDown(idx)} />
                         ))}
                     </div>
                 ) : !showForm && (
@@ -424,40 +661,46 @@ export const RulesManager = ({ open, onClose }) => {
                 {/* EXEMPLES */}
                 {!showForm && (
                     <div className="border-t border-slate-800 pt-4">
-                        <button
-                            onClick={() => setShowExamples(v => !v)}
-                            className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors w-full"
-                        >
+                        <button onClick={() => setShowExamples(v => !v)}
+                            className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors w-full">
                             <BookOpen size={13} />
-                            <span>Exemples de regles ràpides</span>
+                            <span>Exemples de regles rapides ({EXAMPLE_RULES.length})</span>
                             <ChevronDown size={12} className={`ml-auto transition-transform ${showExamples ? 'rotate-180' : ''}`} />
                         </button>
                         {showExamples && (
-                            <div className="mt-3 space-y-1.5">
+                            <div className="mt-3 space-y-1.5 max-h-[30vh] overflow-y-auto pr-1 custom-scrollbar">
                                 {EXAMPLE_RULES.map((ex, i) => {
-                                    const colors = getCatColor(ex.categoria);
-                                    const alreadyAdded = sortedRules.some(r =>
-                                        r.name?.toLowerCase() === ex.name?.toLowerCase() ||
-                                        r.keywords?.toLowerCase() === ex.keywords?.toLowerCase()
-                                    );
+                                    const exCat = ex.actions?.categoria || '';
+                                    const exColors = getCatColor(exCat);
+                                    const added = isExampleAdded(ex);
+                                    const exKeywords = ex.conditions?.keywords || '';
+                                    const exActions = [];
+                                    if (ex.actions?.proveedor) exActions.push(ex.actions.proveedor);
+                                    if (ex.actions?.ivaPorcentaje !== null && ex.actions?.ivaPorcentaje !== undefined) exActions.push(`IVA ${ex.actions.ivaPorcentaje}%`);
+                                    if (ex.actions?.cifNif) exActions.push(`CIF: ${ex.actions.cifNif}`);
+
                                     return (
                                         <div key={i} className="flex items-center gap-3 bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-2">
                                             <div className="flex-1 min-w-0">
-                                                <span className="text-sm text-slate-300 font-medium">{ex.name}</span>
-                                                <span className="text-slate-600 text-xs mx-2">→</span>
-                                                <span className={`text-xs font-semibold ${colors.text}`}>{ex.categoria}</span>
-                                                <div className="text-[10px] text-slate-600 font-mono mt-0.5 truncate">{ex.keywords}</div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-slate-300 font-medium">{ex.name}</span>
+                                                    <span className="text-slate-600 text-xs">-&gt;</span>
+                                                    {exCat && <span className={`text-xs font-semibold ${exColors.text}`}>{exCat}</span>}
+                                                </div>
+                                                <div className="flex items-center gap-2 mt-0.5">
+                                                    <span className="text-[10px] text-slate-600 font-mono truncate">{exKeywords}</span>
+                                                    {exActions.length > 0 && (
+                                                        <span className="text-[10px] text-slate-500">{exActions.join(' | ')}</span>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <button
-                                                onClick={() => !alreadyAdded && handleAddExample(ex)}
-                                                disabled={alreadyAdded}
+                                            <button onClick={() => !added && handleAddExample(ex)} disabled={added}
                                                 className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg font-semibold transition-all flex-shrink-0 ${
-                                                    alreadyAdded
+                                                    added
                                                         ? 'text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 cursor-default'
                                                         : 'text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20'
-                                                }`}
-                                            >
-                                                {alreadyAdded ? <><Check size={11} /> Afegida</> : <><Plus size={11} /> Afegir</>}
+                                                }`}>
+                                                {added ? <><Check size={11} /> Afegida</> : <><Plus size={11} /> Afegir</>}
                                             </button>
                                         </div>
                                     );

@@ -310,7 +310,8 @@ export const scanFolderForReceipts = async (folderPath, config = {}) => {
                     try {
                         const data = await processPdf(pdf.path, {
                             inferredYear, inferredMonth, inferredQuarter, config,
-                            existingExpenses: config.existingExpenses || []
+                            existingExpenses: config.existingExpenses || [],
+                            filename: pdf.name,
                         });
                         if (data) results.push({ file: pdf.path, filename: pdf.name, ...data, inferredQuarter });
                     } catch (err) { console.error(`Error processing ${pdf.name}:`, err); }
@@ -412,28 +413,94 @@ const parseInvoiceText = (metadataItems, context = {}) => {
     const longEnRegex = new RegExp(`(${allMonthsEn.join('|')})\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})`, 'gi');
 
     let dateCandidates = [];
+    // Keywords que indiquen taules de línies de detall (penalitzar dates dins d'estes)
+    const detailTableKeywords = ['cantidad', 'descripción', 'descripcion', 'unidades', 'uds', 'precio', 'importe', 'concepto', 'detalle', 'línea', 'linea', 'artículo', 'articulo', 'referencia', 'ref.'];
+
     const processDateMatch = (match, type, d, m, y, fullMatch) => {
         if (!m || d < 1 || d > 31 || m < 1 || m > 12 || y < 2010 || y > 2100) return;
         const fechaStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
         const offset = fullText.indexOf(fullMatch);
-        const surrounding = fullText.substring(Math.max(0, offset - 60), Math.min(fullText.length, offset + 60)).toLowerCase();
+        const surrounding = fullText.substring(Math.max(0, offset - 80), Math.min(fullText.length, offset + 80)).toLowerCase();
         let score = 50;
+
+        // Bonus per keywords d'emissió
         if (dateKeywords.some(k => surrounding.includes(k))) score += 150;
+        // Penalització per keywords de venciment/entrega
         if (skipKeywords.some(k => surrounding.includes(k))) score -= 200;
+
+        // Bonus per any/mes que coincideix amb el path
         if (inferredYear && y === inferredYear) {
             score += 100;
             if (inferredMonth && m === inferredMonth) score += 400;
         }
-        dateCandidates.push({ fecha: fechaStr, score });
+
+        // [2.1B] Penalitzar dates dins de taules de línies de detall
+        if (detailTableKeywords.some(k => surrounding.includes(k))) score -= 120;
+
+        // [2.1B] Bonus per dates que apareixen a la part superior del text (header de la factura)
+        const relativePosition = offset / Math.max(fullText.length, 1);
+        if (relativePosition < 0.25) score += 80;   // Primer quart del document
+        else if (relativePosition < 0.5) score += 30;
+        else if (relativePosition > 0.8) score -= 40; // Molt avall (probablement peu de pàgina)
+
+        dateCandidates.push({ fecha: fechaStr, score, surroundingText: surrounding, matchType: type, rawMatch: fullMatch });
     };
+
+    // [2.1C] Detectar si el document és internacional (text en anglés, sense indicadors espanyols)
+    const ltFull = fullText.toLowerCase();
+    // Indicadors forts d'anglés: keywords exclusivament angleses (no comunes en docs espanyols)
+    const englishIndicators = ['amount due', 'bill to', 'invoice date', 'due date', 'payment terms', 'remit to', 'purchase order'].filter(k => ltFull.includes(k)).length;
+    // Indicadors d'espanyol: keywords espanyoles
+    const spanishIndicators = ['factura', 'fecha', 'total a pagar', 'base imponible', 'emision', 'emisión', 'proveedor', 'cliente'].filter(k => ltFull.includes(k)).length;
+    // Només considerar internacional si hi ha ≥2 indicadors anglesos i 0 espanyols
+    const isInternational = englishIndicators >= 2 && spanishIndicators === 0;
 
     let dx;
     while ((dx = stdRegex.exec(fullText)) !== null) {
-        if (dx[1]) processDateMatch(dx, 'std', parseInt(dx[1]), parseInt(dx[2]), parseInt(dx[3]) < 100 ? 2000 + parseInt(dx[3]) : parseInt(dx[3]), dx[0]);
+        if (dx[1]) {
+            let d = parseInt(dx[1]), m = parseInt(dx[2]);
+            const y = parseInt(dx[3]) < 100 ? 2000 + parseInt(dx[3]) : parseInt(dx[3]);
+            // [2.1C] Desambiguació dd/mm vs mm/dd
+            if (d <= 12 && m <= 12 && d !== m) {
+                // Ambiguo: pot ser dd/mm (espanyol) o mm/dd (anglès)
+                if (isInternational) {
+                    // Format mm/dd/yyyy per documents internacionals
+                    [d, m] = [m, d];
+                }
+                // Si no és internacional, assumim dd/mm/yyyy (format espanyol per defecte)
+            } else if (d > 12 && m <= 12) {
+                // Inequívoc: d > 12 vol dir que el primer és el dia segur (dd/mm)
+                // No cal fer res
+            } else if (m > 12 && d <= 12) {
+                // Inequívoc: m > 12 vol dir que realment és mm/dd invertit → corregir
+                [d, m] = [m, d];
+            }
+            processDateMatch(dx, 'std', d, m, y, dx[0]);
+        }
         else processDateMatch(dx, 'std', parseInt(dx[6]), parseInt(dx[5]), parseInt(dx[4]), dx[0]);
     }
     while ((dx = longEsRegex.exec(fullText)) !== null) processDateMatch(dx, 'es', parseInt(dx[1]), getMonthNumber(dx[2], 'es'), parseInt(dx[3]), dx[0]);
     while ((dx = longEnRegex.exec(fullText)) !== null) processDateMatch(dx, 'en', parseInt(dx[2]), getMonthNumber(dx[1], 'en'), parseInt(dx[3]), dx[0]);
+
+    // [2.1B] Si hi ha exactament 2 dates i una conté keyword de venciment → l'altra és emissió
+    if (dateCandidates.length === 2) {
+        const hasSkip0 = skipKeywords.some(k => dateCandidates[0].surroundingText?.includes(k));
+        const hasSkip1 = skipKeywords.some(k => dateCandidates[1].surroundingText?.includes(k));
+        if (hasSkip0 && !hasSkip1) dateCandidates[1].score += 300;
+        else if (hasSkip1 && !hasSkip0) dateCandidates[0].score += 300;
+    }
+
+    // [2.1B] Detectar períodes de facturació ("del X al Y", "periodo: X - Y")
+    const periodRegex = /(?:periodo|période|per[íi]odo|del)\s*:?\s*(\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4})\s*(?:[-–aA]l?\s*)\s*(\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4})/gi;
+    let periodMatch;
+    while ((periodMatch = periodRegex.exec(fullText)) !== null) {
+        // Les dates de períodes NO són la data d'emissió — penalitzar-les
+        for (const cand of dateCandidates) {
+            if (cand.rawMatch === periodMatch[1] || cand.rawMatch === periodMatch[2]) {
+                cand.score -= 150;
+            }
+        }
+    }
 
     dateCandidates.sort((a, b) => b.score - a.score);
     let finalFecha = dateCandidates.length > 0 ? dateCandidates[0].fecha : (inferredYear ? `${inferredYear}-${String(inferredMonth || 1).padStart(2, '0')}-01` : new Date().toISOString().split('T')[0]);
@@ -444,11 +511,43 @@ const parseInvoiceText = (metadataItems, context = {}) => {
     const ivaKeywords = ['iva', 'vat', 'i.v.a', 'impuesto', 'tax', 'igic'];
     const priceRegex = /\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:\.\d{2})/g;
 
+    // [2.2D] parseAmount millorat per formats edge-case
     const parseAmount = (s) => {
-        const clean = s.replace(/[^\d.,]/g, '');
-        if (clean.includes(',') && clean.includes('.')) return parseFloat(clean.replace(/\./g, '').replace(',', '.'));
-        if (clean.includes(',')) return parseFloat(clean.replace(',', '.'));
-        return parseFloat(clean);
+        if (!s) return 0;
+        let str = s.toString().trim();
+        // Detectar negatiu al final ("1234.56-" → nota de crèdit)
+        const negativeTrailing = str.endsWith('-');
+        // Netejar símbols monetaris i espais
+        str = str.replace(/[€$£¥\s]/g, '').replace(/EUR|USD|GBP/gi, '').replace(/-$/, '');
+        const clean = str.replace(/[^\d.,-]/g, '');
+        if (!clean) return 0;
+
+        let result;
+        if (clean.includes(',') && clean.includes('.')) {
+            // Determinar quin és el separador decimal mirant l'últim
+            const lastComma = clean.lastIndexOf(',');
+            const lastDot = clean.lastIndexOf('.');
+            if (lastComma > lastDot) {
+                // Format europeu: 1.234,56
+                result = parseFloat(clean.replace(/\./g, '').replace(',', '.'));
+            } else {
+                // Format anglès: 1,234.56
+                result = parseFloat(clean.replace(/,/g, ''));
+            }
+        } else if (clean.includes(',')) {
+            // Si la coma té exactament 2 dígits darrere → decimal
+            const parts = clean.split(',');
+            if (parts[parts.length - 1].length === 2) {
+                result = parseFloat(clean.replace(',', '.'));
+            } else {
+                // Pot ser separador de milers (1,234) — treure coma
+                result = parseFloat(clean.replace(/,/g, ''));
+            }
+        } else {
+            result = parseFloat(clean);
+        }
+
+        return (negativeTrailing ? -1 : 1) * (isNaN(result) ? 0 : result);
     };
 
     let amountCandidates = [];
@@ -457,7 +556,7 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         if (matches) {
             matches.forEach(m => {
                 const val = parseAmount(m);
-                if (val > 0 && val < 50000) {
+                if (val > 0 && val < 500000) { // Límit generós per cobrir factures grans
                     let score = 0, type = 'unknown';
 
                     if (item.isBold) score += 150;
@@ -538,9 +637,122 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         }
     }
 
+    // [2.2A] Suport per IVA mixt (múltiples línies IVA a la mateixa factura)
+    let mixedVatDetected = false;
+    let mixedVatLines = [];
+    const ivaLineRegex = /iva\s*(\d{1,2})\s*%?\s*[:\s]*(\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:\.\d{2}))/gi;
+    let ivaLineMatch;
+    while ((ivaLineMatch = ivaLineRegex.exec(cleanText)) !== null) {
+        mixedVatLines.push({ percent: parseInt(ivaLineMatch[1]), amount: parseAmount(ivaLineMatch[2]) });
+    }
+    if (mixedVatLines.length > 1 && validatedBase === null) {
+        const totalMixedIva = mixedVatLines.reduce((sum, l) => sum + l.amount, 0);
+        // Buscar un total candidat on base + totalIva ≈ total
+        for (const tc of totalCands.slice(0, 3)) {
+            const impliedBase = tc.val - totalMixedIva;
+            if (impliedBase > 0 && impliedBase < tc.val && Math.abs(impliedBase + totalMixedIva - tc.val) < 0.10) {
+                // Verificar coherència bàsica: cap línia ha de tindre IVA 0% amb import > 0
+                let coherent = true;
+                for (const line of mixedVatLines) {
+                    if (line.percent === 0 && line.amount > 0) coherent = false;
+                }
+                if (coherent) {
+                    detectedTotal = tc.val;
+                    validatedBase = impliedBase;
+                    // Utilitzar el tipus IVA predominant (el de major import)
+                    mixedVatLines.sort((a, b) => b.amount - a.amount);
+                    validatedVatPercent = mixedVatLines[0].percent;
+                    mixedVatDetected = true;
+                    console.log(`[pdfScanner] ✓ IVA mixt detectat: ${mixedVatLines.map(l => `${l.percent}%=${l.amount}`).join(' + ')} | Base ${impliedBase.toFixed(2)} | Total ${tc.val}`);
+                    break;
+                }
+            }
+        }
+    }
+
+    // [2.2B] Suport per IRPF retingut en factures de serveis
+    let detectedIrpf = null;
+    const irpfRegex = /(?:retenci[oó]n|irpf)\s*[-:]?\s*(\d{1,2})\s*%?\s*[-:]?\s*-?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:\.\d{2}))/gi;
+    let irpfMatch;
+    while ((irpfMatch = irpfRegex.exec(cleanText)) !== null) {
+        const irpfPercent = parseInt(irpfMatch[1]);
+        const irpfAmount = parseAmount(irpfMatch[2]);
+        if (irpfPercent > 0 && irpfPercent <= 25 && irpfAmount > 0) {
+            detectedIrpf = { percent: irpfPercent, amount: irpfAmount };
+            break;
+        }
+    }
+    // Si hi ha IRPF, ajustar cross-validation: base + iva - irpf = total
+    if (detectedIrpf && validatedBase === null && totalCands.length > 0) {
+        for (const tc of totalCands.slice(0, 3)) {
+            for (const vatPct of [21, 10, 4, 0]) {
+                // total = base + (base * iva%) - (base * irpf%)
+                // total = base * (1 + iva/100 - irpf/100)
+                const factor = 1 + vatPct / 100 - detectedIrpf.percent / 100;
+                if (factor <= 0) continue;
+                const impliedBase = tc.val / factor;
+                const expectedIrpf = impliedBase * (detectedIrpf.percent / 100);
+                if (Math.abs(expectedIrpf - detectedIrpf.amount) < 0.10) {
+                    detectedTotal = tc.val;
+                    validatedBase = impliedBase;
+                    validatedVatPercent = vatPct;
+                    console.log(`[pdfScanner] ✓ IRPF detectat: Base ${impliedBase.toFixed(2)} + IVA ${vatPct}% - IRPF ${detectedIrpf.percent}% (${detectedIrpf.amount}) = Total ${tc.val}`);
+                    break;
+                }
+            }
+            if (validatedBase !== null) break;
+        }
+    }
+
+    // [2.2C] Suport per recàrrec d'equivalència (R.E.)
+    // Nota: Evitem "r.e." sol perquè fa match amb "reference", "rent", etc.
+    // Requerim "recargo equivalencia" complet o "r.e." precedit per IVA/base/recargo context
+    let detectedRE = null;
+    const reRegex = /(?:recargo?\s*(?:de\s*)?equivalencia|recargo\s*equiv\.?)\s*[-:]?\s*(\d{1,2}(?:[,.]\d{1,2})?)\s*%?\s*[-:]?\s*(\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:\.\d{2}))?/gi;
+    let reMatch;
+    while ((reMatch = reRegex.exec(cleanText)) !== null) {
+        const rePct = parseFloat(reMatch[1].replace(',', '.'));
+        const reAmount = reMatch[2] ? parseAmount(reMatch[2]) : null;
+        if (rePct > 0 && rePct <= 10) {
+            detectedRE = { percent: rePct, amount: reAmount };
+            break;
+        }
+    }
+    if (detectedRE && validatedBase === null && totalCands.length > 0) {
+        for (const tc of totalCands.slice(0, 3)) {
+            for (const vatPct of [21, 10, 4]) {
+                // total = base + (base * iva%) + (base * re%)
+                const factor = 1 + vatPct / 100 + detectedRE.percent / 100;
+                const impliedBase = tc.val / factor;
+                if (impliedBase > 0 && impliedBase < tc.val) {
+                    const expectedRE = detectedRE.amount || (impliedBase * detectedRE.percent / 100);
+                    if (!detectedRE.amount || Math.abs(impliedBase * detectedRE.percent / 100 - expectedRE) < 0.10) {
+                        detectedTotal = tc.val;
+                        validatedBase = impliedBase;
+                        validatedVatPercent = vatPct;
+                        console.log(`[pdfScanner] ✓ R.E. detectat: Base ${impliedBase.toFixed(2)} + IVA ${vatPct}% + RE ${detectedRE.percent}% = Total ${tc.val}`);
+                        break;
+                    }
+                }
+            }
+            if (validatedBase !== null) break;
+        }
+    }
+
     // --- 3. PROVEÏDOR ---
     const legalSuffixes = /\b(S\.?L\.?|S\.?L\.?U\.?|S\.?A\.?|Limitada|Anónima|Inc|Corp|GmbH|Ltd)\b/i;
     const ignoreWords = ['factura', 'invoice', 'recibo', 'receipt', 'cliente', 'customer', 'vendedor', 'bill to', 'página', 'page', 'nif', 'cif', 'fecha', 'date', 'tel', 'email', 'www'];
+
+    // [2.3A] Construir conjunt robust de termes propis a filtrar
+    const userFilterTerms = new Set(userNameParts); // Paraules del nom amb >2 chars
+    const userIban = (config.iban || '').replace(/\s/g, '').toUpperCase();
+    const userEmail = (config.email || '').toLowerCase();
+    const userAddress = (config.direccion || '').toLowerCase().substring(0, 30);
+    const userNombre = (config.nombre || '').toLowerCase();
+    // Afegir paraules de l'adreça amb >4 chars (evitar filtrar paraules genèriques curtes)
+    if (userAddress) {
+        userAddress.split(/[\s,]+/).filter(p => p.length > 4).forEach(p => userFilterTerms.add(p));
+    }
 
     let supplierCandidates = [];
     metadataItems.forEach(item => {
@@ -548,7 +760,10 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         if (str.length < 3 || str.length > 80) return;
         const lower = str.toLowerCase();
         if (lower.includes(userNif.toLowerCase())) return;
-        if (userNameParts.some(part => lower.includes(part))) return;
+        // [2.3A] Filtrar si conté paraules del nom, email o IBAN de l'usuari
+        if ([...userFilterTerms].some(part => lower.includes(part))) return;
+        if (userEmail && lower.includes(userEmail)) return;
+        if (userIban && str.replace(/\s/g, '').toUpperCase().includes(userIban.substring(0, 10))) return;
         if (ignoreWords.some(w => lower.includes(w) && str.length < 20)) return;
 
         let score = 0;
@@ -569,6 +784,52 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         foundDomains.forEach(d => supplierCandidates.push({ str: d, score: 600, y: 0, x: 0 }));
     }
 
+    // [2.3B] Detectar emissor vs receptor via patrons explícits
+    const emissorKeywords = ['emisor', 'de:', 'from:', 'vendedor:', 'proveedor:', 'seller:', 'datos del emisor', 'datos empresa'];
+    const receptorKeywords = ['cliente:', 'para:', 'to:', 'destinatario:', 'bill to:', 'facturar a:', 'ship to:', 'datos del cliente', 'datos cliente'];
+
+    // Buscar blocs d'emissor i receptor al text complet
+    const ltClean = cleanText.toLowerCase();
+    let emissorZone = null, receptorZone = null;
+    for (const ek of emissorKeywords) {
+        const idx = ltClean.indexOf(ek);
+        if (idx !== -1) { emissorZone = cleanText.substring(idx, Math.min(idx + 200, cleanText.length)); break; }
+    }
+    for (const rk of receptorKeywords) {
+        const idx = ltClean.indexOf(rk);
+        if (idx !== -1) { receptorZone = cleanText.substring(idx, Math.min(idx + 200, cleanText.length)); break; }
+    }
+
+    // Si el NIF de l'usuari apareix a la zona "receptor", donar bonus a candidats de la zona "emissor"
+    if (receptorZone && receptorZone.toLowerCase().includes(userNif.toLowerCase()) && emissorZone) {
+        const emissorLower = emissorZone.toLowerCase();
+        supplierCandidates.forEach(cand => {
+            if (emissorLower.includes(cand.str.toLowerCase())) {
+                cand.score += 350; // Fort bonus per estar a la zona emissor
+            }
+        });
+    }
+
+    // [2.3C] Millorar matching per plataformes de pagament
+    const paymentPlatforms = ['stripe', 'paypal', 'bizum', 'square', 'wise', 'transferwise', 'revolut'];
+    const merchantKeywords = ['comercio:', 'merchant:', 'vendedor:', 'establecimiento:', 'nombre comercial:', 'company:', 'seller:'];
+    const topSupplier = supplierCandidates.length > 0 ? supplierCandidates.sort((a, b) => b.score - a.score)[0] : null;
+    if (topSupplier && paymentPlatforms.some(p => topSupplier.str.toLowerCase().includes(p))) {
+        // Buscar el nom real del comerciant dins del text
+        for (const mk of merchantKeywords) {
+            const idx = ltClean.indexOf(mk);
+            if (idx !== -1) {
+                const afterKeyword = cleanText.substring(idx + mk.length, idx + mk.length + 80).trim();
+                const merchantName = afterKeyword.split(/[\n\r,|]/)[0].trim();
+                if (merchantName && merchantName.length >= 3 && merchantName.length <= 60) {
+                    supplierCandidates.push({ str: merchantName, score: 700, y: 0, x: 0 });
+                    console.log(`[pdfScanner] 🏪 Plataforma ${topSupplier.str} → comerciant real: ${merchantName}`);
+                    break;
+                }
+            }
+        }
+    }
+
     supplierCandidates.sort((a, b) => b.score - a.score || b.y - a.y);
 
     let finalProveedor = 'Proveedor Desconocido';
@@ -584,46 +845,16 @@ const parseInvoiceText = (metadataItems, context = {}) => {
     // --- 3.1 CIF/NIF ---
     const detectedCifNif = detectProviderCifNif(cleanText, userNif);
 
-    // --- 3.2 CATEGORIA (amb memòria prioritària) ---
+    // --- 3.2 CATEGORIA + IVA + CIF (pipeline amb regles avançades) ---
     let finalCategoria = 'Otros';
     let categorySource = 'default';
+    let finalCifNif = detectedCifNif;
+    let finalConcepto = 'Gasto importado';
+    let finalDeducible = true;
+    let finalDeduciblePct = null;
+    let ruleApplied = null;
 
-    // Prioritat 1: Memòria de proveïdors (correccions manuals)
-    if (providerMemory) {
-        const memorized = providerMemory.findProvider(finalProveedor);
-        if (memorized && memorized.matchScore >= 55 && memorized.categoria) {
-            finalCategoria = memorized.categoria;
-            categorySource = `memory (${memorized.matchType}, score:${memorized.matchScore})`;
-            console.log(`[pdfScanner] 🧠 Memòria: "${finalProveedor}" → ${finalCategoria}`);
-        }
-
-        // Prioritat 1.5: Regles personalitzades
-        if (categorySource === 'default') {
-            const customCat = providerMemory.applyCustomRules(cleanText);
-            if (customCat) {
-                finalCategoria = customCat;
-                categorySource = 'custom_rule';
-                console.log(`[pdfScanner] 📏 Regla: ${finalCategoria}`);
-            }
-        }
-    }
-
-    // Prioritat 2: Proveïdors existents
-    if (categorySource === 'default') {
-        const known = matchKnownProvider(finalProveedor, existingExpenses);
-        if (known && known.categoria) {
-            finalCategoria = known.categoria;
-            categorySource = 'existing_expenses';
-        }
-    }
-
-    // Prioritat 3: Keywords
-    if (categorySource === 'default') {
-        finalCategoria = detectCategoryByKeywords(cleanText);
-        categorySource = 'keywords';
-    }
-
-    // --- 4. IVA ---
+    // --- 4. IVA (detecció automàtica) ---
     const commonVats = [21, 10, 4, 0];
     let detectedVatPercent = validatedVatPercent !== null ? validatedVatPercent : 21;
     let vatFoundInText = validatedVatPercent !== null;
@@ -644,14 +875,19 @@ const parseInvoiceText = (metadataItems, context = {}) => {
     }
     if (!vatFoundInText) {
         const pctRegex = /(\d{1,2})\s*%/g;
+        const pctSkipContext = ['descuento', 'dto', 'retencion', 'retención', 'irpf', 'cobro', 'comision', 'comisión', 'recargo'];
         let px;
         while ((px = pctRegex.exec(cleanText)) !== null) {
             const val = parseInt(px[1]);
-            if (commonVats.includes(val)) { detectedVatPercent = val; vatFoundInText = true; break; }
+            if (!commonVats.includes(val)) continue;
+            // Verificar que no estigui en context de descompte, retenció, etc.
+            const pctSurr = cleanText.substring(Math.max(0, px.index - 40), px.index + 20).toLowerCase();
+            if (pctSkipContext.some(sk => pctSurr.includes(sk))) continue;
+            detectedVatPercent = val; vatFoundInText = true; break;
         }
     }
 
-    // Base imponible
+    // Base imponible (auto-detect)
     let finalBaseImponible = validatedBase !== null
         ? validatedBase
         : detectedTotal / (1 + detectedVatPercent / 100);
@@ -670,36 +906,174 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         }
     }
 
-    // --- 5. CIF/NIF FALLBACK via memòria ---
-    let finalCifNif = detectedCifNif;
-    if (!finalCifNif && providerMemory) {
-        const mem = providerMemory.findProvider(finalProveedor);
-        if (mem && mem.cifNif) finalCifNif = mem.cifNif;
-    }
-    if (!finalCifNif) {
-        const known = matchKnownProvider(finalProveedor, existingExpenses);
-        if (known && known.cifProveedor) finalCifNif = known.cifProveedor;
+    // ============================================
+    // MOTOR DE REGLES AVANÇADES (Prioritat Màxima)
+    // Regla de l'usuari > CIF match > Memòria > Expenses existents > Keywords
+    // ============================================
+
+    // Camp source per a badges de confiança
+    const fieldSources = {};
+
+    if (providerMemory) {
+        // --- PRIORITAT 0: Regles avançades de l'usuari ---
+        const ruleResult = providerMemory.applyAdvancedRules({
+            proveedor: finalProveedor,
+            concepto: finalConcepto,
+            filename: context.filename || '',
+            rawText: cleanText,
+            cif: finalCifNif,
+        });
+
+        if (ruleResult) {
+            const a = ruleResult.actions;
+            ruleApplied = ruleResult.ruleName;
+
+            if (a.proveedor) { finalProveedor = a.proveedor; fieldSources.proveedor = 'rule'; }
+            if (a.categoria) { finalCategoria = a.categoria; categorySource = 'rule'; fieldSources.categoria = 'rule'; }
+            if (a.cifNif) { finalCifNif = a.cifNif; fieldSources.cifProveedor = 'rule'; }
+            if (a.concepto) { finalConcepto = a.concepto; fieldSources.concepto = 'rule'; }
+            if (a.deducible !== null && a.deducible !== undefined) { finalDeducible = a.deducible; fieldSources.deducible = 'rule'; }
+            if (a.deduciblePct !== null && a.deduciblePct !== undefined) { finalDeduciblePct = a.deduciblePct; fieldSources.deduciblePct = 'rule'; }
+            if (a.ivaPorcentaje !== null && a.ivaPorcentaje !== undefined) {
+                detectedVatPercent = a.ivaPorcentaje;
+                // Recalcular base si forcem IVA
+                if (detectedVatPercent === 0) {
+                    finalBaseImponible = detectedTotal;
+                } else {
+                    finalBaseImponible = detectedTotal / (1 + detectedVatPercent / 100);
+                }
+                fieldSources.ivaPorcentaje = 'rule';
+            }
+
+            // Estratègia de data
+            if (a.dateStrategy) {
+                const newDate = applyDateStrategy(dateCandidates, a.dateStrategy, {
+                    fallbackDate: finalFecha,
+                });
+                if (newDate) { finalFecha = newDate; fieldSources.fecha = 'rule'; }
+            }
+
+            console.log(`[pdfScanner] ⚡ Regla aplicada: "${ruleResult.ruleName}" → prov:${a.proveedor || '-'} cat:${a.categoria || '-'} iva:${a.ivaPorcentaje ?? '-'}`);
+        }
+
+        // --- PRIORITAT 0.5: Matching per CIF/NIF ---
+        if (categorySource !== 'rule' && finalCifNif) {
+            const cifMatch = providerMemory.findByCif(finalCifNif);
+            if (cifMatch) {
+                if (!fieldSources.proveedor) { finalProveedor = cifMatch.originalName; fieldSources.proveedor = 'cif_match'; }
+                if (!fieldSources.categoria && cifMatch.categoria) { finalCategoria = cifMatch.categoria; categorySource = 'cif_match'; fieldSources.categoria = 'cif_match'; }
+                if (!fieldSources.ivaPorcentaje && cifMatch.ivaPorcentaje !== null && cifMatch.ivaPorcentaje !== undefined) {
+                    detectedVatPercent = cifMatch.ivaPorcentaje;
+                    finalBaseImponible = detectedTotal / (1 + detectedVatPercent / 100);
+                    fieldSources.ivaPorcentaje = 'cif_match';
+                }
+                console.log(`[pdfScanner] 🔑 CIF match: "${finalCifNif}" → ${finalProveedor}`);
+            }
+        }
+
+        // --- PRIORITAT 1: Memòria de proveïdors ---
+        if (categorySource === 'default' || categorySource === 'keywords') {
+            const memorized = providerMemory.findProvider(finalProveedor);
+            if (memorized && memorized.matchScore >= 55) {
+                if (!fieldSources.categoria && memorized.categoria) {
+                    finalCategoria = memorized.categoria;
+                    categorySource = `memory (${memorized.matchType}, score:${memorized.matchScore})`;
+                    fieldSources.categoria = 'memory';
+                }
+                if (!fieldSources.cifProveedor && memorized.cifNif) { finalCifNif = memorized.cifNif; fieldSources.cifProveedor = 'memory'; }
+                if (!fieldSources.ivaPorcentaje && memorized.ivaPorcentaje !== null && memorized.ivaPorcentaje !== undefined) {
+                    detectedVatPercent = memorized.ivaPorcentaje;
+                    finalBaseImponible = detectedTotal / (1 + detectedVatPercent / 100);
+                    fieldSources.ivaPorcentaje = 'memory';
+                }
+                console.log(`[pdfScanner] 🧠 Memòria: "${finalProveedor}" → ${finalCategoria}`);
+            }
+        }
     }
 
-    // --- 6. IVA FALLBACK via memòria ---
-    if (!vatFoundInText && providerMemory) {
-        const mem = providerMemory.findProvider(finalProveedor);
-        if (mem && mem.ivaPorcentaje !== null && mem.ivaPorcentaje !== undefined) {
-            detectedVatPercent = mem.ivaPorcentaje;
-            finalBaseImponible = detectedTotal / (1 + detectedVatPercent / 100);
-            console.log(`[pdfScanner] 🧠 IVA memòria: ${detectedVatPercent}%`);
+    // --- PRIORITAT 2: Proveïdors existents ---
+    if (categorySource === 'default') {
+        const known = matchKnownProvider(finalProveedor, existingExpenses);
+        if (known && known.categoria) {
+            finalCategoria = known.categoria;
+            categorySource = 'existing_expenses';
+            fieldSources.categoria = 'existing';
+            if (!finalCifNif && known.cifProveedor) finalCifNif = known.cifProveedor;
         }
+    }
+
+    // --- PRIORITAT 3: Keywords ---
+    if (categorySource === 'default') {
+        finalCategoria = detectCategoryByKeywords(cleanText);
+        categorySource = 'keywords';
+        fieldSources.categoria = 'auto';
     }
 
     return {
         fecha: finalFecha,
         proveedor: finalProveedor || 'Proveedor Desconocido',
         cifProveedor: finalCifNif || '',
-        concepto: 'Gasto importado',
+        concepto: finalConcepto,
         categoria: finalCategoria,
         categorySource,
         baseImponible: finalBaseImponible,
         ivaPorcentaje: detectedVatPercent,
-        total: detectedTotal
+        total: detectedTotal,
+        deducible: finalDeducible,
+        deduciblePct: finalDeduciblePct,
+        ruleApplied,
+        fieldSources,
+        // [Fase 2] Dades addicionals d'extracció
+        irpfDetected: detectedIrpf,          // { percent, amount } o null
+        recargoEquivalencia: detectedRE,     // { percent, amount } o null
+        mixedVat: mixedVatDetected ? mixedVatLines : null,  // [{ percent, amount }] o null
     };
+};
+
+// ============================================
+// ESTRATÈGIA DE DATA (per regles avançades)
+// ============================================
+
+const applyDateStrategy = (dateCandidates, strategy, context) => {
+    if (!dateCandidates || dateCandidates.length === 0) return context.fallbackDate;
+
+    let candidates = [...dateCandidates];
+
+    // Filtrar dates amb keywords a evitar
+    if (strategy.skipKeywords?.length) {
+        const filtered = candidates.filter(c =>
+            !strategy.skipKeywords.some(sk =>
+                c.surroundingText?.toLowerCase().includes(sk.toLowerCase())
+            )
+        );
+        // Només filtrar si queden candidats
+        if (filtered.length > 0) candidates = filtered;
+    }
+
+    // Preferència per keyword específic
+    if (strategy.prefer === 'nearest_to_keyword' && strategy.keyword) {
+        candidates.sort((a, b) => {
+            const aHas = a.surroundingText?.toLowerCase().includes(strategy.keyword.toLowerCase());
+            const bHas = b.surroundingText?.toLowerCase().includes(strategy.keyword.toLowerCase());
+            if (aHas && !bHas) return -1;
+            if (bHas && !aHas) return 1;
+            return b.score - a.score;
+        });
+    }
+
+    // Primera o última data cronològicament
+    if (strategy.prefer === 'first') candidates.sort((a, b) => a.fecha.localeCompare(b.fecha));
+    if (strategy.prefer === 'last') candidates.sort((a, b) => b.fecha.localeCompare(a.fecha));
+
+    let result = candidates[0]?.fecha || context.fallbackDate;
+
+    // Forçar dia del mes
+    if (strategy.dayOfMonth && result) {
+        const parts = result.split('-');
+        if (parts.length === 3) {
+            result = `${parts[0]}-${parts[1]}-${String(strategy.dayOfMonth).padStart(2, '0')}`;
+        }
+    }
+
+    return result;
 };

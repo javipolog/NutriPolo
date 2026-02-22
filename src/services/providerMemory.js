@@ -101,11 +101,16 @@ export const useProviderMemory = create(
             providers: {},
 
             /**
-             * Mapa de regles per paraules clau personalitzades
-             * L'usuari pot afegir regles com:
-             * "Si el PDF conté 'MAXOIDO' → categoria 'Equipos informáticos'"
+             * Mapa de regles per paraules clau personalitzades (v2 — amb conditions/actions).
+             * Cada regla pot sobreescriure: proveedor, categoria, ivaPorcentaje, cifNif, concepto,
+             * deducible, deduciblePct i dateStrategy.
              */
             customRules: [],
+
+            /**
+             * Índex CIF → providerKey per matching ràpid per CIF/NIF
+             */
+            cifIndex: {},
 
             // ============================================
             // ACCIONS PRINCIPALS
@@ -148,8 +153,15 @@ export const useProviderMemory = create(
                     }
                 }
 
+                // Actualitzar cifIndex si tenim CIF
+                const cifIndex = { ...get().cifIndex };
+                const newCif = (correctedData.cifProveedor || '').replace(/[\s-]/g, '').toUpperCase();
+                if (newCif && newCif.length >= 8) {
+                    cifIndex[newCif] = key;
+                }
+
                 console.log(`[ProviderMemory] Après de correcció: "${key}" → ${correctedData.categoria} (confiança: ${confidence.toFixed(2)}, correccions: ${corrections})`);
-                set({ providers });
+                set({ providers, cifIndex });
             },
 
             /**
@@ -280,30 +292,38 @@ export const useProviderMemory = create(
             },
 
             // ============================================
-            // REGLES PERSONALITZADES
-            // ============================================
-
-            // ============================================
-            // REGLES PERSONALITZADES
+            // REGLES PERSONALITZADES (v2 — conditions/actions)
             // ============================================
 
             addCustomRule: (rule) => set(state => {
+                // Acceptem tant format v1 (keywords/categoria) com v2 (conditions/actions)
+                const isV2 = !!rule.conditions;
                 const newRule = {
                     id: Date.now().toString(36) + Math.random().toString(36).substr(2, 4),
                     name: rule.name || '',
-                    keywords: rule.keywords || '',
-                    categoria: rule.categoria || '',
-                    matchField: rule.matchField || 'any',
-                    matchMode: rule.matchMode || 'any',
-                    priority: rule.priority ?? (state.customRules.length + 1),
                     enabled: rule.enabled ?? true,
+                    priority: rule.priority ?? (state.customRules.length + 1),
+                    conditions: isV2 ? rule.conditions : {
+                        keywords: rule.keywords || '',
+                        matchField: rule.matchField || 'any',
+                        matchMode: rule.matchMode || 'any',
+                    },
+                    actions: isV2 ? rule.actions : {
+                        categoria: rule.categoria || null,
+                        proveedor: null, ivaPorcentaje: null, cifNif: null,
+                        concepto: null, deducible: null, deduciblePct: null,
+                        dateStrategy: null,
+                    },
                     createdAt: new Date().toISOString(),
+                    updatedAt: new Date().toISOString(),
                 };
                 return { customRules: [...state.customRules, newRule] };
             }),
 
             updateCustomRule: (id, changes) => set(state => ({
-                customRules: state.customRules.map(r => r.id === id ? { ...r, ...changes } : r)
+                customRules: state.customRules.map(r =>
+                    r.id === id ? { ...r, ...changes, updatedAt: new Date().toISOString() } : r
+                )
             })),
 
             removeCustomRule: (id) => set(state => ({
@@ -322,45 +342,104 @@ export const useProviderMemory = create(
             }),
 
             /**
-             * Aplica regles personalitzades a les dades d'un expense candidat.
-             * @param {Object|string} data - { proveedor, concepto, filename, rawText } o string (compat. legacy)
-             * @returns {{ categoria, ruleName, ruleId } | null}
+             * Aplica regles avançades (v2) al pipeline de scanning.
+             * Retorna l'objecte complet { actions, ruleName, ruleId } o null.
+             * BREAK al primer match.
              */
-            applyCustomRules: (data) => {
+            applyAdvancedRules: (data) => {
                 const { customRules } = get();
                 const sorted = [...customRules]
-                    .filter(r => r.enabled !== false && r.keywords && r.categoria)
+                    .filter(r => r.enabled !== false)
                     .sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999));
 
-                // Compatibilitat: si data és string (API antiga), envoltem-lo
-                const d = typeof data === 'string' ? { proveedor: data, any: data } : data;
+                // Compatibilitat: si data és string, envoltem-lo
+                const d = typeof data === 'string' ? { proveedor: data } : data;
 
                 const fields = {
                     proveedor: (d.proveedor || '').toLowerCase(),
                     concepto: (d.concepto || '').toLowerCase(),
                     filename: (d.filename || '').toLowerCase(),
                     rawText: (d.rawText || '').toLowerCase(),
+                    cif: (d.cif || '').replace(/[\s-]/g, '').toUpperCase(),
                 };
                 fields.any = [fields.proveedor, fields.concepto, fields.filename, fields.rawText].join(' ');
 
                 for (const rule of sorted) {
-                    const searchIn = fields[rule.matchField] ?? fields.any;
-                    const keywords = rule.keywords
-                        .split(',')
-                        .map(k => k.trim().toLowerCase())
-                        .filter(Boolean);
+                    // Obtenir condicions (suport v1 i v2)
+                    const cond = rule.conditions || {
+                        keywords: rule.keywords || '',
+                        matchField: rule.matchField || 'any',
+                        matchMode: rule.matchMode || 'any',
+                    };
+
+                    const keywords = (cond.keywords || '')
+                        .split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
                     if (keywords.length === 0) continue;
 
-                    const mode = rule.matchMode || 'any';
-                    const matched = mode === 'all'
-                        ? keywords.every(kw => searchIn.includes(kw))
-                        : keywords.some(kw => searchIn.includes(kw));
+                    // Decidir camp on buscar
+                    const matchField = cond.matchField || 'any';
+                    let searchIn;
+                    if (matchField === 'cif') {
+                        // Matching per CIF: comparar directament
+                        searchIn = fields.cif;
+                    } else {
+                        searchIn = fields[matchField] ?? fields.any;
+                    }
+
+                    const mode = cond.matchMode || 'any';
+                    let matched;
+                    if (matchField === 'cif') {
+                        // Per CIF, comparem directament (case-insensitive)
+                        matched = keywords.some(kw => searchIn === kw.replace(/[\s-]/g, '').toUpperCase());
+                    } else {
+                        matched = mode === 'all'
+                            ? keywords.every(kw => searchIn.includes(kw))
+                            : keywords.some(kw => searchIn.includes(kw));
+                    }
 
                     if (matched) {
-                        return { categoria: rule.categoria, ruleName: rule.name || rule.keywords, ruleId: rule.id };
+                        // Obtenir accions (suport v1 i v2)
+                        const actions = rule.actions || {
+                            categoria: rule.categoria || null,
+                        };
+                        return {
+                            actions,
+                            ruleName: rule.name || cond.keywords,
+                            ruleId: rule.id,
+                        };
                     }
                 }
                 return null;
+            },
+
+            /**
+             * Compat legacy: Aplica regles i retorna { categoria, ruleName, ruleId } o null.
+             */
+            applyCustomRules: (data) => {
+                const result = get().applyAdvancedRules(data);
+                if (!result) return null;
+                return {
+                    categoria: result.actions?.categoria || null,
+                    ruleName: result.ruleName,
+                    ruleId: result.ruleId,
+                };
+            },
+
+            // ============================================
+            // MATCHING PER CIF/NIF
+            // ============================================
+
+            /**
+             * Busca un proveïdor per CIF/NIF a l'índex de CIFs.
+             */
+            findByCif: (cif) => {
+                const { cifIndex, providers } = get();
+                const cleanCif = (cif || '').replace(/[\s-]/g, '').toUpperCase();
+                if (!cleanCif || cleanCif.length < 8) return null;
+                const providerKey = cifIndex[cleanCif];
+                return providerKey && providers[providerKey]
+                    ? { ...providers[providerKey], matchType: 'cif', matchScore: 100 }
+                    : null;
             },
 
             /**
@@ -390,7 +469,7 @@ export const useProviderMemory = create(
             /**
              * Reset total de la memòria
              */
-            resetMemory: () => set({ providers: {}, customRules: [] }),
+            resetMemory: () => set({ providers: {}, customRules: [], cifIndex: {} }),
         }),
         {
             name: 'provider-memory-storage',
@@ -398,7 +477,60 @@ export const useProviderMemory = create(
             partialize: (state) => ({
                 providers: state.providers,
                 customRules: state.customRules,
+                cifIndex: state.cifIndex,
             }),
+            // Migració v1→v2: convertir regles antigues al nou format conditions/actions
+            onRehydrateStorage: () => (state) => {
+                if (!state) return;
+                let needsMigration = false;
+                const migrated = state.customRules.map(rule => {
+                    // Si ja té conditions/actions → v2, no cal migrar
+                    if (rule.conditions && rule.actions) return rule;
+                    needsMigration = true;
+                    return {
+                        id: rule.id,
+                        name: rule.name || '',
+                        enabled: rule.enabled ?? true,
+                        priority: rule.priority ?? 999,
+                        conditions: {
+                            keywords: rule.keywords || '',
+                            matchField: rule.matchField || 'any',
+                            matchMode: rule.matchMode || 'any',
+                        },
+                        actions: {
+                            categoria: rule.categoria || null,
+                            proveedor: null,
+                            ivaPorcentaje: null,
+                            cifNif: null,
+                            concepto: null,
+                            deducible: null,
+                            deduciblePct: null,
+                            dateStrategy: null,
+                        },
+                        createdAt: rule.createdAt || new Date().toISOString(),
+                        updatedAt: new Date().toISOString(),
+                    };
+                });
+                if (needsMigration) {
+                    console.log(`[ProviderMemory] Migrades ${migrated.length} regles v1→v2`);
+                    state.customRules = migrated;
+                }
+
+                // Reconstruir cifIndex des de providers si no existeix
+                if (!state.cifIndex || Object.keys(state.cifIndex).length === 0) {
+                    const cifIndex = {};
+                    for (const [key, data] of Object.entries(state.providers || {})) {
+                        if (data.cifNif) {
+                            const cleanCif = data.cifNif.replace(/[\s-]/g, '').toUpperCase();
+                            if (cleanCif.length >= 8) cifIndex[cleanCif] = key;
+                        }
+                    }
+                    if (Object.keys(cifIndex).length > 0) {
+                        console.log(`[ProviderMemory] Reconstruït cifIndex: ${Object.keys(cifIndex).length} entrades`);
+                        state.cifIndex = cifIndex;
+                    }
+                }
+            },
         }
     )
 );

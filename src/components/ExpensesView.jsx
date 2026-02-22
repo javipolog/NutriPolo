@@ -5,7 +5,8 @@ import {
     Wallet, Calculator, Plus, Search, Edit2, Trash2,
     FolderSearch, FileText, Check, Loader2, Filter,
     Calendar, Layers, ArrowUpDown, ChevronRight, PieChart,
-    Download, Eye, EyeOff, Radio, Zap, FolderOpen, RefreshCw, Tag
+    Download, Eye, EyeOff, Radio, Zap, FolderOpen, RefreshCw, Tag,
+    AlertCircle, BarChart2, X, TrendingUp
 } from 'lucide-react';
 import { open as openDialog } from '@tauri-apps/api/dialog';
 import { scanFolderForReceipts } from '../services/pdfScanner';
@@ -44,6 +45,9 @@ export const ExpensesView = () => {
     const [initialScanDone, setInitialScanDone] = useState(false);
     const [showActivityLog, setShowActivityLog] = useState(false);
     const [showRulesManager, setShowRulesManager] = useState(false);
+    const [rulePrefill, setRulePrefill] = useState(null);
+    const [showPrecisionDashboard, setShowPrecisionDashboard] = useState(false);
+    const [ruleSuggestions, setRuleSuggestions] = useState([]);
 
     const configRef = useRef(config);
     const expensesRef = useRef(expenses);
@@ -211,8 +215,52 @@ export const ExpensesView = () => {
         });
         setShowPendingModal(false);
         setPendingImports([]);
-        if (count > 0) toast.success(`${count} gastos importats correctament.`);
-        else toast.warning('No s\'han importat gastos (duplicats o cap seleccionat).');
+        if (count > 0) {
+            toast.success(`${count} gastos importats correctament.`);
+
+            // ── Fase 5.1: detectar patrons repetitius ──────────────────────
+            // Després d'importar, comprova si hi ha proveïdors amb >= 3 gastos
+            // i sense regla configurada → suggerir creació de regla
+            try {
+                const { applyAdvancedRules } = useProviderMemory.getState();
+                const allExpenses = useStore.getState().expenses;
+
+                // Agrupar per proveïdor (normalitzat)
+                const provMap = {};
+                allExpenses.forEach(exp => {
+                    const raw = exp.proveedor?.trim() || '';
+                    if (!raw || raw === 'Proveedor Desconocido') return;
+                    const key = normalizeProvKey(raw);
+                    if (!provMap[key]) provMap[key] = { name: raw, count: 0, data: exp };
+                    provMap[key].count++;
+                });
+
+                // Filtrar: >= 3 gastos i sense regla
+                const newSuggestions = Object.values(provMap)
+                    .filter(p => {
+                        if (p.count < 3) return false;
+                        const hasRule = applyAdvancedRules({
+                            proveedor: p.name,
+                            concepto: p.data.concepto || '',
+                            filename: p.data.archivo || '',
+                            rawText: p.name,
+                            cif: p.data.cifProveedor || '',
+                        });
+                        return !hasRule;
+                    })
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, 3); // màxim 3 suggeriments
+
+                if (newSuggestions.length > 0) {
+                    setRuleSuggestions(newSuggestions);
+                }
+            } catch (e) {
+                console.warn('[ExpensesView] Rule suggestion error:', e);
+            }
+            // ───────────────────────────────────────────────────────────────
+        } else {
+            toast.warning('No s\'han importat gastos (duplicats o cap seleccionat).');
+        }
     };
 
     // ============================================
@@ -319,6 +367,36 @@ export const ExpensesView = () => {
     };
 
     const toggleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc' }));
+
+    // ============================================
+    // RULE CREATOR (Fase 3.2)
+    // ============================================
+
+    const buildRulePrefill = (r) => ({
+        name: r.proveedor !== 'Proveedor Desconocido' ? r.proveedor : '',
+        conditions: {
+            keywords: (r.proveedor && r.proveedor !== 'Proveedor Desconocido'
+                ? r.proveedor.toLowerCase() : ''),
+            matchField: 'any',
+            matchMode: 'any',
+        },
+        actions: {
+            proveedor: (r.proveedor && r.proveedor !== 'Proveedor Desconocido') ? r.proveedor : null,
+            categoria: (r.categoria && r.categoria !== 'Otros') ? r.categoria : null,
+            ivaPorcentaje: r.ivaPorcentaje !== undefined ? r.ivaPorcentaje : null,
+            cifNif: r.cifProveedor || null,
+            concepto: null, deducible: null, deduciblePct: null, dateStrategy: null,
+        },
+    });
+
+    const handleOpenRuleCreator = (result) => {
+        setRulePrefill(buildRulePrefill(result));
+        setShowRulesManager(true);
+    };
+
+    const dismissRuleSuggestion = useCallback((index) => {
+        setRuleSuggestions(prev => prev.filter((_, i) => i !== index));
+    }, []);
 
     // ============================================
     // RENDER
@@ -434,6 +512,20 @@ export const ExpensesView = () => {
                                 </span>
                             )}
                         </button>
+
+                        {/* Botó Precisió — Fase 5.2 */}
+                        <button
+                            onClick={() => setShowPrecisionDashboard(v => !v)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex-shrink-0 ${
+                                showPrecisionDashboard
+                                    ? 'bg-blue-500/15 border-blue-500/30 text-blue-400'
+                                    : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-blue-400 hover:border-blue-500/40 hover:bg-blue-500/8'
+                            }`}
+                            title="Dashboard de precisió d'importació"
+                        >
+                            <BarChart2 size={13} />
+                            Precisió
+                        </button>
                     </div>
 
                     {/* Activity Log (collapsible) */}
@@ -458,6 +550,39 @@ export const ExpensesView = () => {
                     )}
                 </div>
             </Card>
+
+            {/* Fase 5.1: Suggeriments de regles per patrons repetitius */}
+            {ruleSuggestions.length > 0 && (
+                <RuleSuggestionsBanner
+                    suggestions={ruleSuggestions}
+                    onCreateRule={handleOpenRuleCreator}
+                    onDismiss={dismissRuleSuggestion}
+                />
+            )}
+
+            {/* Fase 5.2: Dashboard de precisió (col·lapsable) */}
+            {showPrecisionDashboard && (
+                <Card className="border-slate-800 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
+                    <div className="p-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                                <BarChart2 size={16} className="text-blue-400" />
+                                Precisió d'Importació
+                                <span className="text-slate-600 font-normal text-xs">
+                                    — {expenses.length} gastos analitzats
+                                </span>
+                            </h3>
+                            <button
+                                onClick={() => setShowPrecisionDashboard(false)}
+                                className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded-lg hover:bg-slate-800"
+                            >
+                                <X size={14} />
+                            </button>
+                        </div>
+                        <PrecisionDashboard onCreateRule={handleOpenRuleCreator} />
+                    </div>
+                </Card>
+            )}
 
             {/* Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -554,8 +679,18 @@ export const ExpensesView = () => {
 
             {/* Modals */}
             <ExpenseModal open={showModal} onClose={() => setShowModal(false)} onSave={saveExpense} expense={editingExpense} />
-            <ScanResultModal open={showPendingModal} onClose={() => setShowPendingModal(false)} results={pendingImports} onImport={handleImportPending} />
-            <RulesManager open={showRulesManager} onClose={() => setShowRulesManager(false)} />
+            <ScanResultModal
+                open={showPendingModal}
+                onClose={() => setShowPendingModal(false)}
+                results={pendingImports}
+                onImport={handleImportPending}
+                onOpenRuleCreator={handleOpenRuleCreator}
+            />
+            <RulesManager
+                open={showRulesManager}
+                onClose={() => { setShowRulesManager(false); setRulePrefill(null); }}
+                initialRule={rulePrefill}
+            />
             {ConfirmDialog}
         </div>
     );
@@ -717,19 +852,105 @@ const ExpenseModal = ({ open, onClose, onSave, expense }) => {
     );
 };
 
-const ScanResultModal = ({ open, onClose, results, onImport }) => {
+// ============================================
+// CONFIDENCE BADGE (Fase 3.1)
+// ============================================
+
+const SOURCE_CFG = {
+    rule:      { cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'REGLA' },
+    cif_match: { cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'CIF' },
+    memory:    { cls: 'bg-purple-500/20 text-purple-400 border-purple-500/30',    label: 'MEMÒRIA' },
+    existing:  { cls: 'bg-green-500/20 text-green-400 border-green-500/30',       label: 'RECURRENT' },
+    validated: { cls: 'bg-blue-500/20 text-blue-400 border-blue-500/30',          label: '✓' },
+    auto:      { cls: 'bg-amber-500/20 text-amber-400 border-amber-500/30',       label: 'AUTO' },
+};
+
+const ConfidenceBadge = ({ source }) => {
+    if (!source) return null;
+    const norm = source?.startsWith('memory') ? 'memory' : source;
+    const cfg = SOURCE_CFG[norm] || SOURCE_CFG.auto;
+    return (
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold border ${cfg.cls}`}>
+            {cfg.label}
+        </span>
+    );
+};
+
+// ============================================
+// VALIDATE SCAN RESULT (Fase 3.3)
+// ============================================
+
+const validateScanResult = (r) => {
+    const warnings = [];
+
+    if (r.fecha) {
+        const fecha = new Date(r.fecha + 'T00:00:00');
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        if (fecha > today) {
+            warnings.push({ field: 'fecha', msg: 'Fecha futura' });
+        } else {
+            const ago = new Date(); ago.setMonth(ago.getMonth() - 6); ago.setHours(0, 0, 0, 0);
+            if (fecha < ago) warnings.push({ field: 'fecha', msg: '>6 meses' });
+        }
+    } else {
+        warnings.push({ field: 'fecha', msg: 'Sin fecha' });
+    }
+
+    if (!r.total || r.total <= 0) {
+        warnings.push({ field: 'total', msg: 'Importe inválido' });
+    } else if (r.baseImponible > 0 && r.ivaPorcentaje !== undefined) {
+        const expected = r.baseImponible * (1 + r.ivaPorcentaje / 100);
+        if (Math.abs(expected - r.total) > 0.06) {
+            warnings.push({ field: 'total', msg: 'Base+IVA≠Total' });
+        }
+    }
+
+    if (!r.proveedor || r.proveedor === 'Proveedor Desconocido') {
+        warnings.push({ field: 'proveedor', msg: 'Proveedor no detectado' });
+    }
+
+    if (r.categoria === 'Otros') {
+        warnings.push({ field: 'categoria', msg: 'Sin categoría' });
+    }
+
+    return warnings;
+};
+
+// ============================================
+// SCAN RESULT MODAL (Fase 3 — enhanced)
+// ============================================
+
+const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }) => {
     const [selected, setSelected] = useState([]);
+    // Fase 3.2: Track which results had inline fields modified
+    const [modifiedSet, setModifiedSet] = useState(new Set());
 
     useEffect(() => {
-        if (open) setSelected(results);
+        if (open) { setSelected(results); setModifiedSet(new Set()); }
     }, [open, results]);
 
     const toggle = (item) => {
-        if (selected.includes(item)) setSelected(selected.filter(i => i !== item));
-        else setSelected([...selected, item]);
+        setSelected(prev => prev.includes(item) ? prev.filter(i => i !== item) : [...prev, item]);
     };
 
-    // Ordenar per data descendent
+    // Fase 3.2: unified field change handler — tracks mutations
+    const handleFieldChange = (r, field, value) => {
+        r[field] = value;
+        setSelected(prev => [...prev]);
+        setModifiedSet(prev => { const n = new Set(prev); n.add(r); return n; });
+    };
+
+    // Fase 3.2: on confirm, suggest rule if any fields were modified
+    const handleImport = () => {
+        onImport(selected);
+        if (modifiedSet.size > 0 && onOpenRuleCreator) {
+            const firstModified = [...modifiedSet].find(r =>
+                selected.includes(r) && r.proveedor && r.proveedor !== 'Proveedor Desconocido'
+            );
+            if (firstModified) onOpenRuleCreator(firstModified);
+        }
+    };
+
     const sortedResults = useMemo(() =>
         [...results].sort((a, b) => new Date(b.fecha) - new Date(a.fecha)),
         [results]
@@ -738,88 +959,445 @@ const ScanResultModal = ({ open, onClose, results, onImport }) => {
     return (
         <Modal open={open} onClose={onClose} title={`PDFs Detectats (${results.length})`} className="max-w-4xl">
             <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-2 custom-scrollbar">
+                {/* Info banner */}
                 <div className="flex items-center gap-2 text-amber-400 bg-amber-400/10 p-3 rounded-lg border border-amber-400/20 mb-2">
                     <Calculator size={18} />
                     <p className="text-xs font-medium">Dades extretes automàticament. Revisa els imports abans de confirmar.</p>
                 </div>
-                {sortedResults.map((r, i) => (
-                    <div key={i}
-                        className={`p-4 rounded-xl border transition-all cursor-pointer ${selected.includes(r) ? 'bg-blue-600/10 border-blue-500/50 shadow-lg shadow-blue-900/10' : 'bg-slate-800/50 border-slate-700 hover:border-slate-500 hover:bg-slate-800'}`}
-                        onClick={() => toggle(r)}>
-                        <div className="flex items-start gap-4">
-                            <div className={`mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all ${selected.includes(r) ? 'bg-blue-600 border-blue-600' : 'border-slate-600 bg-slate-900'}`}>
-                                {selected.includes(r) && <Check size={14} className="text-white stroke-[3px]" />}
-                            </div>
-                            <div className="flex-1">
-                                <div className="flex justify-between items-start">
-                                    <div>
-                                        <div className="flex items-center gap-2">
-                                            <h4 className="font-bold text-white text-base">{r.proveedor || 'Proveedor desconocido'}</h4>
-                                            {r.inferredQuarter && (
-                                                <span className="bg-blue-600/20 text-blue-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-blue-500/20">T{r.inferredQuarter}</span>
+
+                {sortedResults.map((r, i) => {
+                    const isSelected = selected.includes(r);
+                    const fs = r.fieldSources || {};
+                    const warnings = validateScanResult(r);
+                    // Fase 3.1: compute total validation inline (no external flag needed)
+                    const expectedTotal = (r.baseImponible || 0) * (1 + (r.ivaPorcentaje || 0) / 100);
+                    const isTotalValidated = r.total > 0 && Math.abs(expectedTotal - r.total) < 0.06;
+
+                    // Normalise categoria source for ConfidenceBadge
+                    const catSource =
+                        r.categorySource === 'rule' ? 'rule' :
+                        r.categorySource === 'cif_match' ? 'cif_match' :
+                        r.categorySource?.startsWith('memory') ? 'memory' :
+                        r.categorySource === 'existing_expenses' ? 'existing' :
+                        undefined;
+
+                    return (
+                        <div key={i}
+                            className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                                isSelected
+                                    ? 'bg-blue-600/10 border-blue-500/50 shadow-lg shadow-blue-900/10'
+                                    : 'bg-slate-800/50 border-slate-700 hover:border-slate-500 hover:bg-slate-800'
+                            }`}
+                            onClick={() => toggle(r)}>
+
+                            <div className="flex items-start gap-4">
+                                {/* Checkbox */}
+                                <div className={`mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${
+                                    isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-600 bg-slate-900'
+                                }`}>
+                                    {isSelected && <Check size={14} className="text-white stroke-[3px]" />}
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                    {/* Fase 3.1: Regla aplicada banner */}
+                                    {r.ruleApplied && (
+                                        <div className="flex items-center gap-1.5 bg-emerald-500/8 border border-emerald-500/15 rounded-lg px-2.5 py-1 mb-2">
+                                            <Zap size={11} className="text-emerald-400 flex-shrink-0" />
+                                            <span className="text-emerald-400 text-[10px] font-bold">Regla aplicada:</span>
+                                            <span className="text-emerald-300 text-[10px] font-mono truncate">"{r.ruleApplied}"</span>
+                                        </div>
+                                    )}
+
+                                    {/* Header: proveïdor + total */}
+                                    <div className="flex justify-between items-start gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                                <h4 className="font-bold text-white text-base">{r.proveedor || 'Proveedor desconocido'}</h4>
+                                                {/* Fase 3.1: badge proveïdor */}
+                                                <ConfidenceBadge source={fs.proveedor} />
+                                                {r.inferredQuarter && (
+                                                    <span className="bg-blue-600/20 text-blue-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-blue-500/20">T{r.inferredQuarter}</span>
+                                                )}
+                                            </div>
+                                            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                                <Calendar size={12} />
+                                                <span>{formatDate(r.fecha)}</span>
+                                                {/* Fase 3.1: badge data (only if rule forced it) */}
+                                                {fs.fecha && <ConfidenceBadge source={fs.fecha} />}
+                                                <span className="mx-0.5">•</span>
+                                                <FileText size={12} />
+                                                <span className="truncate max-w-[180px]">{r.filename}</span>
+                                            </p>
+                                        </div>
+
+                                        {/* Total + IVA amb badges */}
+                                        <div className="text-right bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-700/50 flex-shrink-0">
+                                            <div className="flex items-center justify-end gap-1.5">
+                                                <div className="text-lg font-black text-white leading-none">{formatCurrency(r.total)}</div>
+                                                {/* Fase 3.1: badge total validat */}
+                                                {isTotalValidated && <ConfidenceBadge source="validated" />}
+                                            </div>
+                                            {r.ivaPorcentaje !== undefined && (
+                                                <div className="flex items-center justify-end gap-1.5 mt-1">
+                                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">IVA {r.ivaPorcentaje}%</span>
+                                                    {/* Fase 3.1: badge IVA */}
+                                                    {fs.ivaPorcentaje && <ConfidenceBadge source={fs.ivaPorcentaje} />}
+                                                </div>
+                                            )}
+                                            {/* Informació addicional detectada */}
+                                            {r.irpfDetected && (
+                                                <div className="text-[9px] text-orange-400 mt-0.5 font-mono">-IRPF {r.irpfDetected.percent}%</div>
+                                            )}
+                                            {r.recargoEquivalencia && (
+                                                <div className="text-[9px] text-yellow-400 mt-0.5 font-mono">+R.E. {r.recargoEquivalencia.percent}%</div>
+                                            )}
+                                            {r.mixedVat && (
+                                                <div className="text-[9px] text-blue-400 mt-0.5">IVA mixt ({r.mixedVat.length} tipus)</div>
                                             )}
                                         </div>
-                                        <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 line-clamp-1">
-                                            <Calendar size={12} /> {formatDate(r.fecha)}
-                                            <span className="mx-1">•</span>
-                                            <FileText size={12} /> {r.filename}
-                                        </p>
                                     </div>
-                                    <div className="text-right bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-700/50">
-                                        <div className="text-lg font-black text-white leading-none">{formatCurrency(r.total)}</div>
-                                        {r.ivaPorcentaje !== undefined && (
-                                            <div className="text-[10px] text-slate-500 font-bold mt-1 tracking-wider uppercase">IVA {r.ivaPorcentaje}%</div>
-                                        )}
-                                    </div>
-                                </div>
-                                <div className="mt-3 flex items-center gap-4 pt-3 border-t border-slate-700/30" onClick={e => e.stopPropagation()}>
-                                    <div className="flex-1">
-                                        <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 flex items-center gap-1.5">
-                                            Categoría
-                                            {r.categorySource && r.categorySource !== 'default' && r.categorySource !== 'keywords' && (
-                                                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[8px] font-bold ${
-                                                    r.categorySource.startsWith('memory') ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' :
-                                                    r.categorySource === 'custom_rule' ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30' :
-                                                    r.categorySource === 'existing_expenses' ? 'bg-green-500/20 text-green-400 border border-green-500/30' :
-                                                    'bg-slate-700 text-slate-400'
-                                                }`}>
-                                                    {r.categorySource.startsWith('memory') ? '🧠 MEMÒRIA' :
-                                                     r.categorySource === 'custom_rule' ? '📏 REGLA' :
-                                                     r.categorySource === 'existing_expenses' ? '📋 RECURRENT' : '🔍'}
+
+                                    {/* Fase 3.3: Validation warnings */}
+                                    {warnings.length > 0 && (
+                                        <div className="flex flex-wrap gap-1 mt-2">
+                                            {warnings.map((w, wi) => (
+                                                <span key={wi} className="flex items-center gap-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] font-semibold px-1.5 py-0.5 rounded-full">
+                                                    <AlertCircle size={9} /> {w.msg}
                                                 </span>
-                                            )}
-                                        </label>
-                                        <Select value={r.categoria} onChange={e => { r.categoria = e.target.value; setSelected([...selected]); }}
-                                            options={defaultCategories.map(c => ({ value: c, label: c }))} className="h-8 text-xs bg-slate-900/50 border-slate-700" />
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Editable fields */}
+                                    <div className="mt-3 flex items-center gap-3 pt-3 border-t border-slate-700/30" onClick={e => e.stopPropagation()}>
+                                        {/* Categoria amb badge */}
+                                        <div className="flex-1">
+                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 flex items-center gap-1.5">
+                                                Categoría
+                                                <ConfidenceBadge source={catSource} />
+                                            </label>
+                                            <Select
+                                                value={r.categoria}
+                                                onChange={e => handleFieldChange(r, 'categoria', e.target.value)}
+                                                options={defaultCategories.map(c => ({ value: c, label: c }))}
+                                                className="h-8 text-xs bg-slate-900/50 border-slate-700"
+                                            />
+                                        </div>
+                                        {/* CIF/NIF amb badge */}
+                                        <div className="w-28">
+                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 flex items-center gap-1.5">
+                                                CIF/NIF
+                                                {fs.cifProveedor && <ConfidenceBadge source={fs.cifProveedor} />}
+                                            </label>
+                                            <input
+                                                type="text"
+                                                value={r.cifProveedor || ''}
+                                                onChange={e => handleFieldChange(r, 'cifProveedor', e.target.value)}
+                                                className="w-full h-8 text-xs bg-slate-900/50 border border-slate-700 rounded-md px-2 text-white outline-none focus:border-blue-500 font-mono"
+                                                placeholder="B12345678"
+                                            />
+                                        </div>
+                                        {/* Concepto */}
+                                        <div className="w-1/4">
+                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Concepto</label>
+                                            <input
+                                                type="text"
+                                                value={r.concepto || ''}
+                                                onChange={e => handleFieldChange(r, 'concepto', e.target.value)}
+                                                className="w-full h-8 text-xs bg-slate-900/50 border border-slate-700 rounded-md px-2 text-white outline-none focus:border-blue-500"
+                                            />
+                                        </div>
                                     </div>
-                                    <div className="w-28">
-                                        <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">CIF/NIF</label>
-                                        <input type="text" value={r.cifProveedor || ''} onChange={e => { r.cifProveedor = e.target.value; setSelected([...selected]); }}
-                                            className="w-full h-8 text-xs bg-slate-900/50 border border-slate-700 rounded-md px-2 text-white outline-none focus:border-blue-500 font-mono" placeholder="B12345678" />
-                                    </div>
-                                    <div className="w-1/4">
-                                        <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Concepto</label>
-                                        <input type="text" value={r.concepto || ''} onChange={e => { r.concepto = e.target.value; setSelected([...selected]); }}
-                                            className="w-full h-8 text-xs bg-slate-900/50 border border-slate-700 rounded-md px-2 text-white outline-none focus:border-blue-500" />
-                                    </div>
+
+                                    {/* Fase 3.2: Suggest crear regla quan hi ha modificacions */}
+                                    {modifiedSet.has(r) && onOpenRuleCreator && (
+                                        <div className="mt-2 flex items-center gap-2 bg-cyan-500/8 border border-cyan-500/15 rounded-lg px-2.5 py-1.5" onClick={e => e.stopPropagation()}>
+                                            <Tag size={11} className="text-cyan-400 flex-shrink-0" />
+                                            <span className="text-cyan-300 text-[10px]">Has modificat camps.</span>
+                                            <button
+                                                onClick={() => onOpenRuleCreator(r)}
+                                                className="text-[10px] font-bold text-cyan-400 hover:text-cyan-300 underline transition-colors"
+                                            >
+                                                Crear regla per a "{r.proveedor}"?
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
+
                 {results.length === 0 && (
                     <div className="py-10 text-center text-slate-500">No s'han trobat resultats.</div>
                 )}
             </div>
+
             <div className="flex justify-between items-center pt-6 mt-4 border-t border-slate-800">
                 <span className="text-slate-400 text-sm font-medium">{selected.length} elements seleccionats</span>
                 <div className="flex gap-3">
                     <Button variant="ghost" onClick={onClose} className="text-slate-400 hover:text-white">Cancelar</Button>
-                    <Button onClick={() => onImport(selected)} className="bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/20 px-6">
+                    <Button onClick={handleImport} className="bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/20 px-6">
                         Confirmar Importació
                     </Button>
                 </div>
             </div>
         </Modal>
+    );
+};
+
+// ============================================
+// UTILITAT COMPARTIDA (Fase 5)
+// ============================================
+
+const normalizeProvKey = (name) => {
+    if (!name) return '';
+    return name
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+// ============================================
+// RULE SUGGESTIONS BANNER (Fase 5.1)
+// Apareix després d'importar si un proveïdor
+// apareix >= 3 vegades sense regla configurada.
+// ============================================
+
+const RuleSuggestionsBanner = ({ suggestions, onCreateRule, onDismiss }) => {
+    if (!suggestions || suggestions.length === 0) return null;
+
+    return (
+        <div className="space-y-2">
+            {suggestions.map((sug, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 bg-cyan-500/8 border border-cyan-500/20 px-4 py-3 rounded-xl">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                        <TrendingUp size={14} className="text-cyan-400 flex-shrink-0" />
+                        <p className="text-xs text-slate-300 truncate">
+                            <strong className="text-white">{sug.name}</strong>
+                            {' '}apareix{' '}
+                            <strong className="text-cyan-400">{sug.count} vegades</strong>
+                            {' '}sense regla.
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                        <button
+                            onClick={() => { onCreateRule(sug.data); onDismiss(i); }}
+                            className="text-xs font-bold text-cyan-400 bg-cyan-500/15 border border-cyan-500/25 px-3 py-1.5 rounded-lg hover:bg-cyan-500/25 transition-colors whitespace-nowrap"
+                        >
+                            Crear regla
+                        </button>
+                        <button
+                            onClick={() => onDismiss(i)}
+                            className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded-lg hover:bg-slate-800"
+                        >
+                            <X size={14} />
+                        </button>
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+};
+
+// ============================================
+// PRECISION DASHBOARD (Fase 5.2)
+// Analitza retroactivament els gastos existents
+// per mostrar cobertura de regles i incidències.
+// ============================================
+
+const PrecisionDashboard = ({ onCreateRule }) => {
+    const expenses = useStore(s => s.expenses);
+    const { customRules, applyAdvancedRules, findProvider } = useProviderMemory();
+
+    const stats = useMemo(() => {
+        if (expenses.length === 0) return null;
+
+        let withRule = 0, withMemory = 0, withAuto = 0;
+        // provMap: normalizedKey → { name, count, hasRule, exampleExpense }
+        const provMap = {};
+        const warnings = { badTotal: 0, unknownProvider: 0, noCategory: 0 };
+
+        expenses.forEach(exp => {
+            // ── Classificació per font ──────────────────────────────────
+            const ruleResult = applyAdvancedRules({
+                proveedor: exp.proveedor || '',
+                concepto: exp.concepto || '',
+                filename: exp.archivo || '',
+                rawText: exp.proveedor || '',
+                cif: exp.cifProveedor || '',
+            });
+
+            let source;
+            if (ruleResult) {
+                source = 'rule';
+                withRule++;
+            } else {
+                const memResult = findProvider(exp.proveedor);
+                if (memResult && (memResult.confidence || 0) >= 0.5) {
+                    source = 'memory';
+                    withMemory++;
+                } else {
+                    source = 'auto';
+                    withAuto++;
+                }
+            }
+
+            // ── Mapa de proveïdors ──────────────────────────────────────
+            const raw = exp.proveedor?.trim() || '';
+            if (raw && raw !== 'Proveedor Desconocido') {
+                const key = normalizeProvKey(raw);
+                if (key.length > 1) {
+                    if (!provMap[key]) {
+                        provMap[key] = { name: raw, count: 0, hasRule: false, exampleExpense: exp };
+                    }
+                    provMap[key].count++;
+                    if (source === 'rule') provMap[key].hasRule = true;
+                }
+            }
+
+            // ── Advertències ──────────────────────────────────────────
+            if (!exp.proveedor || exp.proveedor === 'Proveedor Desconocido') {
+                warnings.unknownProvider++;
+            }
+            if (!exp.categoria || exp.categoria === 'Otros') {
+                warnings.noCategory++;
+            }
+            if (exp.baseImponible > 0 && exp.ivaPorcentaje !== undefined && exp.total > 0) {
+                const expected = exp.baseImponible * (1 + exp.ivaPorcentaje / 100);
+                if (Math.abs(expected - exp.total) > 0.06) {
+                    warnings.badTotal++;
+                }
+            }
+        });
+
+        // Proveïdors sense cap regla, ordenats per freqüència
+        const unruledProviders = Object.values(provMap)
+            .filter(p => !p.hasRule)
+            .sort((a, b) => b.count - a.count);
+
+        return { total: expenses.length, withRule, withMemory, withAuto, unruledProviders, warnings };
+    }, [expenses, customRules]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Note: applyAdvancedRules i findProvider llegeixen de customRules internament.
+    // Dep a customRules garanteix recompute quan canvien les regles.
+
+    if (!stats) {
+        return (
+            <div className="py-6 text-center text-slate-500 text-sm">
+                No hi ha gastos per analitzar.
+            </div>
+        );
+    }
+
+    const pct = (n) => stats.total > 0 ? Math.round((n / stats.total) * 100) : 0;
+    const totalWarnings = stats.warnings.badTotal + stats.warnings.unknownProvider + stats.warnings.noCategory;
+
+    const coverageBars = [
+        { label: 'Amb regla',    count: stats.withRule,   color: 'bg-emerald-500', textColor: 'text-emerald-400', desc: 'Forçats per regla d\'usuari' },
+        { label: 'Amb memòria',  count: stats.withMemory, color: 'bg-purple-500',  textColor: 'text-purple-400',  desc: 'Reconeguts per memòria' },
+        { label: 'Autodetectat', count: stats.withAuto,   color: 'bg-amber-500',   textColor: 'text-amber-400',   desc: 'Detectats automàticament' },
+    ];
+
+    return (
+        <div className="space-y-5">
+            {/* ── Barres de cobertura ── */}
+            <div className="space-y-3">
+                <h4 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Cobertura actual</h4>
+                {coverageBars.map(({ label, count, color, textColor, desc }) => (
+                    <div key={label} className="space-y-1">
+                        <div className="flex justify-between items-center text-xs">
+                            <div className="flex items-center gap-2">
+                                <span className={`font-semibold ${textColor}`}>{label}</span>
+                                <span className="text-slate-600 text-[10px]">{desc}</span>
+                            </div>
+                            <span>
+                                <span className={`font-bold ${textColor}`}>{pct(count)}%</span>
+                                <span className="text-slate-600 ml-1.5">({count} / {stats.total})</span>
+                            </span>
+                        </div>
+                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div
+                                className={`h-full ${color} rounded-full transition-all duration-700`}
+                                style={{ width: `${pct(count)}%` }}
+                            />
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {/* ── Proveïdors sense regla ── */}
+            {stats.unruledProviders.length > 0 ? (
+                <div className="space-y-2">
+                    <h4 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">
+                        Proveïdors sense regla ({stats.unruledProviders.length})
+                    </h4>
+                    <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                        {stats.unruledProviders.slice(0, 10).map((prov, i) => (
+                            <div key={i}
+                                className="flex items-center justify-between gap-3 bg-slate-800/40 px-3 py-2 rounded-lg border border-slate-700/30 hover:border-slate-600/50 transition-colors">
+                                <div className="min-w-0 flex-1">
+                                    <span className="text-slate-200 text-sm font-medium truncate block">{prov.name}</span>
+                                    <span className="text-slate-500 text-[10px]">
+                                        {prov.count} gasto{prov.count !== 1 ? 's' : ''}
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={() => onCreateRule(prov.exampleExpense)}
+                                    className="flex-shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg hover:bg-blue-500/20 transition-colors"
+                                >
+                                    <Tag size={10} /> Crear
+                                </button>
+                            </div>
+                        ))}
+                        {stats.unruledProviders.length > 10 && (
+                            <p className="text-xs text-slate-600 text-center py-1">
+                                + {stats.unruledProviders.length - 10} proveïdors més
+                            </p>
+                        )}
+                    </div>
+                </div>
+            ) : (
+                <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/8 border border-emerald-500/15 px-3 py-2 rounded-lg">
+                    <Check size={12} />
+                    <span>Tots els proveïdors estan coberts per alguna regla.</span>
+                </div>
+            )}
+
+            {/* ── Incidències ── */}
+            {totalWarnings > 0 && (
+                <div className="space-y-1.5">
+                    <h4 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">
+                        Gastos amb incidències ({totalWarnings})
+                    </h4>
+                    {stats.warnings.badTotal > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-lg">
+                            <AlertCircle size={12} className="flex-shrink-0" />
+                            <span>Base + IVA ≠ Total: <strong>{stats.warnings.badTotal}</strong> gastos</span>
+                        </div>
+                    )}
+                    {stats.warnings.unknownProvider > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-lg">
+                            <AlertCircle size={12} className="flex-shrink-0" />
+                            <span>Proveïdor desconegut: <strong>{stats.warnings.unknownProvider}</strong> gastos</span>
+                        </div>
+                    )}
+                    {stats.warnings.noCategory > 0 && (
+                        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-lg">
+                            <AlertCircle size={12} className="flex-shrink-0" />
+                            <span>Sense categoria específica: <strong>{stats.warnings.noCategory}</strong> gastos</span>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {totalWarnings === 0 && stats.unruledProviders.length === 0 && (
+                <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/8 border border-emerald-500/15 px-3 py-2.5 rounded-lg">
+                    <Check size={12} />
+                    <span className="font-medium">Excel·lent! Tots els gastos estan ben coberts i sense incidències.</span>
+                </div>
+            )}
+        </div>
     );
 };
