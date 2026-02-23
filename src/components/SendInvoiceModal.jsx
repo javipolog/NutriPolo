@@ -34,10 +34,10 @@ import { useStore, formatCurrency } from '../stores/store';
 
 const InfoBadge = ({ children, color = 'blue' }) => {
   const colors = {
-    blue:   'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    amber:  'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    emerald:'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-    red:    'bg-red-500/10 text-red-400 border-red-500/20',
+    blue:   'bg-terra-50 text-terra-400 border-terra-200',
+    amber:  'bg-amber-500/10 text-warning border-amber-500/20',
+    emerald:'bg-success-light text-success border-success/20',
+    red:    'bg-danger-light text-danger border-danger/20',
   };
   return (
     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-semibold ${colors[color]}`}>
@@ -51,7 +51,7 @@ const VarChip = ({ token, desc, onInsert }) => (
     type="button"
     onClick={() => onInsert(token)}
     title={desc}
-    className="flex items-center gap-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 hover:border-blue-500/40 text-slate-300 hover:text-blue-400 text-[10px] font-mono px-2 py-1 rounded-md transition-all"
+    className="flex items-center gap-1 bg-sand-100 hover:bg-sand-200 border border-sand-300 hover:border-terra-200 text-sand-700 hover:text-terra-400 text-[10px] font-mono px-2 py-1 rounded-md transition-all"
   >
     <Tag size={9} className="opacity-60 shrink-0" />
     {token.replace(/[{}]/g, '')}
@@ -186,25 +186,25 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
       <div className="space-y-4">
 
         {/* ---- Invoice summary ---- */}
-        <div className="flex items-center gap-3 bg-slate-800/50 border border-slate-700/50 rounded-xl p-3">
-          <div className="w-10 h-10 bg-blue-600/20 rounded-xl flex items-center justify-center shrink-0">
-            <FileText size={18} className="text-blue-400" />
+        <div className="flex items-center gap-3 bg-sand-100 border border-sand-200 rounded-soft p-3">
+          <div className="w-10 h-10 bg-terra-400/20 rounded-soft flex items-center justify-center shrink-0">
+            <FileText size={18} className="text-terra-400" />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold text-white text-sm">{invoice.numero}</span>
+              <span className="font-bold text-sand-900 text-sm">{invoice.numero}</span>
               <InfoBadge color="blue">{invoice.estado}</InfoBadge>
               <InfoBadge color="emerald">{formatCurrency(invoice.total)}</InfoBadge>
             </div>
-            <p className="text-xs text-slate-500 truncate mt-0.5">{invoice.concepto}</p>
+            <p className="text-xs text-sand-500 truncate mt-0.5">{invoice.concepto}</p>
           </div>
           <div className="text-right shrink-0">
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
+            <div className="flex items-center gap-1.5 text-xs text-sand-600">
               <User size={12} />
-              <span className="font-semibold text-slate-300">{client.nombre}</span>
+              <span className="font-semibold text-sand-700">{client.nombre}</span>
             </div>
             {client.email && (
-              <div className="flex items-center gap-1 text-[11px] text-slate-500 mt-0.5">
+              <div className="flex items-center gap-1 text-[11px] text-sand-500 mt-0.5">
                 <AtSign size={10} />
                 {client.email}
               </div>
@@ -215,11 +215,11 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
         {/* ---- Sent success state ---- */}
         {sent ? (
           <div className="space-y-4">
-            <div className="flex items-start gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4">
-              <Check size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 bg-success-light border border-success/20 rounded-soft p-4">
+              <Check size={18} className="text-success shrink-0 mt-0.5" />
               <div>
-                <p className="text-sm font-semibold text-emerald-400">Client de correu obert!</p>
-                <p className="text-xs text-slate-400 mt-1">
+                <p className="text-sm font-semibold text-success">Client de correu obert!</p>
+                <p className="text-xs text-sand-600 mt-1">
                   S'ha obert el teu client de correu amb el missatge pre-emplenat.
                   Adjunta el PDF i prem enviar.
                 </p>
@@ -227,17 +227,17 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
             </div>
 
             {pdfPath && (
-              <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3">
+              <div className="bg-sand-100 border border-sand-300 rounded-soft p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs text-slate-400 mb-1">📎 PDF generat a:</p>
-                    <p className="text-xs text-white font-mono truncate bg-slate-900 px-2 py-1 rounded border border-slate-700">
+                    <p className="text-xs text-sand-600 mb-1">📎 PDF generat a:</p>
+                    <p className="text-xs text-sand-700 font-mono truncate bg-white px-2 py-1 rounded border border-sand-300">
                       {pdfPath}
                     </p>
                   </div>
                   <button
                     onClick={() => navigator.clipboard.writeText(pdfPath)}
-                    className="shrink-0 p-2 rounded-lg text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
+                    className="shrink-0 p-2 rounded-button text-sand-500 hover:text-sand-700 hover:bg-sand-200 transition-colors"
                     title="Copiar ruta"
                   >
                     <Copy size={14} />
@@ -250,7 +250,7 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
               <Button variant="ghost" onClick={handleSend} icon={RotateCcw} size="sm">
                 Tornar a obrir
               </Button>
-              <Button onClick={onClose} className="bg-blue-600 hover:bg-blue-500" size="sm">
+              <Button onClick={onClose} className="bg-terra-400 hover:bg-terra-500" size="sm">
                 Tancar
               </Button>
             </div>
@@ -259,12 +259,12 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
           <>
             {/* ---- Language tabs ---- */}
             <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Plantilla</span>
-              <div className="flex gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800">
+              <span className="text-xs text-sand-500 font-semibold uppercase tracking-wider">Plantilla</span>
+              <div className="flex gap-1 bg-white p-0.5 rounded-button border border-sand-300">
                 {LANGS.map(l => (
                   <button key={l.id} onClick={() => handleLangSwitch(l.id)}
                     className={`px-3 py-1 rounded-md text-xs font-bold transition-all ${
-                      langTab === l.id ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'
+                      langTab === l.id ? 'bg-sand-200 text-sand-900' : 'text-sand-500 hover:text-sand-700'
                     }`}>
                     {l.label}
                   </button>
@@ -274,7 +274,7 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
 
             {/* ---- To ---- */}
             <div>
-              <label className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-1.5 flex items-center gap-1.5">
+              <label className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-1.5 flex items-center gap-1.5">
                 <AtSign size={11} /> Destinatari
                 {!client?.email && (
                   <InfoBadge color="amber"><AlertCircle size={10} /> Client sense email</InfoBadge>
@@ -286,13 +286,13 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
                 onFocus={() => setActiveField('to')}
                 type="email"
                 placeholder="correu@empresa.com"
-                className="w-full bg-slate-900 border border-slate-700 text-white px-3 py-2.5 rounded-lg text-sm outline-none focus:border-blue-500 transition-colors font-mono"
+                className="w-full bg-white border border-sand-300 text-sand-900 px-3 py-2.5 rounded-button text-sm outline-none focus:border-terra-400 transition-colors font-mono"
               />
             </div>
 
             {/* ---- Subject ---- */}
             <div>
-              <label className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-1.5 block">
+              <label className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-1.5 block">
                 Assumpte
               </label>
               <input
@@ -301,13 +301,13 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
                 onChange={e => setSubject(e.target.value)}
                 onFocus={() => setActiveField('subject')}
                 placeholder="Assumpte del correu..."
-                className={`w-full bg-slate-900 border text-white px-3 py-2.5 rounded-lg text-sm outline-none transition-colors font-sans ${
-                  activeField === 'subject' ? 'border-blue-500' : 'border-slate-700 focus:border-blue-500'
+                className={`w-full bg-white border text-sand-900 px-3 py-2.5 rounded-button text-sm outline-none transition-colors font-sans ${
+                  activeField === 'subject' ? 'border-terra-400' : 'border-sand-300 focus:border-terra-400'
                 }`}
               />
               {showPreview && subject !== resolvedSubject && (
-                <p className="text-xs text-slate-500 mt-1 truncate">
-                  → <span className="text-slate-300">{resolvedSubject}</span>
+                <p className="text-xs text-sand-500 mt-1 truncate">
+                  → <span className="text-sand-700">{resolvedSubject}</span>
                 </p>
               )}
             </div>
@@ -315,13 +315,13 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
             {/* ---- Body ---- */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs text-slate-500 uppercase font-semibold tracking-wider">
+                <label className="text-xs text-sand-500 uppercase font-semibold tracking-wider">
                   Missatge
                 </label>
                 <button
                   type="button"
                   onClick={() => setShowPreview(v => !v)}
-                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                  className="flex items-center gap-1 text-xs text-sand-500 hover:text-sand-700 transition-colors"
                 >
                   {showPreview ? <EyeOff size={12} /> : <Eye size={12} />}
                   {showPreview ? 'Editar' : 'Previsualitzar'}
@@ -329,7 +329,7 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
               </div>
 
               {showPreview ? (
-                <div className="w-full bg-slate-900/50 border border-slate-700 rounded-lg px-3 py-3 text-sm text-slate-200 whitespace-pre-wrap leading-relaxed min-h-[200px] max-h-[300px] overflow-y-auto custom-scrollbar font-sans">
+                <div className="w-full bg-white border border-sand-300 rounded-button px-3 py-3 text-sm text-sand-800 whitespace-pre-wrap leading-relaxed min-h-[200px] max-h-[300px] overflow-y-auto custom-scrollbar font-sans">
                   {resolvedBody}
                 </div>
               ) : (
@@ -339,8 +339,8 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
                   onChange={e => setBody(e.target.value)}
                   onFocus={() => setActiveField('body')}
                   rows={9}
-                  className={`w-full bg-slate-900 border text-white px-3 py-2.5 rounded-lg text-sm outline-none transition-colors resize-none font-mono leading-relaxed custom-scrollbar ${
-                    activeField === 'body' ? 'border-blue-500' : 'border-slate-700 focus:border-blue-500'
+                  className={`w-full bg-white border text-sand-900 px-3 py-2.5 rounded-button text-sm outline-none transition-colors resize-none font-mono leading-relaxed custom-scrollbar ${
+                    activeField === 'body' ? 'border-terra-400' : 'border-sand-300 focus:border-terra-400'
                   }`}
                 />
               )}
@@ -351,50 +351,50 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
               <button
                 type="button"
                 onClick={() => setShowVars(v => !v)}
-                className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-300 transition-colors w-full"
+                className="flex items-center gap-2 text-xs text-sand-500 hover:text-sand-700 transition-colors w-full"
               >
                 <Zap size={12} />
                 <span>Variables disponibles</span>
-                <span className="text-slate-600 text-[10px]">— fes clic per inserir-les al camp actiu</span>
+                <span className="text-sand-400 text-[10px]">— fes clic per inserir-les al camp actiu</span>
                 <ChevronDown size={11} className={`ml-auto transition-transform ${showVars ? 'rotate-180' : ''}`} />
               </button>
 
               {showVars && (
-                <div className="mt-2 p-3 bg-slate-900/50 border border-slate-800 rounded-xl">
+                <div className="mt-2 p-3 bg-white border border-sand-300 rounded-soft">
                   <div className="flex flex-wrap gap-1.5">
                     {AVAILABLE_VARIABLES.map(v => (
                       <VarChip key={v.token} token={v.token} desc={v.desc} onInsert={insertVariable} />
                     ))}
                   </div>
-                  <p className="text-[10px] text-slate-600 mt-2">
-                    Camp actiu: <span className="text-slate-400 font-semibold">{activeField === 'subject' ? 'Assumpte' : 'Missatge'}</span>
+                  <p className="text-[10px] text-sand-400 mt-2">
+                    Camp actiu: <span className="text-sand-600 font-semibold">{activeField === 'subject' ? 'Assumpte' : 'Missatge'}</span>
                   </p>
                 </div>
               )}
             </div>
 
             {/* ---- Info note ---- */}
-            <div className="flex items-start gap-2.5 bg-blue-500/5 border border-blue-500/15 rounded-xl p-3">
-              <Info size={14} className="text-blue-400 shrink-0 mt-0.5" />
-              <p className="text-xs text-slate-400 leading-relaxed">
-                S'obrirà el teu <strong className="text-slate-300">client de correu natiu</strong> (Outlook, Thunderbird, Mail…) amb el missatge pre-emplenat.
+            <div className="flex items-start gap-2.5 bg-terra-50/30 border border-terra-300/30 rounded-soft p-3">
+              <Info size={14} className="text-terra-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-sand-600 leading-relaxed">
+                S'obrirà el teu <strong className="text-sand-700">client de correu natiu</strong> (Outlook, Thunderbird, Mail…) amb el missatge pre-emplenat.
                 El PDF es generarà automàticament — adjunta'l manualment des de la ruta que t'indicarem.
               </p>
             </div>
 
             {/* ---- Error ---- */}
             {error && (
-              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-xl">
+              <div className="flex items-center gap-2 bg-danger-light border border-danger/20 text-danger text-sm p-3 rounded-soft">
                 <AlertCircle size={15} className="shrink-0" /> {error}
               </div>
             )}
 
             {/* ---- Actions ---- */}
-            <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+            <div className="flex items-center justify-between pt-2 border-t border-sand-300">
               <button
                 type="button"
                 onClick={handleCopyMailto}
-                className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                className="flex items-center gap-1.5 text-xs text-sand-500 hover:text-sand-700 transition-colors"
                 title="Còpia l'URI mailto: al portapapers"
               >
                 <Copy size={12} /> Copiar URI mailto
@@ -406,7 +406,7 @@ export const SendInvoiceModal = ({ open, onClose, invoice, client }) => {
                   disabled={sending || !toEmail}
                   size="sm"
                   className={`px-6 min-w-[130px] ${
-                    sending ? 'bg-slate-700' : 'bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/20'
+                    sending ? 'bg-sand-200' : 'bg-terra-400 hover:bg-terra-500 shadow-card-hover'
                   }`}
                 >
                   {sending ? (

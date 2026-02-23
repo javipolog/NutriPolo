@@ -14,21 +14,21 @@ import { Card, StatCard, StatusBadge, Button, Modal, Select } from './UI';
 import { useStore, formatCurrency, formatDate, getQuarter, getTaxDeadlines, distributeInvoiceByMonth } from '../stores/store';
 
 /* ============================================
-   TOOLTIPS
+   TOOLTIPS — paleta càlida
    ============================================ */
 
 const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
         return (
-            <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 p-4 rounded-xl shadow-2xl">
-                <p className="text-slate-400 text-xs font-semibold mb-2 uppercase tracking-wider">{label}</p>
+            <div className="bg-white border border-sand-300 p-4 rounded-soft shadow-modal">
+                <p className="text-sand-500 text-xs font-semibold mb-2 uppercase tracking-wider">{label}</p>
                 {payload.map((entry, index) => (
                     <div key={index} className="flex items-center justify-between gap-4 text-sm font-medium mb-1 last:mb-0">
                         <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color, boxShadow: `0 0 10px ${entry.color}40` }} />
-                            <span className="text-slate-200">{entry.name}</span>
+                            <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                            <span className="text-sand-700">{entry.name}</span>
                         </div>
-                        <span className="text-white font-mono font-bold">{formatCurrency(entry.value)}</span>
+                        <span className="text-sand-900 font-mono font-bold">{formatCurrency(entry.value)}</span>
                     </div>
                 ))}
             </div>
@@ -48,18 +48,18 @@ const ComparisonTooltip = ({ active, payload, label }) => {
             grouped[year][type] = { value: entry.value, color: entry.color };
         });
         return (
-            <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 p-4 rounded-xl shadow-2xl min-w-[220px]">
-                <p className="text-slate-400 text-xs font-semibold mb-3 uppercase tracking-wider">{label}</p>
+            <div className="bg-white border border-sand-300 p-4 rounded-soft shadow-modal min-w-[220px]">
+                <p className="text-sand-500 text-xs font-semibold mb-3 uppercase tracking-wider">{label}</p>
                 {Object.entries(grouped).map(([year, types]) => (
                     <div key={year} className="mb-2 last:mb-0">
-                        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mb-1">{year}</p>
+                        <p className="text-sand-400 text-[10px] font-bold uppercase tracking-widest mb-1">{year}</p>
                         {Object.entries(types).map(([type, data]) => (
                             <div key={type} className="flex items-center justify-between gap-4 text-sm font-medium mb-0.5">
                                 <div className="flex items-center gap-2">
                                     <div className="w-2 h-2 rounded-full" style={{ backgroundColor: data.color }} />
-                                    <span className="text-slate-300 text-xs">{type}</span>
+                                    <span className="text-sand-600 text-xs">{type}</span>
                                 </div>
-                                <span className="text-white font-mono font-bold text-xs">{formatCurrency(data.value)}</span>
+                                <span className="text-sand-900 font-mono font-bold text-xs">{formatCurrency(data.value)}</span>
                             </div>
                         ))}
                     </div>
@@ -73,8 +73,8 @@ const ComparisonTooltip = ({ active, payload, label }) => {
 const YoYTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
         return (
-            <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 p-4 rounded-xl shadow-2xl">
-                <p className="text-slate-400 text-xs font-semibold mb-2 uppercase tracking-wider">{label}</p>
+            <div className="bg-white border border-sand-300 p-4 rounded-soft shadow-modal">
+                <p className="text-sand-500 text-xs font-semibold mb-2 uppercase tracking-wider">{label}</p>
                 {payload.map((entry, index) => {
                     const val = entry.value;
                     const pos = val >= 0;
@@ -82,9 +82,9 @@ const YoYTooltip = ({ active, payload, label }) => {
                         <div key={index} className="flex items-center justify-between gap-4 text-sm font-medium mb-1 last:mb-0">
                             <div className="flex items-center gap-2">
                                 <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
-                                <span className="text-slate-200">{entry.name}</span>
+                                <span className="text-sand-700">{entry.name}</span>
                             </div>
-                            <span className={`font-mono font-bold ${pos ? 'text-emerald-400' : 'text-red-400'}`}>
+                            <span className={`font-mono font-bold ${pos ? 'text-success' : 'text-danger'}`}>
                                 {pos ? '+' : ''}{val.toFixed(1)}%
                             </span>
                         </div>
@@ -97,15 +97,15 @@ const YoYTooltip = ({ active, payload, label }) => {
 };
 
 /* ============================================
-   CONSTANTS
+   CONSTANTS — paleta terra
    ============================================ */
 
 const YEAR_COLORS = [
-    { ingresos: '#3b82f6', gastos: '#ef4444', benefici: '#10b981' },
-    { ingresos: '#818cf8', gastos: '#fb923c', benefici: '#34d399' },
-    { ingresos: '#a78bfa', gastos: '#fbbf24', benefici: '#6ee7b7' },
+    { ingresos: '#C15F3C', gastos: '#9C9A91', benefici: '#2D7A4F' },
+    { ingresos: '#D4845F', gastos: '#B0AEA5', benefici: '#3A8F5C' },
+    { ingresos: '#A84E30', gastos: '#65635B', benefici: '#1A5C38' },
 ];
-const PIE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
+const PIE_COLORS = ['#C15F3C', '#2D7A4F', '#B8860B', '#4A7FB5', '#8B5CF6', '#06b6d4', '#ec4899'];
 const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 /* ============================================
@@ -113,38 +113,42 @@ const MONTHS = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', '
    ============================================ */
 
 const ChartModeTab = ({ active, icon: Icon, label, onClick }) => (
-    <button onClick={onClick} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${active ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50 border border-transparent'}`}>
+    <button onClick={onClick} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-button text-xs font-medium transition-colors duration-150 ${active ? 'bg-terra-50 text-terra-400 border border-terra-200' : 'text-sand-500 hover:bg-sand-100 hover:text-sand-700 border border-transparent'}`}>
         <Icon size={13} />{label}
     </button>
 );
 
 const Toggle = ({ checked, onChange }) => (
-    <div onClick={(e) => { e.preventDefault(); onChange(); }} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${checked ? 'bg-blue-600' : 'bg-slate-700'}`}>
-        <div className={`bg-white w-4 h-4 rounded-full shadow-md transform duration-300 ${checked ? 'translate-x-5' : 'translate-x-0'}`}></div>
+    <div onClick={(e) => { e.preventDefault(); onChange(); }} className={`w-11 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors duration-300 ${checked ? 'bg-terra-400' : 'bg-sand-300'}`}>
+        <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform duration-300 ${checked ? 'translate-x-5' : 'translate-x-0'}`}></div>
     </div>
 );
 
 const LayoutIcon = ({ icon: Icon }) => (
-    <div className="p-1.5 bg-slate-700/50 rounded text-slate-400"><Icon size={14} /></div>
+    <div className="p-1.5 bg-sand-100 rounded text-sand-500"><Icon size={14} /></div>
 );
 
 const AlertItem = ({ condition, icon: Icon, color, title, desc, fallback }) => {
     const cs = {
-        amber: 'bg-amber-500/10 border-amber-500/20 text-amber-400',
-        blue: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
-        emerald: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
-        red: 'bg-red-500/10 border-red-500/20 text-red-400',
-        indigo: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400',
+        amber:   'bg-warning-light border-warning/20 text-warning',
+        blue:    'bg-info-light border-info/20 text-info',
+        emerald: 'bg-success-light border-success/20 text-success',
+        red:     'bg-danger-light border-danger/20 text-danger',
+        indigo:  'bg-info-light border-info/20 text-info',
     };
-    const render = (I, c, t, d) => (
-        <div className={`flex gap-3 items-start p-3 rounded-xl border ${cs[c].split(' ').slice(0, 2).join(' ')}`}>
-            <I className={`${cs[c].split(' ').pop()} shrink-0 mt-0.5`} size={18} />
-            <div>
-                <p className={`${cs[c].split(' ').pop()} text-sm font-semibold`}>{t}</p>
-                <p className="text-slate-400 text-xs mt-1">{d}</p>
+    const render = (I, c, t, d) => {
+        const cls = cs[c] || cs.blue;
+        const [bg, border, textCls] = cls.split(' ');
+        return (
+            <div className={`flex gap-3 items-start p-3 rounded-soft border ${bg} ${border}`}>
+                <I className={`${textCls} shrink-0 mt-0.5`} size={17} />
+                <div>
+                    <p className={`${textCls} text-sm font-semibold`}>{t}</p>
+                    <p className="text-sand-600 text-xs mt-1">{d}</p>
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
     if (condition) return render(Icon, color, title, desc);
     if (fallback) return render(fallback.icon, fallback.color, fallback.title, fallback.desc);
     return null;
@@ -154,10 +158,6 @@ const AlertItem = ({ condition, icon: Icon, color, title, desc, fallback }) => {
    HELPERS
    ============================================ */
 
-/**
- * Calcula la porció del subtotal d'una factura que pertany a un rang de mesos concret.
- * Usa distributeInvoiceByMonth per obtindre la distribució proporcional.
- */
 const getDistributedAmount = (invoice, targetYear, quarterFilter) => {
     const dist = distributeInvoiceByMonth(invoice, 'subtotal');
     let total = 0;
@@ -173,20 +173,12 @@ const getDistributedAmount = (invoice, targetYear, quarterFilter) => {
     return total;
 };
 
-/**
- * Calcula ingressos i gastos per mes usant distribució proporcional.
- * Les factures amb fechaFin distribueixen el subtotal proporcionalment
- * entre els mesos que cobreix el projecte (per dies naturals).
- * Les despeses s'assignen al mes de la seua data (sense distribució).
- */
 const getMonthlyData = (yearInvoices, yearExpenses, monthRange) => {
-    // Pre-calcular distribucions de totes les factures
     const monthTotals = {};
     monthRange.forEach(m => { monthTotals[m] = 0; });
 
     yearInvoices.forEach(inv => {
         const dist = distributeInvoiceByMonth(inv, 'subtotal');
-        // dist keys són "year-month", ex: "2025-6" per juliol
         Object.entries(dist).forEach(([key, amount]) => {
             const monthIdx = parseInt(key.split('-')[1], 10);
             if (monthIdx in monthTotals) {
@@ -239,7 +231,6 @@ export const Dashboard = () => {
         );
     };
 
-    // Anys disponibles
     const years = useMemo(() => {
         const u = new Set([
             ...invoices.map(i => new Date(i.fecha).getFullYear()),
@@ -249,7 +240,6 @@ export const Dashboard = () => {
         return Array.from(u).sort((a, b) => b - a);
     }, [invoices, expenses, currentYear]);
 
-    // Filtre de dates bàsic (per data exacta - usat per despeses)
     const checkDateForYear = (dateStr, year) => {
         const date = new Date(dateStr);
         if (date.getFullYear() !== year) return false;
@@ -257,36 +247,28 @@ export const Dashboard = () => {
         return getQuarter(date) === parseInt(filter.quarter);
     };
 
-    /**
-     * Comprova si una factura "toca" un any/trimestre concret,
-     * considerant que el projecte pot abastar múltiples mesos.
-     * Inclou factures on [fecha, fechaFin] interseca el període filtrat.
-     */
     const invoiceTouchesYear = (inv, year) => {
         const start = new Date(inv.fecha);
         const end = inv.fechaFin ? new Date(inv.fechaFin) : start;
         const actualEnd = end >= start ? end : start;
 
         if (filter.quarter === 'all') {
-            // L'any complet: [1 gen, 31 des]
             const periodStart = new Date(year, 0, 1);
             const periodEnd = new Date(year, 11, 31);
             return start <= periodEnd && actualEnd >= periodStart;
         } else {
             const q = parseInt(filter.quarter);
             const periodStart = new Date(year, (q - 1) * 3, 1);
-            const periodEnd = new Date(year, q * 3, 0); // últim dia del trimestre
+            const periodEnd = new Date(year, q * 3, 0);
             return start <= periodEnd && actualEnd >= periodStart;
         }
     };
 
-    // Dades filtrades any principal
     const filteredData = useMemo(() => ({
         invoices: invoices.filter(i => invoiceTouchesYear(i, filter.year) && i.estado !== 'anulada'),
         expenses: expenses.filter(e => checkDateForYear(e.fecha, filter.year))
     }), [invoices, expenses, filter]);
 
-    // Dades filtrades anys comparació
     const compareData = useMemo(() => {
         const r = {};
         compareYears.forEach(year => {
@@ -300,7 +282,6 @@ export const Dashboard = () => {
 
     const allCompareYears = [filter.year, ...compareYears];
 
-    // Estadístiques
     const stats = useMemo(() => {
         const totalIngresos = filteredData.invoices.reduce((s, i) => s + getDistributedAmount(i, filter.year, filter.quarter), 0);
         const totalGastos = filteredData.expenses.reduce((s, e) => s + (e.baseImponible || 0), 0);
@@ -327,7 +308,6 @@ export const Dashboard = () => {
         };
     }, [filteredData, invoices, expenses, filter]);
 
-    // Month range helpers
     const monthRange = useMemo(() => {
         const start = filter.quarter === 'all' ? 0 : (parseInt(filter.quarter) - 1) * 3;
         const end = filter.quarter === 'all' ? 12 : start + 3;
@@ -336,7 +316,6 @@ export const Dashboard = () => {
 
     const monthLabels = useMemo(() => monthRange.map(i => MONTHS[i]), [monthRange]);
 
-    // Chart data principal (sense comparació)
     const chartData = useMemo(() => {
         const main = getMonthlyData(filteredData.invoices, filteredData.expenses, monthRange);
         return monthLabels.map((name, idx) => ({
@@ -345,7 +324,6 @@ export const Dashboard = () => {
         }));
     }, [filteredData, monthRange, monthLabels]);
 
-    // Chart data comparació multi-any
     const comparisonChartData = useMemo(() => {
         if (compareYears.length === 0) return chartData;
         const main = getMonthlyData(filteredData.invoices, filteredData.expenses, monthRange);
@@ -369,7 +347,6 @@ export const Dashboard = () => {
         });
     }, [chartData, compareYears, compareData, filteredData, filter, monthRange, monthLabels]);
 
-    // YoY % data
     const yoyChartData = useMemo(() => {
         if (compareYears.length === 0) return [];
         const refYear = compareYears[0];
@@ -386,7 +363,6 @@ export const Dashboard = () => {
         });
     }, [filteredData, compareData, compareYears, monthRange, monthLabels]);
 
-    // Acumulat
     const accumulatedChartData = useMemo(() => {
         const main = getMonthlyData(filteredData.invoices, filteredData.expenses, monthRange);
         const cmp = {};
@@ -410,7 +386,6 @@ export const Dashboard = () => {
         });
     }, [filteredData, compareData, compareYears, filter, allCompareYears, monthRange, monthLabels]);
 
-    // Resum comparatiu (taula)
     const yearSummaries = useMemo(() => {
         return allCompareYears.map((year, idx) => {
             const d = idx === 0 ? filteredData : compareData[year];
@@ -424,7 +399,6 @@ export const Dashboard = () => {
         }).filter(Boolean);
     }, [filteredData, compareData, allCompareYears]);
 
-    // Pie charts
     const expensesByCategory = useMemo(() => {
         const c = {};
         filteredData.expenses.forEach(e => { c[e.categoria] = (c[e.categoria] || 0) + e.total; });
@@ -451,63 +425,63 @@ export const Dashboard = () => {
             {/* HEADER */}
             <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-white tracking-tight">Panel de Control</h1>
-                    <p className="text-slate-400 mt-1 flex items-center gap-2">
-                        <Activity size={16} className="text-blue-400" />Visión general de tu actividad económica
+                    <h1 className="font-serif text-display text-sand-900">Panel de Control</h1>
+                    <p className="text-sand-600 mt-1 flex items-center gap-2 text-sm">
+                        <Activity size={15} className="text-terra-400" />Visión general de tu actividad económica
                     </p>
                 </div>
                 <div className="flex items-center flex-wrap gap-3">
                     {/* Filtre Any/Trimestre */}
-                    <Card className="flex items-center gap-2 px-3 py-1.5 !bg-slate-900/80 !border-slate-800">
-                        <Filter size={14} className="text-slate-400" />
-                        <select value={filter.year} onChange={(e) => setFilter({ ...filter, year: parseInt(e.target.value) })} className="bg-transparent text-sm text-white font-medium focus:outline-none cursor-pointer">
-                            {years.map(y => <option key={y} value={y} className="bg-slate-800">{y}</option>)}
+                    <div className="bg-white border border-sand-300 rounded-soft flex items-center gap-2 px-3 py-1.5 shadow-card">
+                        <Filter size={14} className="text-sand-400" />
+                        <select value={filter.year} onChange={(e) => setFilter({ ...filter, year: parseInt(e.target.value) })} className="bg-transparent text-sm text-sand-800 font-medium focus:outline-none cursor-pointer">
+                            {years.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
-                        <div className="w-px h-4 bg-slate-700 mx-1"></div>
-                        <select value={filter.quarter} onChange={(e) => setFilter({ ...filter, quarter: e.target.value })} className="bg-transparent text-sm text-white font-medium focus:outline-none cursor-pointer">
-                            <option value="all" className="bg-slate-800">Todo el año</option>
-                            <option value="1" className="bg-slate-800">1º Trimestre</option>
-                            <option value="2" className="bg-slate-800">2º Trimestre</option>
-                            <option value="3" className="bg-slate-800">3º Trimestre</option>
-                            <option value="4" className="bg-slate-800">4º Trimestre</option>
+                        <div className="w-px h-4 bg-sand-300 mx-1"></div>
+                        <select value={filter.quarter} onChange={(e) => setFilter({ ...filter, quarter: e.target.value })} className="bg-transparent text-sm text-sand-800 font-medium focus:outline-none cursor-pointer">
+                            <option value="all">Todo el año</option>
+                            <option value="1">1º Trimestre</option>
+                            <option value="2">2º Trimestre</option>
+                            <option value="3">3º Trimestre</option>
+                            <option value="4">4º Trimestre</option>
                         </select>
-                    </Card>
+                    </div>
 
                     {/* Selector comparació anys */}
                     {years.length > 1 && (
-                        <Card className="flex items-center gap-2 px-3 py-1.5 !bg-slate-900/80 !border-slate-800">
-                            <GitCompareArrows size={14} className="text-indigo-400" />
-                            <span className="text-xs text-slate-400 font-medium">Comparar:</span>
+                        <div className="bg-white border border-sand-300 rounded-soft flex items-center gap-2 px-3 py-1.5 shadow-card">
+                            <GitCompareArrows size={14} className="text-info" />
+                            <span className="text-xs text-sand-500 font-medium">Comparar:</span>
                             <div className="flex gap-1">
                                 {years.filter(y => y !== filter.year).map(y => (
                                     <button key={y} onClick={() => toggleCompareYear(y)}
-                                        className={`px-2 py-0.5 rounded text-xs font-bold transition-all ${compareYears.includes(y) ? 'bg-indigo-500/30 text-indigo-300 border border-indigo-500/40' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800 border border-transparent'}`}>
+                                        className={`px-2 py-0.5 rounded-badge text-xs font-bold transition-colors ${compareYears.includes(y) ? 'bg-info-light text-info border border-info/20' : 'text-sand-500 hover:text-sand-700 hover:bg-sand-100 border border-transparent'}`}>
                                         {y}
                                     </button>
                                 ))}
                             </div>
-                        </Card>
+                        </div>
                     )}
 
-                    <Button variant="ghost" size="sm" icon={Settings} onClick={() => setShowConfig(true)}>Personalizar</Button>
+                    <Button variant="secondary" size="sm" icon={Settings} onClick={() => setShowConfig(true)}>Personalizar</Button>
                 </div>
             </div>
 
             {/* CONFIG MODAL */}
             <Modal open={showConfig} onClose={() => setShowConfig(false)} title="Personalizar Dashboard" size="sm">
                 <div className="space-y-4">
-                    <p className="text-sm text-slate-400">Selecciona los elementos que quieres ver en tu panel de control.</p>
-                    <div className="space-y-3">
+                    <p className="text-sm text-sand-600">Selecciona los elementos que quieres ver en tu panel de control.</p>
+                    <div className="space-y-2">
                         {[
-                            { key: 'showStats', icon: Briefcase, label: 'Resumen Financiero' },
-                            { key: 'showMainChart', icon: TrendingUp, label: 'Gráficos de Evolución' },
-                            { key: 'showAlerts', icon: AlertCircle, label: 'Alertas y Estado' },
-                            { key: 'showDistribution', icon: Wallet, label: 'Distribución de Gastos' },
-                            { key: 'showClients', icon: Euro, label: 'Ingresos por Cliente' },
-                            { key: 'showRecent', icon: FileText, label: 'Últimas Facturas' },
+                            { key: 'showStats',       icon: Briefcase,    label: 'Resumen Financiero' },
+                            { key: 'showMainChart',   icon: TrendingUp,   label: 'Gráficos de Evolución' },
+                            { key: 'showAlerts',      icon: AlertCircle,  label: 'Alertas y Estado' },
+                            { key: 'showDistribution',icon: Wallet,       label: 'Distribución de Gastos' },
+                            { key: 'showClients',     icon: Euro,         label: 'Ingresos por Cliente' },
+                            { key: 'showRecent',      icon: FileText,     label: 'Últimas Facturas' },
                         ].map(({ key, icon, label }) => (
-                            <label key={key} className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 cursor-pointer border border-slate-700/50">
-                                <span className="flex items-center gap-2 text-white"><LayoutIcon icon={icon} /> {label}</span>
+                            <label key={key} className="flex items-center justify-between p-3 rounded-soft bg-sand-50 hover:bg-sand-100 cursor-pointer border border-sand-300 transition-colors">
+                                <span className="flex items-center gap-2 text-sand-800"><LayoutIcon icon={icon} /> {label}</span>
                                 <Toggle checked={dashboardConfig[key]} onChange={() => toggleSection(key)} />
                             </label>
                         ))}
@@ -516,43 +490,38 @@ export const Dashboard = () => {
                 </div>
             </Modal>
 
-            {/* STAT CARDS amb tendència real vs any anterior */}
+            {/* STAT CARDS */}
             {dashboardConfig.showStats && (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
                     <StatCard icon={Euro} label="Ingresos" value={formatCurrency(stats.totalIngresos)}
-                        subValue={`Base Imponible · vs ${stats.prevYear}`} color="blue"
+                        subValue={`Base Imponible · vs ${stats.prevYear}`} color="success"
                         trend={formatGrowth(stats.growth.ingresos)} trendUp={stats.growth.ingresos >= 0} />
                     <StatCard icon={Wallet} label="Gastos" value={formatCurrency(stats.totalGastos)}
-                        subValue={`Deducibles · vs ${stats.prevYear}`} color="red"
+                        subValue={`Deducibles · vs ${stats.prevYear}`} color="danger"
                         trend={formatGrowth(stats.growth.gastos)} trendUp={stats.growth.gastos <= 0} />
                     <StatCard icon={Briefcase} label="Beneficio" value={formatCurrency(stats.beneficio)}
-                        subValue={`Rendimiento · vs ${stats.prevYear}`} color="emerald"
+                        subValue={`Rendimiento · vs ${stats.prevYear}`} color="terra"
                         trend={formatGrowth(stats.growth.beneficio)} trendUp={stats.growth.beneficio >= 0} />
                     <StatCard icon={Clock} label="Pendiente" value={formatCurrency(stats.importePendiente)}
                         subValue={`${stats.pendientes} factura${stats.pendientes !== 1 ? 's' : ''} sin cobrar`}
-                        color="amber" trend={stats.pendientes.toString()} trendUp={false} />
+                        color="warning" trend={stats.pendientes.toString()} trendUp={false} />
                 </div>
             )}
 
             {/* GRÀFIC PRINCIPAL + PANEL LATERAL */}
-            {/* El grid s'adapta: si el chart principal és visible ocupa 2/3 columnes,
-                si no, el panel lateral s'expandeix. Si cap dels dos és visible no renderitza res. */}
             {(dashboardConfig.showMainChart || dashboardConfig.showAlerts || dashboardConfig.showClients || dashboardConfig.showDistribution) && (
             <div className={`grid grid-cols-1 gap-6 lg:gap-8 ${
-                dashboardConfig.showMainChart
-                    ? 'lg:grid-cols-3'
-                    : 'lg:grid-cols-2'
+                dashboardConfig.showMainChart ? 'lg:grid-cols-3' : 'lg:grid-cols-2'
             }`}>
                 {dashboardConfig.showMainChart && (
-                    <Card className="lg:col-span-2 p-6 flex flex-col relative overflow-hidden" variant="glass"
+                    <Card className="lg:col-span-2 p-6 flex flex-col"
                         style={{ minHeight: compareYears.length > 0 ? '500px' : '420px' }}>
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none"></div>
 
                         {/* Capçalera + mode tabs */}
-                        <div className="flex items-start justify-between mb-4 relative z-10 gap-4 flex-wrap">
+                        <div className="flex items-start justify-between mb-4 gap-4 flex-wrap">
                             <div>
-                                <h3 className="text-lg font-bold text-white">Evolución Financiera</h3>
-                                <p className="text-slate-400 text-sm">
+                                <h3 className="font-serif text-subheading text-sand-900">Evolución Financiera</h3>
+                                <p className="text-sand-500 text-sm">
                                     {filter.year}{compareYears.length > 0 ? ` vs ${compareYears.join(', ')}` : ''}
                                     {filter.quarter !== 'all' ? ` · T${filter.quarter}` : ''}
                                 </p>
@@ -571,10 +540,10 @@ export const Dashboard = () => {
 
                         {/* Filtre de mètrica */}
                         {compareYears.length > 0 && (chartMode === 'compare' || chartMode === 'evolution') && (
-                            <div className="flex gap-1.5 mb-4 relative z-10">
+                            <div className="flex gap-1.5 mb-4">
                                 {[{ key: 'both', label: 'Todo' }, { key: 'ingresos', label: 'Ingresos' }, { key: 'gastos', label: 'Gastos' }, { key: 'beneficio', label: 'Beneficio' }].map(m => (
                                     <button key={m.key} onClick={() => setCompareMetric(m.key)}
-                                        className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${compareMetric === m.key ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}>
+                                        className={`px-2.5 py-1 rounded-badge text-[11px] font-semibold transition-colors ${compareMetric === m.key ? 'bg-sand-200 text-sand-800' : 'text-sand-400 hover:text-sand-600'}`}>
                                         {m.label}
                                     </button>
                                 ))}
@@ -582,56 +551,53 @@ export const Dashboard = () => {
                         )}
 
                         {/* CHARTS */}
-                        <div className="flex-1 w-full min-h-0 relative z-10">
+                        <div className="flex-1 w-full min-h-0">
                             <ResponsiveContainer width="100%" height="100%">
-                                {/* EVOLUCIÓ sense comparació */}
                                 {chartMode === 'evolution' && compareYears.length === 0 ? (
                                     <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                         <defs>
                                             <linearGradient id="colorIngresos" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4} />
-                                                <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                                <stop offset="5%" stopColor="#C15F3C" stopOpacity={0.2} />
+                                                <stop offset="95%" stopColor="#C15F3C" stopOpacity={0} />
                                             </linearGradient>
                                             <linearGradient id="colorGastos" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#ef4444" stopOpacity={0.4} />
-                                                <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
+                                                <stop offset="5%" stopColor="#9C9A91" stopOpacity={0.2} />
+                                                <stop offset="95%" stopColor="#9C9A91" stopOpacity={0} />
                                             </linearGradient>
                                         </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                                        <Tooltip content={<CustomTooltip />} />
-                                        <Area type="monotone" dataKey="ingresos" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorIngresos)" name="Ingresos" activeDot={{ r: 6, strokeWidth: 0, fill: '#60a5fa' }} animationDuration={1500} />
-                                        <Area type="monotone" dataKey="gastos" stroke="#ef4444" strokeWidth={3} fillOpacity={1} fill="url(#colorGastos)" name="Gastos" activeDot={{ r: 6, strokeWidth: 0, fill: '#f87171' }} animationDuration={1500} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
+                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#C15F3C', strokeDasharray: '4 4', strokeWidth: 1 }} />
+                                        <Area type="monotone" dataKey="ingresos" stroke="#C15F3C" strokeWidth={2.5} fillOpacity={1} fill="url(#colorIngresos)" name="Ingresos" activeDot={{ r: 5, strokeWidth: 0, fill: '#C15F3C' }} animationDuration={1500} />
+                                        <Area type="monotone" dataKey="gastos" stroke="#9C9A91" strokeWidth={2.5} fillOpacity={1} fill="url(#colorGastos)" name="Gastos" activeDot={{ r: 5, strokeWidth: 0, fill: '#9C9A91' }} animationDuration={1500} />
                                     </AreaChart>
 
-                                /* EVOLUCIÓ amb comparació (lines) */
                                 ) : chartMode === 'evolution' && compareYears.length > 0 ? (
                                     <LineChart data={comparisonChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                                        <Tooltip content={<ComparisonTooltip />} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
+                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <Tooltip content={<ComparisonTooltip />} cursor={{ stroke: '#C15F3C', strokeDasharray: '4 4', strokeWidth: 1 }} />
                                         {allCompareYears.map((year, yIdx) => {
                                             const c = YEAR_COLORS[yIdx] || YEAR_COLORS[0];
                                             const main = yIdx === 0;
                                             return (
                                                 <React.Fragment key={year}>
-                                                    {(compareMetric === 'both' || compareMetric === 'ingresos') && <Line type="monotone" dataKey={`ingresos_${year}`} stroke={c.ingresos} strokeWidth={main ? 3 : 2} strokeDasharray={main ? undefined : '6 3'} dot={false} activeDot={{ r: 5, strokeWidth: 0, fill: c.ingresos }} name={`Ingressos ${year}`} animationDuration={1500} />}
-                                                    {(compareMetric === 'both' || compareMetric === 'gastos') && <Line type="monotone" dataKey={`gastos_${year}`} stroke={c.gastos} strokeWidth={main ? 3 : 2} strokeDasharray={main ? undefined : '6 3'} dot={false} activeDot={{ r: 5, strokeWidth: 0, fill: c.gastos }} name={`Gastos ${year}`} animationDuration={1500} />}
-                                                    {compareMetric === 'beneficio' && <Line type="monotone" dataKey={`beneficio_${year}`} stroke={c.benefici} strokeWidth={main ? 3 : 2} strokeDasharray={main ? undefined : '6 3'} dot={false} activeDot={{ r: 5, strokeWidth: 0, fill: c.benefici }} name={`Benefici ${year}`} animationDuration={1500} />}
+                                                    {(compareMetric === 'both' || compareMetric === 'ingresos') && <Line type="monotone" dataKey={`ingresos_${year}`} stroke={c.ingresos} strokeWidth={main ? 2.5 : 2} strokeDasharray={main ? undefined : '6 3'} dot={false} activeDot={{ r: 5, strokeWidth: 0, fill: c.ingresos }} name={`Ingressos ${year}`} animationDuration={1500} />}
+                                                    {(compareMetric === 'both' || compareMetric === 'gastos') && <Line type="monotone" dataKey={`gastos_${year}`} stroke={c.gastos} strokeWidth={main ? 2.5 : 2} strokeDasharray={main ? undefined : '6 3'} dot={false} activeDot={{ r: 5, strokeWidth: 0, fill: c.gastos }} name={`Gastos ${year}`} animationDuration={1500} />}
+                                                    {compareMetric === 'beneficio' && <Line type="monotone" dataKey={`beneficio_${year}`} stroke={c.benefici} strokeWidth={main ? 2.5 : 2} strokeDasharray={main ? undefined : '6 3'} dot={false} activeDot={{ r: 5, strokeWidth: 0, fill: c.benefici }} name={`Benefici ${year}`} animationDuration={1500} />}
                                                 </React.Fragment>
                                             );
                                         })}
                                     </LineChart>
 
-                                /* COMPARAR (barres agrupades) */
                                 ) : chartMode === 'compare' ? (
                                     <BarChart data={comparisonChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                                        <Tooltip content={<ComparisonTooltip />} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
+                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <Tooltip content={<ComparisonTooltip />} cursor={{ fill: '#F4F3EE' }} />
                                         {allCompareYears.map((year, yIdx) => {
                                             const c = YEAR_COLORS[yIdx] || YEAR_COLORS[0];
                                             const main = yIdx === 0;
@@ -645,40 +611,38 @@ export const Dashboard = () => {
                                         })}
                                     </BarChart>
 
-                                /* YoY % */
                                 ) : chartMode === 'yoy' ? (
                                     <ComposedChart data={yoyChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
+                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
                                         <Tooltip content={<YoYTooltip />} />
-                                        <ReferenceLine y={0} stroke="#475569" strokeWidth={1.5} />
-                                        <Bar dataKey={'Δ Ingresos'} fill="#3b82f6" fillOpacity={0.7} radius={[3, 3, 0, 0]} name={'Δ Ingresos'} animationDuration={1200} />
-                                        <Bar dataKey={'Δ Gastos'} fill="#ef4444" fillOpacity={0.7} radius={[3, 3, 0, 0]} name={'Δ Gastos'} animationDuration={1200} />
-                                        <Line type="monotone" dataKey={'Δ Benefici'} stroke="#10b981" strokeWidth={2.5} dot={{ fill: '#10b981', r: 4 }} name={'Δ Benefici'} animationDuration={1500} />
+                                        <ReferenceLine y={0} stroke="#D4D0C8" strokeWidth={1.5} />
+                                        <Bar dataKey={'Δ Ingresos'} fill="#C15F3C" fillOpacity={0.7} radius={[3, 3, 0, 0]} name={'Δ Ingresos'} animationDuration={1200} />
+                                        <Bar dataKey={'Δ Gastos'} fill="#9C9A91" fillOpacity={0.7} radius={[3, 3, 0, 0]} name={'Δ Gastos'} animationDuration={1200} />
+                                        <Line type="monotone" dataKey={'Δ Benefici'} stroke="#2D7A4F" strokeWidth={2.5} dot={{ fill: '#2D7A4F', r: 4 }} name={'Δ Benefici'} animationDuration={1500} />
                                     </ComposedChart>
 
-                                /* ACUMULAT */
                                 ) : chartMode === 'accumulated' ? (
                                     <AreaChart data={accumulatedChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                         <defs>
                                             {allCompareYears.map((year, yIdx) => (
                                                 <linearGradient key={year} id={`accIng${year}`} x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor={(YEAR_COLORS[yIdx] || YEAR_COLORS[0]).ingresos} stopOpacity={yIdx === 0 ? 0.3 : 0.1} />
+                                                    <stop offset="5%" stopColor={(YEAR_COLORS[yIdx] || YEAR_COLORS[0]).ingresos} stopOpacity={yIdx === 0 ? 0.2 : 0.08} />
                                                     <stop offset="95%" stopColor={(YEAR_COLORS[yIdx] || YEAR_COLORS[0]).ingresos} stopOpacity={0} />
                                                 </linearGradient>
                                             ))}
                                         </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                                        <Tooltip content={<ComparisonTooltip />} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
+                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <Tooltip content={<ComparisonTooltip />} cursor={{ stroke: '#C15F3C', strokeDasharray: '4 4', strokeWidth: 1 }} />
                                         {allCompareYears.map((year, yIdx) => {
                                             const c = YEAR_COLORS[yIdx] || YEAR_COLORS[0];
                                             const main = yIdx === 0;
                                             return (
                                                 <React.Fragment key={year}>
-                                                    <Area type="monotone" dataKey={`Ingressos ${year}`} stroke={c.ingresos} strokeWidth={main ? 3 : 2} strokeDasharray={main ? undefined : '6 3'} fillOpacity={1} fill={`url(#accIng${year})`} name={`Ingressos ${year}`} activeDot={{ r: 5, strokeWidth: 0, fill: c.ingresos }} animationDuration={1500} />
+                                                    <Area type="monotone" dataKey={`Ingressos ${year}`} stroke={c.ingresos} strokeWidth={main ? 2.5 : 2} strokeDasharray={main ? undefined : '6 3'} fillOpacity={1} fill={`url(#accIng${year})`} name={`Ingressos ${year}`} activeDot={{ r: 5, strokeWidth: 0, fill: c.ingresos }} animationDuration={1500} />
                                                     <Area type="monotone" dataKey={`Gastos ${year}`} stroke={c.gastos} strokeWidth={main ? 2 : 1.5} strokeDasharray={main ? '4 2' : '6 3'} fillOpacity={0} name={`Gastos ${year}`} activeDot={{ r: 4, strokeWidth: 0, fill: c.gastos }} animationDuration={1500} />
                                                 </React.Fragment>
                                             );
@@ -692,19 +656,19 @@ export const Dashboard = () => {
                         </div>
 
                         {/* Llegenda dinàmica */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-slate-800/50 relative z-10">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 pt-3 border-t border-sand-200">
                             {compareYears.length === 0 ? (
                                 <>
-                                    <span className="flex items-center gap-1.5 text-xs text-slate-400"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Ingresos</span>
-                                    <span className="flex items-center gap-1.5 text-xs text-slate-400"><div className="w-2 h-2 rounded-full bg-red-500"></div> Gastos</span>
+                                    <span className="flex items-center gap-1.5 text-xs text-sand-500"><div className="w-2 h-2 rounded-full bg-terra-400"></div> Ingresos</span>
+                                    <span className="flex items-center gap-1.5 text-xs text-sand-500"><div className="w-2 h-2 rounded-full bg-sand-500"></div> Gastos</span>
                                 </>
                             ) : allCompareYears.map((year, yIdx) => {
                                 const c = YEAR_COLORS[yIdx] || YEAR_COLORS[0];
                                 return (
                                     <div key={year} className="flex items-center gap-2">
-                                        <span className={`text-[10px] font-bold uppercase tracking-wider ${yIdx === 0 ? 'text-white' : 'text-slate-500'}`}>{year}</span>
-                                        <span className="flex items-center gap-1 text-xs text-slate-400"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.ingresos }}></div>Ing</span>
-                                        <span className="flex items-center gap-1 text-xs text-slate-400"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.gastos }}></div>Gas</span>
+                                        <span className={`text-[10px] font-bold uppercase tracking-wider ${yIdx === 0 ? 'text-sand-800' : 'text-sand-400'}`}>{year}</span>
+                                        <span className="flex items-center gap-1 text-xs text-sand-500"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.ingresos }}></div>Ing</span>
+                                        <span className="flex items-center gap-1 text-xs text-sand-500"><div className="w-2 h-2 rounded-full" style={{ backgroundColor: c.gastos }}></div>Gas</span>
                                     </div>
                                 );
                             })}
@@ -712,10 +676,6 @@ export const Dashboard = () => {
                     </Card>
                 )}
 
-                {/* PANEL LATERAL:
-                    - Quan showMainChart=true → ocupa 1 columna (col 3 del grid 3 cols)
-                    - Quan showMainChart=false → mostra els widgets en grid de 2 cols expandit
-                    - Només es renderitza si hi ha algun widget lateral visible */}
                 {(dashboardConfig.showAlerts || dashboardConfig.showClients || dashboardConfig.showDistribution) && (
                     <div className={`flex flex-col gap-6 ${
                         !dashboardConfig.showMainChart
@@ -723,8 +683,10 @@ export const Dashboard = () => {
                             : 'lg:col-span-1'
                     }`}>
                         {dashboardConfig.showAlerts && (
-                            <Card className="p-6" variant="gradient">
-                                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2"><AlertCircle size={20} className="text-amber-400" />Estado y Alertas</h3>
+                            <Card className="p-6">
+                                <h3 className="font-serif text-subheading text-sand-900 mb-4 flex items-center gap-2">
+                                    <AlertCircle size={18} className="text-warning" />Estado y Alertas
+                                </h3>
                                 <div className="space-y-3">
                                     {taxDeadline.next.urgent ? (
                                         <AlertItem condition={true} icon={Bell} color="red" title={`¡URGENTE! ${taxDeadline.next.model}`} desc={`Solo ${taxDeadline.next.daysUntil} días para presentar. Fecha límite: ${taxDeadline.next.label}.`} />
@@ -748,8 +710,8 @@ export const Dashboard = () => {
                         )}
 
                         {dashboardConfig.showClients && (
-                            <Card className="p-6 flex-1 flex flex-col min-h-[300px]" variant="default">
-                                <h3 className="text-lg font-bold text-white mb-2">Ingresos por Cliente</h3>
+                            <Card className="p-6 flex flex-col min-h-[300px]">
+                                <h3 className="font-serif text-subheading text-sand-900 mb-2">Ingresos por Cliente</h3>
                                 <div className="flex-1 w-full relative">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <PieChart>
@@ -760,15 +722,15 @@ export const Dashboard = () => {
                                         </PieChart>
                                     </ResponsiveContainer>
                                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                                        <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Total</p>
-                                        <p className="text-sm font-bold text-white">{formatCurrency(stats.totalIngresos)}</p>
+                                        <p className="text-xs text-sand-500 uppercase font-bold tracking-wider">Total</p>
+                                        <p className="text-sm font-bold text-sand-900">{formatCurrency(stats.totalIngresos)}</p>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-x-2 gap-y-2 mt-4">
                                     {clientsByRevenue.slice(0, 4).map((e, i) => (
                                         <div key={i} className="flex items-center gap-2 text-xs">
                                             <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}></div>
-                                            <span className="text-slate-300 truncate">{e.name}</span>
+                                            <span className="text-sand-600 truncate">{e.name}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -776,8 +738,8 @@ export const Dashboard = () => {
                         )}
 
                         {dashboardConfig.showDistribution && (
-                            <Card className="p-6 flex-1 flex flex-col min-h-[300px]" variant="default">
-                                <h3 className="text-lg font-bold text-white mb-2">Gastos por Categoría</h3>
+                            <Card className="p-6 flex flex-col min-h-[300px]">
+                                <h3 className="font-serif text-subheading text-sand-900 mb-2">Gastos por Categoría</h3>
                                 <div className="flex-1 w-full relative">
                                     <ResponsiveContainer width="100%" height="100%">
                                         <PieChart>
@@ -788,15 +750,15 @@ export const Dashboard = () => {
                                         </PieChart>
                                     </ResponsiveContainer>
                                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
-                                        <p className="text-xs text-slate-500 uppercase font-bold tracking-wider">Total</p>
-                                        <p className="text-sm font-bold text-white">{formatCurrency(stats.totalGastos)}</p>
+                                        <p className="text-xs text-sand-500 uppercase font-bold tracking-wider">Total</p>
+                                        <p className="text-sm font-bold text-sand-900">{formatCurrency(stats.totalGastos)}</p>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-x-2 gap-y-2 mt-4">
                                     {expensesByCategory.slice(0, 4).map((e, i) => (
                                         <div key={i} className="flex items-center gap-2 text-xs">
                                             <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}></div>
-                                            <span className="text-slate-300 truncate">{e.name}</span>
+                                            <span className="text-sand-600 truncate">{e.name}</span>
                                         </div>
                                     ))}
                                 </div>
@@ -809,51 +771,51 @@ export const Dashboard = () => {
 
             {/* TAULA COMPARATIVA MULTI-ANY */}
             {compareYears.length > 0 && (
-                <Card className="overflow-hidden border border-slate-800" variant="default">
-                    <div className="p-6 border-b border-slate-800/50 bg-slate-900/50">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                            <GitCompareArrows size={18} className="text-indigo-400" />
+                <Card className="overflow-hidden">
+                    <div className="px-6 py-4 border-b border-sand-300 bg-sand-50">
+                        <h3 className="font-serif text-subheading text-sand-900 flex items-center gap-2">
+                            <GitCompareArrows size={17} className="text-info" />
                             Comparativa {filter.quarter !== 'all' ? `T${filter.quarter}` : 'Anual'}: {allCompareYears.join(' vs ')}
                         </h3>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="bg-slate-900/50">
+                            <thead className="bg-sand-50 border-b border-sand-300">
                                 <tr>
-                                    <th className="text-left py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Any</th>
-                                    <th className="text-right py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Ingressos</th>
-                                    <th className="text-right py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Gastos</th>
-                                    <th className="text-right py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Benefici</th>
-                                    <th className="text-right py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Marge</th>
-                                    <th className="text-center py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Factures</th>
-                                    <th className="text-right py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Mitja/Fact.</th>
+                                    <th className="text-left py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Año</th>
+                                    <th className="text-right py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Ingresos</th>
+                                    <th className="text-right py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Gastos</th>
+                                    <th className="text-right py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Beneficio</th>
+                                    <th className="text-right py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Margen</th>
+                                    <th className="text-center py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Facturas</th>
+                                    <th className="text-right py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Media/Fact.</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-800/50">
+                            <tbody className="divide-y divide-sand-200">
                                 {yearSummaries.map((s, idx) => {
                                     const base = idx > 0 ? yearSummaries[0] : null;
                                     const dIng = base ? calcGrowth(s.ing, base.ing) : null;
                                     const dBen = base ? calcGrowth(s.ben, base.ben) : null;
                                     return (
-                                        <tr key={s.year} className={`transition-colors ${s.isMain ? 'bg-blue-500/5' : 'hover:bg-slate-800/30'}`}>
+                                        <tr key={s.year} className={`transition-colors ${s.isMain ? 'bg-terra-50' : 'hover:bg-sand-50'}`}>
                                             <td className="py-4 px-6">
-                                                <span className={`font-bold font-mono ${s.isMain ? 'text-blue-400' : 'text-slate-300'}`}>{s.year}</span>
-                                                {s.isMain && <span className="ml-2 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-semibold">ACTUAL</span>}
+                                                <span className={`font-bold font-mono ${s.isMain ? 'text-terra-500' : 'text-sand-700'}`}>{s.year}</span>
+                                                {s.isMain && <span className="ml-2 text-[10px] bg-terra-50 text-terra-400 px-1.5 py-0.5 rounded-badge font-semibold border border-terra-200">ACTUAL</span>}
                                             </td>
                                             <td className="py-4 px-6 text-right">
-                                                <span className="text-white font-bold">{formatCurrency(s.ing)}</span>
-                                                {dIng !== null && <span className={`ml-2 text-xs font-medium ${dIng < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatGrowth(dIng)}</span>}
+                                                <span className="text-sand-900 font-bold">{formatCurrency(s.ing)}</span>
+                                                {dIng !== null && <span className={`ml-2 text-xs font-medium ${dIng < 0 ? 'text-danger' : 'text-success'}`}>{formatGrowth(dIng)}</span>}
                                             </td>
-                                            <td className="py-4 px-6 text-right text-slate-300 font-medium">{formatCurrency(s.gas)}</td>
+                                            <td className="py-4 px-6 text-right text-sand-600 font-medium">{formatCurrency(s.gas)}</td>
                                             <td className="py-4 px-6 text-right">
-                                                <span className={`font-bold ${s.ben >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{formatCurrency(s.ben)}</span>
-                                                {dBen !== null && <span className={`ml-2 text-xs font-medium ${dBen < 0 ? 'text-red-400' : 'text-emerald-400'}`}>{formatGrowth(dBen)}</span>}
+                                                <span className={`font-bold ${s.ben >= 0 ? 'text-success' : 'text-danger'}`}>{formatCurrency(s.ben)}</span>
+                                                {dBen !== null && <span className={`ml-2 text-xs font-medium ${dBen < 0 ? 'text-danger' : 'text-success'}`}>{formatGrowth(dBen)}</span>}
                                             </td>
                                             <td className="py-4 px-6 text-right">
-                                                <span className={`font-mono text-sm font-bold ${s.margin >= 30 ? 'text-emerald-400' : s.margin >= 15 ? 'text-amber-400' : 'text-red-400'}`}>{s.margin.toFixed(1)}%</span>
+                                                <span className={`font-mono text-sm font-bold ${s.margin >= 30 ? 'text-success' : s.margin >= 15 ? 'text-warning' : 'text-danger'}`}>{s.margin.toFixed(1)}%</span>
                                             </td>
-                                            <td className="py-4 px-6 text-center text-slate-400 font-mono">{s.nf}</td>
-                                            <td className="py-4 px-6 text-right text-slate-300 font-medium">{formatCurrency(s.avg)}</td>
+                                            <td className="py-4 px-6 text-center text-sand-500 font-mono">{s.nf}</td>
+                                            <td className="py-4 px-6 text-right text-sand-600 font-medium">{formatCurrency(s.avg)}</td>
                                         </tr>
                                     );
                                 })}
@@ -865,37 +827,39 @@ export const Dashboard = () => {
 
             {/* ÚLTIMES FACTURES */}
             {dashboardConfig.showRecent && (
-                <Card className="overflow-hidden border border-slate-800" variant="default">
-                    <div className="p-6 border-b border-slate-800/50 flex items-center justify-between bg-slate-900/50">
-                        <h3 className="text-lg font-bold text-white flex items-center gap-2"><FileText size={18} className="text-blue-400" /> Últimas Facturas</h3>
+                <Card className="overflow-hidden">
+                    <div className="px-6 py-4 border-b border-sand-300 bg-sand-50 flex items-center justify-between">
+                        <h3 className="font-serif text-subheading text-sand-900 flex items-center gap-2">
+                            <FileText size={17} className="text-terra-400" /> Últimas Facturas
+                        </h3>
                         <Button variant="ghost" size="sm" className="text-xs">Ver todas</Button>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full">
-                            <thead className="bg-slate-900/50">
+                            <thead className="bg-sand-50 border-b border-sand-300">
                                 <tr>
-                                    <th className="text-left py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Número</th>
-                                    <th className="text-left py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Cliente</th>
-                                    <th className="text-left py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Fecha</th>
-                                    <th className="text-right py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Importe</th>
-                                    <th className="text-center py-4 px-6 text-xs font-semibold text-slate-500 uppercase tracking-wider">Estado</th>
+                                    <th className="text-left py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Número</th>
+                                    <th className="text-left py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Cliente</th>
+                                    <th className="text-left py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Fecha</th>
+                                    <th className="text-right py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Importe</th>
+                                    <th className="text-center py-3 px-6 text-xs font-semibold text-sand-500 uppercase tracking-wide">Estado</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-800/50">
+                            <tbody className="divide-y divide-sand-200">
                                 {invoices.slice().sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 5).map(inv => {
                                     const client = clients.find(c => c.id === inv.clienteId);
                                     return (
-                                        <tr key={inv.id} className="hover:bg-slate-800/30 transition-colors group">
-                                            <td className="py-4 px-6 text-white font-mono text-sm group-hover:text-blue-400 transition-colors">{inv.numero}</td>
-                                            <td className="py-4 px-6 text-slate-300 font-medium">{client?.nombre || '-'}</td>
-                                            <td className="py-4 px-6 text-slate-400 text-sm">{formatDate(inv.fecha)}</td>
-                                            <td className="py-4 px-6 text-right text-white font-bold tracking-tight">{formatCurrency(inv.total)}</td>
-                                            <td className="py-4 px-6 text-center"><StatusBadge status={inv.estado} /></td>
+                                        <tr key={inv.id} className="hover:bg-sand-50 transition-colors">
+                                            <td className="py-3 px-6 text-sand-700 font-mono text-sm">{inv.numero}</td>
+                                            <td className="py-3 px-6 text-sand-700 font-medium">{client?.nombre || '-'}</td>
+                                            <td className="py-3 px-6 text-sand-500 text-sm">{formatDate(inv.fecha)}</td>
+                                            <td className="py-3 px-6 text-right text-sand-900 font-bold tracking-tight">{formatCurrency(inv.total)}</td>
+                                            <td className="py-3 px-6 text-center"><StatusBadge status={inv.estado} /></td>
                                         </tr>
                                     );
                                 })}
                                 {invoices.length === 0 && (
-                                    <tr><td colSpan={5} className="py-12 text-center text-slate-500">No hay facturas recientes</td></tr>
+                                    <tr><td colSpan={5} className="py-12 text-center text-sand-400">No hay facturas recientes</td></tr>
                                 )}
                             </tbody>
                         </table>

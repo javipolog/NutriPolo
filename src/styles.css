@@ -2,6 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================
+   CSS CUSTOM PROPERTIES — SISTEMA DE TEMA
+   ============================================ */
+:root {
+  --bg: #FAF9F6;
+  --surface: #F4F3EE;
+  --surface-alt: #EDEAE3;
+  --border: #E8E5DD;
+  --border-strong: #D4D0C8;
+  --text: #1A1915;
+  --text-secondary: #65635B;
+  --text-muted: #9C9A91;
+  --accent: #C15F3C;
+  --accent-hover: #A84E30;
+  --accent-light: #FDF4EF;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #1C1B18;
+  --surface: #2A2923;
+  --surface-alt: #353430;
+  --border: #3D3C36;
+  --border-strong: #4A4840;
+  --text: #F0EDE6;
+  --text-secondary: #A09D94;
+  --text-muted: #6B6960;
+  --accent: #D4845F;
+  --accent-hover: #C15F3C;
+  --accent-light: #352520;
+  color-scheme: dark;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -13,28 +46,34 @@ body,
 #root {
   height: 100%;
   font-family: 'Inter', system-ui, sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
 }
 
-/* Scrollbar styling */
+/* ============================================
+   SCROLLBAR — CÀLIDA
+   ============================================ */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e293b;
+  background: var(--surface);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #475569;
+  background: var(--border-strong);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #64748b;
+  background: var(--text-muted);
 }
 
-/* Input number hide arrows */
+/* ============================================
+   INPUT NUMBER — hide arrows
+   ============================================ */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
@@ -46,7 +85,9 @@ input[type="number"] {
   -moz-appearance: textfield;
 }
 
-/* Color input styling */
+/* ============================================
+   COLOR INPUT
+   ============================================ */
 input[type="color"] {
   appearance: none;
   -webkit-appearance: none;
@@ -63,39 +104,45 @@ input[type="color"]::-webkit-color-swatch {
   border-radius: 6px;
 }
 
-/* Select styling */
+/* ============================================
+   SELECT — paleta càlida
+   ============================================ */
 select {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%239C9A91'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 1rem;
   padding-right: 2.5rem;
-  color-scheme: dark;
 }
 
 select option {
-  background-color: #0f172a !important;
-  /* Force dark background */
-  color: #f1f5f9;
+  background-color: var(--surface);
+  color: var(--text);
   padding: 12px;
   font-size: 14px;
 }
 
-/* Checkbox styling */
+/* ============================================
+   CHECKBOX
+   ============================================ */
 input[type="checkbox"] {
   cursor: pointer;
-  accent-color: #3b82f6;
+  accent-color: #C15F3C;
 }
 
-/* Invoice preview container */
+/* ============================================
+   INVOICE PREVIEW
+   ============================================ */
 .invoice-preview-modern {
-  box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 0 20px rgba(26, 25, 21, 0.1);
 }
 
-/* Print styles for PDF preview */
+/* ============================================
+   PRINT STYLES
+   ============================================ */
 @media print {
   body * {
     visibility: hidden;
@@ -125,186 +172,88 @@ input[type="checkbox"] {
   }
 }
 
-/* Animation classes */
+/* ============================================
+   ANIMATIONS
+   ============================================ */
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
 
-  to {
-    opacity: 1;
-  }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 @keyframes slideIn {
-  from {
-    transform: translateY(-10px);
-    opacity: 0;
-  }
-
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
 }
 
 @keyframes pulse {
-
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.5;
-  }
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.5; }
 }
 
-.animate-fadeIn {
-  animation: fadeIn 0.2s ease-out;
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+  20%, 40%, 60%, 80%       { transform: translateX(4px); }
 }
 
-.animate-slideIn {
-  animation: slideIn 0.2s ease-out;
-}
-
-.animate-pulse {
-  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-/* Toast slide in from right */
 @keyframes slideInRight {
-  from {
-    transform: translateX(100%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
 
 @keyframes slideOutRight {
-  from {
-    transform: translateX(0);
-    opacity: 1;
-  }
-  to {
-    transform: translateX(100%);
-    opacity: 0;
-  }
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0; }
 }
 
-.toast-enter {
-  animation: slideInRight 0.3s ease-out;
-}
+.animate-fadeIn    { animation: fadeIn    0.15s ease-out; }
+.animate-fadeInUp  { animation: fadeInUp  0.2s  ease-out; }
+.animate-scaleIn   { animation: scaleIn   0.15s ease-out; }
+.animate-slideIn   { animation: slideIn   0.15s ease-out; }
+.animate-pulse     { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+.animate-shake     { animation: shake     0.4s  ease-in-out; }
+.toast-enter       { animation: slideInRight 0.25s ease-out; }
+.toast-exit        { animation: slideOutRight 0.25s ease-in; }
 
-.toast-exit {
-  animation: slideOutRight 0.3s ease-in;
-}
-
-/* Shake animation for errors */
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-  20%, 40%, 60%, 80% { transform: translateX(5px); }
-}
-
-.animate-shake {
-  animation: shake 0.5s ease-in-out;
-}
-
-/* Validation error highlight */
+/* ============================================
+   VALIDATION STATES
+   ============================================ */
 .input-error {
-  border-color: #ef4444 !important;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+  border-color: #C13B3B !important;
+  box-shadow: 0 0 0 3px rgba(193, 59, 59, 0.08);
 }
 
-/* Success highlight */
 .input-success {
-  border-color: #10b981 !important;
-  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.1);
-}
-
-/* Design editor specific styles */
-.design-preview-container {
-  background: linear-gradient(45deg, #e5e7eb 25%, transparent 25%),
-    linear-gradient(-45deg, #e5e7eb 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #e5e7eb 75%),
-    linear-gradient(-45deg, transparent 75%, #e5e7eb 75%);
-  background-size: 20px 20px;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  border-color: #2D7A4F !important;
+  box-shadow: 0 0 0 3px rgba(45, 122, 79, 0.08);
 }
 
 /* ============================================
-   LIGHT THEME OVERRIDES (#19)
-   S'apliquen quan data-theme="light" al <html>
+   DESIGN EDITOR PREVIEW
    ============================================ */
-[data-theme="light"] {
-  color-scheme: light;
+.design-preview-container {
+  background: linear-gradient(45deg, #EDEAE3 25%, transparent 25%),
+    linear-gradient(-45deg, #EDEAE3 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #EDEAE3 75%),
+    linear-gradient(-45deg, transparent 75%, #EDEAE3 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
+  background-color: #FAF9F6;
 }
 
-/* Fons principals */
-[data-theme="light"] .bg-slate-950  { background-color: #f0f4f8 !important; }
-[data-theme="light"] .bg-slate-900  { background-color: #ffffff !important; }
-[data-theme="light"] .bg-slate-800  { background-color: #f1f5f9 !important; }
-[data-theme="light"] .bg-slate-700  { background-color: #e2e8f0 !important; }
-
-/* Variants amb opacitat */
-[data-theme="light"] .bg-slate-900\/50  { background-color: rgba(255, 255, 255, 0.9) !important; }
-[data-theme="light"] .bg-slate-900\/30  { background-color: rgba(248, 250, 252, 0.85) !important; }
-[data-theme="light"] .bg-slate-800\/50  { background-color: rgba(241, 245, 249, 0.8) !important; }
-[data-theme="light"] .bg-slate-800\/40  { background-color: rgba(241, 245, 249, 0.7) !important; }
-[data-theme="light"] .bg-slate-800\/30  { background-color: rgba(241, 245, 249, 0.6) !important; }
-[data-theme="light"] .bg-slate-800\/20  { background-color: rgba(241, 245, 249, 0.4) !important; }
-[data-theme="light"] .bg-slate-700\/50  { background-color: rgba(226, 232, 240, 0.7) !important; }
-
-/* Borders */
-[data-theme="light"] .border-slate-800       { border-color: #e2e8f0 !important; }
-[data-theme="light"] .border-slate-800\/50   { border-color: rgba(226, 232, 240, 0.8) !important; }
-[data-theme="light"] .border-slate-700       { border-color: #cbd5e1 !important; }
-[data-theme="light"] .border-slate-700\/50   { border-color: rgba(203, 213, 225, 0.8) !important; }
-[data-theme="light"] .border-t.border-slate-800 { border-color: #e2e8f0 !important; }
-
-/* Dividers */
-[data-theme="light"] .divide-slate-800\/50 > * + * { border-color: rgba(226, 232, 240, 0.6) !important; }
-
-/* Text colors */
-[data-theme="light"] .text-white    { color: #0f172a !important; }
-[data-theme="light"] .text-slate-100 { color: #0f172a !important; }
-[data-theme="light"] .text-slate-200 { color: #1e293b !important; }
-[data-theme="light"] .text-slate-300 { color: #334155 !important; }
-[data-theme="light"] .text-slate-400 { color: #475569 !important; }
-[data-theme="light"] .text-slate-500 { color: #64748b !important; }
-[data-theme="light"] .text-slate-600 { color: #94a3b8 !important; }
-
-/* Excepció: text blanc en botons de color i badges — mantenen text original */
-[data-theme="light"] .bg-blue-600 .text-white,
-[data-theme="light"] .bg-blue-600.text-white,
-[data-theme="light"] [class*="bg-blue-6"] .text-white,
-[data-theme="light"] [class*="bg-blue-7"] .text-white,
-[data-theme="light"] [class*="bg-emerald-6"] .text-white,
-[data-theme="light"] [class*="bg-red-6"] .text-white,
-[data-theme="light"] [class*="bg-amber-6"] .text-white,
-[data-theme="light"] [class*="bg-purple-6"] .text-white,
-[data-theme="light"] button.bg-blue-600,
-[data-theme="light"] button[class*="bg-blue-6"],
-[data-theme="light"] button[class*="bg-emerald-6"],
-[data-theme="light"] button[class*="bg-red-6"] { color: #ffffff !important; }
-
-/* Scrollbar en light mode */
-[data-theme="light"] ::-webkit-scrollbar-track { background: #f1f5f9; }
-[data-theme="light"] ::-webkit-scrollbar-thumb { background: #94a3b8; }
-[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #64748b; }
-
-/* Select dropdown en light mode */
-[data-theme="light"] select { color-scheme: light; }
-[data-theme="light"] select option { background-color: #ffffff !important; color: #0f172a !important; }
-
-/* Invoice preview — no invertir, ja és blanca */
-[data-theme="light"] .invoice-preview-modern { box-shadow: 0 0 20px rgba(0, 0, 0, 0.15); }
-
-/* Font preview classes */
+/* ============================================
+   FONT PREVIEW CLASSES (per DesignEditor)
+   ============================================ */
 .font-preview-primary {
   font-family: var(--font-primary, 'Work Sans'), Arial, sans-serif;
 }

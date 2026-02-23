@@ -425,13 +425,13 @@ export const ExpensesView = () => {
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-extrabold text-white tracking-tight">Gastos</h1>
+                    <h1 className="text-3xl font-extrabold text-sand-900 tracking-tight">Gastos</h1>
                     <div className="flex items-center gap-2 mt-1.5">
-                        <span className="text-slate-400 text-sm font-medium bg-slate-800/50 px-2.5 py-1 rounded-full border border-slate-700/50 flex items-center gap-2">
+                        <span className="text-sand-600 text-sm font-medium bg-sand-100 px-2.5 py-1 rounded-full border border-sand-200 flex items-center gap-2">
                             {filteredExpenses.length} gastos filtrados
                             {filteredExpenses.length > 0 && (
                                 <button onClick={() => toggleSelectAll(filteredExpenses.map(e => e.id))}
-                                    className="text-blue-400 hover:text-blue-300 ml-1 text-xs border-l border-slate-700 pl-2 font-bold">
+                                    className="text-terra-400 hover:text-terra-300 ml-1 text-xs border-l border-sand-300 pl-2 font-bold">
                                     {filteredExpenses.every(e => selectedExpenses.includes(e.id)) ? 'DESMARCAR TODOS' : 'SELECCIONAR TODOS'}
                                 </button>
                             )}
@@ -441,7 +441,7 @@ export const ExpensesView = () => {
                 <div className="flex gap-3">
                     {selectedExpenses.length > 0 && (
                         <Button variant="danger" icon={Trash2} onClick={handleDeleteSelected}
-                            className="bg-red-600 hover:bg-red-500 shadow-lg shadow-red-900/20">
+                            className="bg-danger hover:bg-danger-dark">
                             Eliminar ({selectedExpenses.length})
                         </Button>
                     )}
@@ -452,7 +452,7 @@ export const ExpensesView = () => {
                             <span className="absolute -top-1 -right-1 w-3 h-3 bg-amber-400 rounded-full animate-ping" />
                         </Button>
                     )}
-                    <Button icon={Plus} onClick={openNew} className="bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/20">
+                    <Button icon={Plus} onClick={openNew} className="bg-terra-400 hover:bg-terra-500 shadow-card-hover">
                         Nuevo Gasto
                     </Button>
                 </div>
@@ -461,16 +461,16 @@ export const ExpensesView = () => {
             {/* ============================================ */}
             {/* WATCHFOLDER CONTROL PANEL                    */}
             {/* ============================================ */}
-            <Card className="border-slate-800 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
+            <Card className="border-sand-300 bg-white backdrop-blur-[2px] overflow-hidden">
                 <div className="p-4">
                     <div className="flex items-center justify-between gap-4 flex-wrap">
                         {/* Toggle + Folder */}
                         <div className="flex items-center gap-4 flex-1 min-w-0">
                             <button onClick={handleToggleWatcher}
-                                className={`relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl font-bold text-sm transition-all duration-300 flex-shrink-0 ${
+                                className={`relative flex items-center gap-2.5 px-4 py-2.5 rounded-soft font-bold text-sm transition-all duration-300 flex-shrink-0 ${
                                     watcherActive
-                                        ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 shadow-lg shadow-emerald-900/20'
-                                        : 'bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 hover:text-white'
+                                        ? 'bg-success/20 text-success border border-emerald-500/30 hover:bg-success/30 shadow-lg shadow-emerald-900/20'
+                                        : 'bg-sand-100 text-sand-600 border border-sand-300 hover:bg-sand-200 hover:text-sand-800'
                                 }`}>
                                 {watcherProcessing ? <Loader2 size={18} className="animate-spin" />
                                     : watcherActive ? <Radio size={18} className="animate-pulse" />
@@ -478,18 +478,18 @@ export const ExpensesView = () => {
                                 {watcherActive ? 'VIGILANT' : 'ACTIVAR WATCHFOLDER'}
                                 {watcherActive && (
                                     <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                                        <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                                        <span className="relative inline-flex rounded-full h-3 w-3 bg-success" />
                                     </span>
                                 )}
                             </button>
 
                             <div className="flex items-center gap-2 min-w-0 flex-1">
-                                <FolderOpen size={16} className="text-slate-500 flex-shrink-0" />
+                                <FolderOpen size={16} className="text-sand-500 flex-shrink-0" />
                                 {config.expensesFolder
-                                    ? <span className="text-xs text-slate-500 truncate" title={config.expensesFolder}>{config.expensesFolder}</span>
-                                    : <span className="text-xs text-slate-600 italic">Cap carpeta seleccionada</span>}
-                                <button onClick={handleChangeFolder} className="text-blue-400 hover:text-blue-300 text-xs font-medium flex-shrink-0 transition-colors">Canviar</button>
+                                    ? <span className="text-xs text-sand-500 truncate" title={config.expensesFolder}>{config.expensesFolder}</span>
+                                    : <span className="text-xs text-sand-400 italic">Cap carpeta seleccionada</span>}
+                                <button onClick={handleChangeFolder} className="text-terra-400 hover:text-terra-300 text-xs font-medium flex-shrink-0 transition-colors">Canviar</button>
                             </div>
                         </div>
 
@@ -497,19 +497,19 @@ export const ExpensesView = () => {
                         {watcherActive && (
                             <div className="flex items-center gap-3 flex-shrink-0">
                                 <div className="flex items-center gap-1.5 text-xs">
-                                    <Zap size={13} className="text-emerald-400" />
-                                    <span className="text-slate-400">Processats:</span>
-                                    <span className="text-emerald-400 font-bold">{watcherStats.processed}</span>
+                                    <Zap size={13} className="text-success" />
+                                    <span className="text-sand-600">Processats:</span>
+                                    <span className="text-success font-bold">{watcherStats.processed}</span>
                                 </div>
                                 {watcherStats.queued > 0 && (
                                     <div className="flex items-center gap-1.5 text-xs">
-                                        <Loader2 size={13} className="text-blue-400 animate-spin" />
-                                        <span className="text-slate-400">En cua:</span>
-                                        <span className="text-blue-400 font-bold">{watcherStats.queued}</span>
+                                        <Loader2 size={13} className="text-terra-400 animate-spin" />
+                                        <span className="text-sand-600">En cua:</span>
+                                        <span className="text-terra-400 font-bold">{watcherStats.queued}</span>
                                     </div>
                                 )}
                                 <button onClick={() => setShowActivityLog(!showActivityLog)}
-                                    className="text-slate-500 hover:text-slate-300 transition-colors p-1">
+                                    className="text-sand-500 hover:text-sand-700 transition-colors p-1">
                                     {showActivityLog ? <EyeOff size={14} /> : <Eye size={14} />}
                                 </button>
                             </div>
@@ -518,8 +518,8 @@ export const ExpensesView = () => {
                         {/* Botó Regles — sempre visible */}
                         <button
                             onClick={() => setShowRulesManager(true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex-shrink-0
-                                bg-slate-800/80 border-slate-700 text-slate-400 hover:text-cyan-400 hover:border-cyan-500/40 hover:bg-cyan-500/8"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-button text-xs font-semibold border transition-all flex-shrink-0
+                                bg-sand-100 border-sand-300 text-sand-600 hover:text-cyan-400 hover:border-cyan-500/40 hover:bg-cyan-500/8"
                             title="Gestionar regles de categorització"
                         >
                             <Tag size={13} />
@@ -534,10 +534,10 @@ export const ExpensesView = () => {
                         {/* Botó Precisió — Fase 5.2 */}
                         <button
                             onClick={() => setShowPrecisionDashboard(v => !v)}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all flex-shrink-0 ${
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-button text-xs font-semibold border transition-all flex-shrink-0 ${
                                 showPrecisionDashboard
-                                    ? 'bg-blue-500/15 border-blue-500/30 text-blue-400'
-                                    : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-blue-400 hover:border-blue-500/40 hover:bg-blue-500/8'
+                                    ? 'bg-terra-50 border-terra-300 text-terra-500'
+                                    : 'bg-sand-100 border-sand-300 text-sand-600 hover:text-terra-400 hover:border-terra-300 hover:bg-terra-50'
                             }`}
                             title="Dashboard de precisió d'importació"
                         >
@@ -548,20 +548,20 @@ export const ExpensesView = () => {
 
                     {/* Activity Log (collapsible) */}
                     {showActivityLog && recentActivity.length > 0 && (
-                        <div className="mt-3 pt-3 border-t border-slate-800 max-h-40 overflow-y-auto custom-scrollbar space-y-1">
+                        <div className="mt-3 pt-3 border-t border-sand-300 max-h-40 overflow-y-auto custom-scrollbar space-y-1">
                             {recentActivity.map((activity, i) => (
                                 <div key={i} className="flex items-center gap-2 text-xs">
                                     <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                                        activity.type === 'success' ? 'bg-emerald-400' :
-                                        activity.type === 'error' ? 'bg-red-400' :
+                                        activity.type === 'success' ? 'bg-success' :
+                                        activity.type === 'error' ? 'bg-danger' :
                                         activity.type === 'warning' ? 'bg-amber-400' :
-                                        activity.type === 'new' ? 'bg-blue-400' :
-                                        'bg-slate-500'
+                                        activity.type === 'new' ? 'bg-info' :
+                                        'bg-sand-400'
                                     }`} />
-                                    <span className="text-slate-500 flex-shrink-0 font-mono">
+                                    <span className="text-sand-500 flex-shrink-0 font-mono">
                                         {activity.time.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                     </span>
-                                    <span className="text-slate-400 truncate">{activity.message}</span>
+                                    <span className="text-sand-600 truncate">{activity.message}</span>
                                 </div>
                             ))}
                         </div>
@@ -580,19 +580,19 @@ export const ExpensesView = () => {
 
             {/* Fase 5.2: Dashboard de precisió (col·lapsable) */}
             {showPrecisionDashboard && (
-                <Card className="border-slate-800 bg-slate-900/60 backdrop-blur-sm overflow-hidden">
+                <Card className="border-sand-300 bg-white backdrop-blur-[2px] overflow-hidden">
                     <div className="p-4">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                                <BarChart2 size={16} className="text-blue-400" />
+                            <h3 className="text-sm font-bold text-sand-900 flex items-center gap-2">
+                                <BarChart2 size={16} className="text-terra-400" />
                                 Precisió d'Importació
-                                <span className="text-slate-600 font-normal text-xs">
+                                <span className="text-sand-400 font-normal text-xs">
                                     — {expenses.length} gastos analitzats
                                 </span>
                             </h3>
                             <button
                                 onClick={() => setShowPrecisionDashboard(false)}
-                                className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded-lg hover:bg-slate-800"
+                                className="text-sand-500 hover:text-sand-700 transition-colors p-1 rounded-button hover:bg-sand-100"
                             >
                                 <X size={14} />
                             </button>
@@ -613,33 +613,33 @@ export const ExpensesView = () => {
             </div>
 
             {/* Filters Bar */}
-            <Card className="p-1 border-slate-800 bg-slate-900/50 backdrop-blur-sm sticky top-0 z-20 shadow-xl">
+            <Card className="p-1 border-sand-300 bg-white backdrop-blur-[2px] sticky top-0 z-20 shadow-xl">
                 <div className="flex flex-col lg:flex-row gap-2 p-3">
                     <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
-                        <input className="w-full bg-slate-800 border border-slate-700 text-white pl-10 pr-4 py-2 rounded-xl focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all outline-none"
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-sand-500" size={18} />
+                        <input className="w-full bg-sand-100 border border-sand-300 text-sand-900 pl-10 pr-4 py-2 rounded-soft focus:ring-2 focus:ring-terra-400/20 focus:border-terra-400 transition-all outline-none"
                             placeholder="Buscar por proveedor o concepto..." value={search} onChange={e => setSearch(e.target.value)} />
                     </div>
                     <div className="flex flex-wrap gap-2">
-                        <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl border border-slate-700 overflow-hidden shadow-inner">
+                        <div className="flex items-center gap-1 bg-sand-100 p-1 rounded-soft border border-sand-300 overflow-hidden shadow-inner">
                             <select value={filters.year} onChange={e => setFilters({ ...filters, year: e.target.value })}
-                                className="bg-transparent text-white text-sm px-3 py-1 outline-none cursor-pointer hover:bg-slate-700 transition-colors appearance-none font-medium">
-                                <option value="all" className="bg-slate-900 text-white">Años</option>
-                                {years.map(y => <option key={y} value={y} className="bg-slate-900 text-white">{y}</option>)}
+                                className="bg-transparent text-sand-800 text-sm px-3 py-1 outline-none cursor-pointer hover:bg-sand-200 transition-colors appearance-none font-medium">
+                                <option value="all" className="bg-white text-sand-900">Años</option>
+                                {years.map(y => <option key={y} value={y} className="bg-white text-sand-900">{y}</option>)}
                             </select>
-                            <div className="w-px h-4 bg-slate-700 mx-1"></div>
+                            <div className="w-px h-4 bg-sand-200 mx-1"></div>
                             <select value={filters.period} onChange={e => setFilters({ ...filters, period: e.target.value })}
-                                className="bg-transparent text-white text-sm px-3 py-1 outline-none cursor-pointer hover:bg-slate-700 transition-colors appearance-none font-medium">
-                                <option value="all" className="bg-slate-900 text-white">Todo el año</option>
-                                <optgroup label="Trimestres" className="bg-slate-900 text-slate-400 font-bold italic">
-                                    <option value="Q4" className="bg-slate-900 text-white">Trimestre 4</option>
-                                    <option value="Q3" className="bg-slate-900 text-white">Trimestre 3</option>
-                                    <option value="Q2" className="bg-slate-900 text-white">Trimestre 2</option>
-                                    <option value="Q1" className="bg-slate-900 text-white">Trimestre 1</option>
+                                className="bg-transparent text-sand-800 text-sm px-3 py-1 outline-none cursor-pointer hover:bg-sand-200 transition-colors appearance-none font-medium">
+                                <option value="all" className="bg-white text-sand-900">Todo el año</option>
+                                <optgroup label="Trimestres" className="bg-white text-sand-600 font-bold italic">
+                                    <option value="Q4" className="bg-white text-sand-900">Trimestre 4</option>
+                                    <option value="Q3" className="bg-white text-sand-900">Trimestre 3</option>
+                                    <option value="Q2" className="bg-white text-sand-900">Trimestre 2</option>
+                                    <option value="Q1" className="bg-white text-sand-900">Trimestre 1</option>
                                 </optgroup>
-                                <optgroup label="Meses" className="bg-slate-900 text-slate-400 font-bold italic">
+                                <optgroup label="Meses" className="bg-white text-sand-600 font-bold italic">
                                     {['12','11','10','09','08','07','06','05','04','03','02','01'].map(m => (
-                                        <option key={m} value={m} className="bg-slate-900 text-white">
+                                        <option key={m} value={m} className="bg-white text-sand-900">
                                             {new Date(2000, parseInt(m)-1).toLocaleString('es-ES', { month: 'long' }).replace(/^\w/, c => c.toUpperCase())}
                                         </option>
                                     ))}
@@ -647,18 +647,18 @@ export const ExpensesView = () => {
                             </select>
                         </div>
                         <select value={filters.category} onChange={e => setFilters({ ...filters, category: e.target.value })}
-                            className="bg-slate-800 border border-slate-700 text-white text-sm px-4 py-2 rounded-xl outline-none focus:border-blue-500 transition-all hover:border-slate-600 appearance-none font-medium shadow-inner">
-                            <option value="all" className="bg-slate-900 text-white">Categorías</option>
-                            {defaultCategories.map(c => <option key={c} value={c} className="bg-slate-900 text-white">{c}</option>)}
+                            className="bg-sand-100 border border-sand-300 text-sand-900 text-sm px-4 py-2 rounded-soft outline-none focus:border-terra-400 transition-all hover:border-sand-400 appearance-none font-medium shadow-inner">
+                            <option value="all" className="bg-white text-sand-900">Categorías</option>
+                            {defaultCategories.map(c => <option key={c} value={c} className="bg-white text-sand-900">{c}</option>)}
                         </select>
-                        <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 px-3 py-1 rounded-xl shadow-inner hover:border-slate-600 transition-colors">
-                            <Layers size={14} className="text-slate-400" />
+                        <div className="flex items-center gap-2 bg-sand-100 border border-sand-300 px-3 py-1 rounded-soft shadow-inner hover:border-sand-400 transition-colors">
+                            <Layers size={14} className="text-sand-600" />
                             <select value={filters.groupBy} onChange={e => setFilters({ ...filters, groupBy: e.target.value })}
-                                className="bg-transparent text-white text-sm outline-none cursor-pointer appearance-none font-medium py-1">
-                                <option value="none" className="bg-slate-900 text-white">Sin agrupar</option>
-                                <option value="month" className="bg-slate-900 text-white">Mes</option>
-                                <option value="category" className="bg-slate-900 text-white">Categoría</option>
-                                <option value="provider" className="bg-slate-900 text-white">Proveedor</option>
+                                className="bg-transparent text-sand-800 text-sm outline-none cursor-pointer appearance-none font-medium py-1">
+                                <option value="none" className="bg-white text-sand-900">Sin agrupar</option>
+                                <option value="month" className="bg-white text-sand-900">Mes</option>
+                                <option value="category" className="bg-white text-sand-900">Categoría</option>
+                                <option value="provider" className="bg-white text-sand-900">Proveedor</option>
                             </select>
                         </div>
                     </div>
@@ -671,15 +671,15 @@ export const ExpensesView = () => {
                     {groupedData.map(([group, data]) => (
                         <div key={group} className="space-y-3">
                             <div className="flex items-center gap-3 px-2">
-                                <ChevronRight className="text-blue-500" size={20} />
-                                <h3 className="text-lg font-bold text-white uppercase tracking-wider">{group}</h3>
-                                <div className="h-px flex-1 bg-slate-800"></div>
+                                <ChevronRight className="text-terra-400" size={20} />
+                                <h3 className="font-serif text-lg font-bold text-sand-900 uppercase tracking-wider">{group}</h3>
+                                <div className="h-px flex-1 bg-sand-100"></div>
                                 <div className="flex gap-4 text-sm font-mono">
-                                    <span className="text-slate-500">Items: <span className="text-slate-300">{data.items.length}</span></span>
-                                    <span className="text-slate-500">Total: <span className="text-emerald-400 font-bold">{formatCurrency(data.total)}</span></span>
+                                    <span className="text-sand-500">Items: <span className="text-sand-700">{data.items.length}</span></span>
+                                    <span className="text-sand-500">Total: <span className="text-success font-bold">{formatCurrency(data.total)}</span></span>
                                 </div>
                             </div>
-                            <Card className="overflow-hidden border-slate-800/50">
+                            <Card className="overflow-hidden border-sand-200">
                                 <ExpensesTable expenses={data.items} onEdit={openEdit} onDelete={handleDelete} onOpenPdf={openPdf}
                                     toggleSort={toggleSort} sortConfig={sortConfig} selectedItems={selectedExpenses}
                                     onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll} compact />
@@ -688,7 +688,7 @@ export const ExpensesView = () => {
                     ))}
                 </div>
             ) : (
-                <Card className="overflow-hidden border-slate-800 shadow-2xl">
+                <Card className="overflow-hidden border-sand-300 shadow-2xl">
                     <ExpensesTable expenses={filteredExpenses} onEdit={openEdit} onDelete={handleDelete} onOpenPdf={openPdf}
                         toggleSort={toggleSort} sortConfig={sortConfig} selectedItems={selectedExpenses}
                         onToggleSelect={toggleSelect} onToggleSelectAll={toggleSelectAll} />
@@ -720,7 +720,7 @@ export const ExpensesView = () => {
 
 const ExpensesTable = ({ expenses, onEdit, onDelete, onOpenPdf, toggleSort, sortConfig, selectedItems = [], onToggleSelect, onToggleSelectAll, compact = false }) => {
     if (expenses.length === 0) {
-        return <div className="py-20 text-center text-slate-500 flex flex-col items-center gap-3">
+        return <div className="py-20 text-center text-sand-500 flex flex-col items-center gap-3">
             <Filter size={40} className="opacity-20" />
             <p className="text-lg">No se encontraron gastos con estos filtros</p>
         </div>;
@@ -733,49 +733,49 @@ const ExpensesTable = ({ expenses, onEdit, onDelete, onOpenPdf, toggleSort, sort
         <div className="overflow-x-auto">
             <table className="w-full">
                 <thead>
-                    <tr className="border-b border-slate-800 bg-slate-800/20">
+                    <tr className="border-b border-sand-300 bg-sand-50">
                         <th className="py-4 px-6 text-left w-10">
-                            <input type="checkbox" className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
+                            <input type="checkbox" className="w-4 h-4 rounded border-sand-300 bg-white text-blue-600 focus:ring-terra-400 focus:ring-offset-0"
                                 checked={allSelected} ref={el => el && (el.indeterminate = someSelected && !allSelected)}
                                 onChange={() => onToggleSelectAll(expenses.map(e => e.id))} />
                         </th>
-                        <th className="text-left py-4 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-slate-300 transition-colors group" onClick={() => toggleSort('fecha')}>
-                            <div className="flex items-center gap-2">FECHA <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === 'fecha' ? 'opacity-100 text-blue-500' : ''}`} /></div>
+                        <th className="text-left py-4 px-6 text-xs font-bold text-sand-500 uppercase tracking-wider cursor-pointer hover:text-sand-700 transition-colors group" onClick={() => toggleSort('fecha')}>
+                            <div className="flex items-center gap-2">FECHA <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === 'fecha' ? 'opacity-100 text-terra-400' : ''}`} /></div>
                         </th>
-                        <th className="text-left py-4 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-slate-300 transition-colors group" onClick={() => toggleSort('proveedor')}>
-                            <div className="flex items-center gap-2">PROVEEDOR <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === 'proveedor' ? 'opacity-100 text-blue-500' : ''}`} /></div>
+                        <th className="text-left py-4 px-6 text-xs font-bold text-sand-500 uppercase tracking-wider cursor-pointer hover:text-sand-700 transition-colors group" onClick={() => toggleSort('proveedor')}>
+                            <div className="flex items-center gap-2">PROVEEDOR <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === 'proveedor' ? 'opacity-100 text-terra-400' : ''}`} /></div>
                         </th>
-                        <th className="text-left py-4 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider">CONCEPTO</th>
-                        {!compact && <th className="text-left py-4 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider">CATEGORÍA</th>}
-                        <th className="text-right py-4 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider">IVA</th>
-                        <th className="text-right py-4 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-slate-300 transition-colors group" onClick={() => toggleSort('total')}>
-                            <div className="flex items-center justify-end gap-2">TOTAL <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === 'total' ? 'opacity-100 text-blue-500' : ''}`} /></div>
+                        <th className="text-left py-4 px-6 text-xs font-bold text-sand-500 uppercase tracking-wider">CONCEPTO</th>
+                        {!compact && <th className="text-left py-4 px-6 text-xs font-bold text-sand-500 uppercase tracking-wider">CATEGORÍA</th>}
+                        <th className="text-right py-4 px-6 text-xs font-bold text-sand-500 uppercase tracking-wider">IVA</th>
+                        <th className="text-right py-4 px-6 text-xs font-bold text-sand-500 uppercase tracking-wider cursor-pointer hover:text-sand-700 transition-colors group" onClick={() => toggleSort('total')}>
+                            <div className="flex items-center justify-end gap-2">TOTAL <ArrowUpDown size={12} className={`opacity-0 group-hover:opacity-100 ${sortConfig.key === 'total' ? 'opacity-100 text-terra-400' : ''}`} /></div>
                         </th>
-                        <th className="text-right py-4 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider">ACCIONES</th>
+                        <th className="text-right py-4 px-6 text-xs font-bold text-sand-500 uppercase tracking-wider">ACCIONES</th>
                     </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/50">
+                <tbody className="divide-y divide-sand-200">
                     {expenses.map(exp => (
-                        <tr key={exp.id} className={`hover:bg-slate-800/40 transition-all group ${selectedItems.includes(exp.id) ? 'bg-blue-600/5 hover:bg-blue-600/10' : ''}`}
+                        <tr key={exp.id} className={`hover:bg-sand-100 transition-all group ${selectedItems.includes(exp.id) ? 'bg-terra-400/5 hover:bg-terra-400/10' : ''}`}
                             onClick={() => onToggleSelect(exp.id)}>
                             <td className="py-3 px-6" onClick={e => e.stopPropagation()}>
-                                <input type="checkbox" className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-0"
+                                <input type="checkbox" className="w-4 h-4 rounded border-sand-300 bg-white text-blue-600 focus:ring-terra-400 focus:ring-offset-0"
                                     checked={selectedItems.includes(exp.id)} onChange={() => onToggleSelect(exp.id)} />
                             </td>
-                            <td className="py-3 px-6 text-slate-400 font-mono text-sm">{formatDate(exp.fecha)}</td>
+                            <td className="py-3 px-6 text-sand-600 font-mono text-sm">{formatDate(exp.fecha)}</td>
                             <td className="py-3 px-6">
-                                <div className="text-white font-semibold">{exp.proveedor}</div>
-                                <div className="text-[10px] text-slate-500 font-mono">{exp.cifProveedor}</div>
+                                <div className="text-sand-900 font-semibold">{exp.proveedor}</div>
+                                <div className="text-[10px] text-sand-500 font-mono">{exp.cifProveedor}</div>
                             </td>
                             <td className="py-3 px-6">
                                 <div className="flex items-center gap-2">
                                     {exp.archivo && (
                                         <button onClick={e => { e.stopPropagation(); onOpenPdf(exp.archivo); }}
-                                            className="p-1.5 bg-blue-500/10 text-blue-400 rounded-lg hover:bg-blue-500/20 transition-colors" title="Ver comprobante">
+                                            className="p-1.5 bg-terra-50 text-terra-400 rounded-button hover:bg-terra-50 transition-colors" title="Ver comprobante">
                                             <FileText size={14} />
                                         </button>
                                     )}
-                                    <span className={`text-slate-300 text-sm truncate max-w-[200px] ${exp.archivo ? "cursor-pointer hover:text-white" : ""}`}
+                                    <span className={`text-sand-700 text-sm truncate max-w-[200px] ${exp.archivo ? "cursor-pointer hover:text-terra-500" : ""}`}
                                         onClick={e => { if (exp.archivo) { e.stopPropagation(); onOpenPdf(exp.archivo); } }}>
                                         {exp.concepto}
                                     </span>
@@ -783,26 +783,26 @@ const ExpensesTable = ({ expenses, onEdit, onDelete, onOpenPdf, toggleSort, sort
                             </td>
                             {!compact && (
                                 <td className="py-3 px-6">
-                                    <span className="bg-slate-800/80 text-slate-400 text-[10px] px-2 py-1 rounded-md border border-slate-700/50 uppercase font-medium">{exp.categoria}</span>
+                                    <span className="bg-sand-100 text-sand-600 text-[10px] px-2 py-1 rounded-md border border-sand-200 uppercase font-medium">{exp.categoria}</span>
                                 </td>
                             )}
                             <td className="py-3 px-6 text-right">
-                                <div className="text-slate-500 text-xs font-mono">{formatCurrency(exp.ivaImporte)}</div>
-                                <div className="text-[10px] text-slate-600 font-mono">({exp.ivaPorcentaje}%)</div>
+                                <div className="text-sand-500 text-xs font-mono">{formatCurrency(exp.ivaImporte)}</div>
+                                <div className="text-[10px] text-sand-400 font-mono">({exp.ivaPorcentaje}%)</div>
                             </td>
                             <td className="py-3 px-6 text-right">
-                                <div className="text-white font-bold font-mono flex items-center justify-end gap-1.5">
+                                <div className="text-sand-900 font-bold font-mono flex items-center justify-end gap-1.5">
                                     {formatCurrency(exp.total)}
                                     {exp.moneda && exp.moneda !== 'EUR' && (
-                                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">{exp.moneda}</span>
+                                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-warning border border-amber-500/30">{exp.moneda}</span>
                                     )}
                                 </div>
-                                <div className="text-[10px] text-slate-500 font-mono">Base: {formatCurrency(exp.baseImponible)}</div>
+                                <div className="text-[10px] text-sand-500 font-mono">Base: {formatCurrency(exp.baseImponible)}</div>
                             </td>
                             <td className="py-3 px-6 text-right" onClick={e => e.stopPropagation()}>
                                 <div className="flex items-center justify-end gap-1 opacity-10 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Button variant="ghost" size="sm" icon={Edit2} onClick={() => onEdit(exp)} className="h-8 w-8 p-0 text-slate-400 hover:text-white hover:bg-slate-700" />
-                                    <Button variant="ghost" size="sm" icon={Trash2} onClick={() => onDelete(exp.id)} className="h-8 w-8 p-0 text-slate-500 hover:text-red-400 hover:bg-red-900/20" />
+                                    <Button variant="ghost" size="sm" icon={Edit2} onClick={() => onEdit(exp)} className="h-8 w-8 p-0 text-sand-600 hover:text-sand-800 hover:bg-sand-200" />
+                                    <Button variant="ghost" size="sm" icon={Trash2} onClick={() => onDelete(exp.id)} className="h-8 w-8 p-0 text-sand-500 hover:text-danger hover:bg-danger-light/50" />
                                 </div>
                             </td>
                         </tr>
@@ -835,7 +835,7 @@ const ExpenseModal = ({ open, onClose, onSave, expense }) => {
                     <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm({ ...form, fecha: e.target.value })} required />
                     <Select label="Categoría" value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })} options={defaultCategories.map(c => ({ value: c, label: c }))} />
                 </div>
-                <div className="grid grid-cols-3 gap-4 border-t border-slate-800 pt-4">
+                <div className="grid grid-cols-3 gap-4 border-t border-sand-300 pt-4">
                     <div className="col-span-2">
                         <Input label="Proveedor" value={form.proveedor} onChange={e => setForm({ ...form, proveedor: e.target.value })} required placeholder="Nombre fiscal..." />
                     </div>
@@ -844,31 +844,31 @@ const ExpenseModal = ({ open, onClose, onSave, expense }) => {
                     </div>
                 </div>
                 <Input label="Concepto / Factura" value={form.concepto} onChange={e => setForm({ ...form, concepto: e.target.value })} required placeholder="Ej: Factura luz Enero..." />
-                <div className="grid grid-cols-2 gap-4 border-t border-slate-800 pt-4">
+                <div className="grid grid-cols-2 gap-4 border-t border-sand-300 pt-4">
                     <Input label="Base Imponible (€)" type="number" step="0.01" value={form.baseImponible} onChange={e => setForm({ ...form, baseImponible: parseFloat(e.target.value) || 0 })} required />
                     <Input label="IVA (%)" type="number" value={form.ivaPorcentaje} onChange={e => setForm({ ...form, ivaPorcentaje: parseFloat(e.target.value) || 0 })} />
                 </div>
-                <div className="flex gap-6 bg-slate-800/30 p-3 rounded-xl border border-slate-800">
-                    <label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer select-none">
-                        <input type="checkbox" checked={form.deducibleIva} onChange={e => setForm({ ...form, deducibleIva: e.target.checked })} className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500" />
+                <div className="flex gap-6 bg-sand-50 p-3 rounded-soft border border-sand-300">
+                    <label className="flex items-center gap-2 text-sand-700 text-sm cursor-pointer select-none">
+                        <input type="checkbox" checked={form.deducibleIva} onChange={e => setForm({ ...form, deducibleIva: e.target.checked })} className="w-4 h-4 rounded border-sand-300 bg-white text-blue-600 focus:ring-terra-400" />
                         Deducible IVA
                     </label>
-                    <label className="flex items-center gap-2 text-slate-300 text-sm cursor-pointer select-none">
-                        <input type="checkbox" checked={form.deducibleIrpf} onChange={e => setForm({ ...form, deducibleIrpf: e.target.checked })} className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500" />
+                    <label className="flex items-center gap-2 text-sand-700 text-sm cursor-pointer select-none">
+                        <input type="checkbox" checked={form.deducibleIrpf} onChange={e => setForm({ ...form, deducibleIrpf: e.target.checked })} className="w-4 h-4 rounded border-sand-300 bg-white text-blue-600 focus:ring-terra-400" />
                         Deducible IRPF
                     </label>
                 </div>
-                <div className="p-4 bg-blue-600/10 rounded-2xl border border-blue-500/20">
-                    <div className="flex justify-between text-xs text-slate-400 mb-1"><span>Base</span><span>{formatCurrency(form.baseImponible)}</span></div>
-                    <div className="flex justify-between text-xs text-slate-400"><span>IVA ({form.ivaPorcentaje}%)</span><span>{formatCurrency(ivaImporte)}</span></div>
-                    <div className="mt-3 pt-3 border-t border-blue-500/20 flex justify-between items-end">
-                        <span className="text-white text-sm font-medium">TOTAL GASTO</span>
-                        <span className="text-white text-xl font-black">{formatCurrency(total)}</span>
+                <div className="p-4 bg-terra-400/10 rounded-soft border border-terra-200">
+                    <div className="flex justify-between text-xs text-sand-600 mb-1"><span>Base</span><span>{formatCurrency(form.baseImponible)}</span></div>
+                    <div className="flex justify-between text-xs text-sand-600"><span>IVA ({form.ivaPorcentaje}%)</span><span>{formatCurrency(ivaImporte)}</span></div>
+                    <div className="mt-3 pt-3 border-t border-terra-200 flex justify-between items-end">
+                        <span className="text-sand-900 text-sm font-medium">TOTAL GASTO</span>
+                        <span className="text-sand-900 text-xl font-black">{formatCurrency(total)}</span>
                     </div>
                 </div>
                 <div className="flex justify-end gap-3 pt-4">
-                    <Button type="button" variant="ghost" onClick={onClose} className="text-slate-400 hover:text-white">Cancelar</Button>
-                    <Button type="submit" className="px-8 bg-blue-600 hover:bg-blue-500">Guardar Transacción</Button>
+                    <Button type="button" variant="ghost" onClick={onClose} className="text-sand-600 hover:text-terra-500">Cancelar</Button>
+                    <Button type="submit" className="px-8 bg-terra-400 hover:bg-terra-500">Guardar Transacción</Button>
                 </div>
             </form>
         </Modal>
@@ -880,12 +880,12 @@ const ExpenseModal = ({ open, onClose, onSave, expense }) => {
 // ============================================
 
 const SOURCE_CFG = {
-    rule:      { cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'REGLA' },
-    cif_match: { cls: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', label: 'CIF' },
+    rule:      { cls: 'bg-success-light text-success border-success/30', label: 'REGLA' },
+    cif_match: { cls: 'bg-success-light text-success border-success/30', label: 'CIF' },
     memory:    { cls: 'bg-purple-500/20 text-purple-400 border-purple-500/30',    label: 'MEMÒRIA' },
     existing:  { cls: 'bg-green-500/20 text-green-400 border-green-500/30',       label: 'RECURRENT' },
-    validated: { cls: 'bg-blue-500/20 text-blue-400 border-blue-500/30',          label: '✓' },
-    auto:      { cls: 'bg-amber-500/20 text-amber-400 border-amber-500/30',       label: 'AUTO' },
+    validated: { cls: 'bg-terra-50 text-terra-400 border-terra-200',          label: '✓' },
+    auto:      { cls: 'bg-amber-500/20 text-warning border-amber-500/30',       label: 'AUTO' },
 };
 
 const ConfidenceBadge = ({ source }) => {
@@ -983,7 +983,7 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
         <Modal open={open} onClose={onClose} title={`PDFs Detectats (${results.length})`} className="max-w-4xl">
             <div className="max-h-[60vh] overflow-y-auto space-y-3 pr-2 custom-scrollbar">
                 {/* Info banner */}
-                <div className="flex items-center gap-2 text-amber-400 bg-amber-400/10 p-3 rounded-lg border border-amber-400/20 mb-2">
+                <div className="flex items-center gap-2 text-warning bg-amber-400/10 p-3 rounded-button border border-amber-400/20 mb-2">
                     <Calculator size={18} />
                     <p className="text-xs font-medium">Dades extretes automàticament. Revisa els imports abans de confirmar.</p>
                 </div>
@@ -1006,17 +1006,17 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
 
                     return (
                         <div key={i}
-                            className={`p-4 rounded-xl border transition-all cursor-pointer ${
+                            className={`p-4 rounded-soft border transition-all cursor-pointer ${
                                 isSelected
-                                    ? 'bg-blue-600/10 border-blue-500/50 shadow-lg shadow-blue-900/10'
-                                    : 'bg-slate-800/50 border-slate-700 hover:border-slate-500 hover:bg-slate-800'
+                                    ? 'bg-terra-400/10 border-terra-400/50 shadow-lg shadow-blue-900/10'
+                                    : 'bg-sand-100 border-sand-300 hover:border-slate-500 hover:bg-sand-100'
                             }`}
                             onClick={() => toggle(r)}>
 
                             <div className="flex items-start gap-4">
                                 {/* Checkbox */}
-                                <div className={`mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center transition-all flex-shrink-0 ${
-                                    isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-600 bg-slate-900'
+                                <div className={`mt-0.5 w-6 h-6 rounded-button border-2 flex items-center justify-center transition-all flex-shrink-0 ${
+                                    isSelected ? 'bg-terra-400 border-terra-500' : 'border-sand-400 bg-white'
                                 }`}>
                                     {isSelected && <Check size={14} className="text-white stroke-[3px]" />}
                                 </div>
@@ -1024,10 +1024,10 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                 <div className="flex-1 min-w-0">
                                     {/* Fase 3.1: Regla aplicada banner */}
                                     {r.ruleApplied && (
-                                        <div className="flex items-center gap-1.5 bg-emerald-500/8 border border-emerald-500/15 rounded-lg px-2.5 py-1 mb-2">
-                                            <Zap size={11} className="text-emerald-400 flex-shrink-0" />
-                                            <span className="text-emerald-400 text-[10px] font-bold">Regla aplicada:</span>
-                                            <span className="text-emerald-300 text-[10px] font-mono truncate">"{r.ruleApplied}"</span>
+                                        <div className="flex items-center gap-1.5 bg-success-light/50 border border-success/20 rounded-button px-2.5 py-1 mb-2">
+                                            <Zap size={11} className="text-success flex-shrink-0" />
+                                            <span className="text-success text-[10px] font-bold">Regla aplicada:</span>
+                                            <span className="text-success text-[10px] font-mono truncate">"{r.ruleApplied}"</span>
                                         </div>
                                     )}
 
@@ -1035,14 +1035,14 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                     <div className="flex justify-between items-start gap-2">
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center gap-2 flex-wrap">
-                                                <h4 className="font-bold text-white text-base">{r.proveedor || 'Proveedor desconocido'}</h4>
+                                                <h4 className="font-bold text-sand-900 text-base">{r.proveedor || 'Proveedor desconocido'}</h4>
                                                 {/* Fase 3.1: badge proveïdor */}
                                                 <ConfidenceBadge source={fs.proveedor} />
                                                 {r.inferredQuarter && (
-                                                    <span className="bg-blue-600/20 text-blue-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-blue-500/20">T{r.inferredQuarter}</span>
+                                                    <span className="bg-terra-400/20 text-terra-400 text-[10px] px-2 py-0.5 rounded-full font-bold border border-terra-200">T{r.inferredQuarter}</span>
                                                 )}
                                             </div>
-                                            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                                            <p className="text-xs text-sand-500 mt-0.5 flex items-center gap-1.5 flex-wrap">
                                                 <Calendar size={12} />
                                                 <span>{formatDate(r.fecha)}</span>
                                                 {/* Fase 3.1: badge data (only if rule forced it) */}
@@ -1054,15 +1054,15 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                         </div>
 
                                         {/* Total + IVA amb badges */}
-                                        <div className="text-right bg-slate-900/50 px-3 py-2 rounded-lg border border-slate-700/50 flex-shrink-0">
+                                        <div className="text-right bg-white px-3 py-2 rounded-button border border-sand-200 flex-shrink-0">
                                             <div className="flex items-center justify-end gap-1.5">
-                                                <div className="text-lg font-black text-white leading-none">{formatCurrency(r.total)}</div>
+                                                <div className="text-lg font-black text-sand-900 leading-none">{formatCurrency(r.total)}</div>
                                                 {/* Fase 3.1: badge total validat */}
                                                 {isTotalValidated && <ConfidenceBadge source="validated" />}
                                             </div>
                                             {r.ivaPorcentaje !== undefined && (
                                                 <div className="flex items-center justify-end gap-1.5 mt-1">
-                                                    <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">IVA {r.ivaPorcentaje}%</span>
+                                                    <span className="text-[10px] text-sand-500 font-bold uppercase tracking-wider">IVA {r.ivaPorcentaje}%</span>
                                                     {/* Fase 3.1: badge IVA */}
                                                     {fs.ivaPorcentaje && <ConfidenceBadge source={fs.ivaPorcentaje} />}
                                                 </div>
@@ -1075,7 +1075,7 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                                 <div className="text-[9px] text-yellow-400 mt-0.5 font-mono">+R.E. {r.recargoEquivalencia.percent}%</div>
                                             )}
                                             {r.mixedVat && (
-                                                <div className="text-[9px] text-blue-400 mt-0.5">IVA mixt ({r.mixedVat.length} tipus)</div>
+                                                <div className="text-[9px] text-terra-400 mt-0.5">IVA mixt ({r.mixedVat.length} tipus)</div>
                                             )}
                                         </div>
                                     </div>
@@ -1084,7 +1084,7 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                     {warnings.length > 0 && (
                                         <div className="flex flex-wrap gap-1 mt-2">
                                             {warnings.map((w, wi) => (
-                                                <span key={wi} className="flex items-center gap-1 bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[9px] font-semibold px-1.5 py-0.5 rounded-full">
+                                                <span key={wi} className="flex items-center gap-1 bg-amber-500/10 text-warning border border-amber-500/20 text-[9px] font-semibold px-1.5 py-0.5 rounded-full">
                                                     <AlertCircle size={9} /> {w.msg}
                                                 </span>
                                             ))}
@@ -1092,10 +1092,10 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                     )}
 
                                     {/* Editable fields */}
-                                    <div className="mt-3 flex items-center gap-3 pt-3 border-t border-slate-700/30" onClick={e => e.stopPropagation()}>
+                                    <div className="mt-3 flex items-center gap-3 pt-3 border-t border-sand-300/30" onClick={e => e.stopPropagation()}>
                                         {/* Categoria amb badge */}
                                         <div className="flex-1">
-                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 flex items-center gap-1.5">
+                                            <label className="text-[10px] text-sand-500 uppercase font-bold mb-1 flex items-center gap-1.5">
                                                 Categoría
                                                 <ConfidenceBadge source={catSource} />
                                             </label>
@@ -1103,12 +1103,12 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                                 value={r.categoria}
                                                 onChange={e => handleFieldChange(r, 'categoria', e.target.value)}
                                                 options={defaultCategories.map(c => ({ value: c, label: c }))}
-                                                className="h-8 text-xs bg-slate-900/50 border-slate-700"
+                                                className="h-8 text-xs bg-white border-sand-300"
                                             />
                                         </div>
                                         {/* CIF/NIF amb badge */}
                                         <div className="w-28">
-                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 flex items-center gap-1.5">
+                                            <label className="text-[10px] text-sand-500 uppercase font-bold mb-1 flex items-center gap-1.5">
                                                 CIF/NIF
                                                 {fs.cifProveedor && <ConfidenceBadge source={fs.cifProveedor} />}
                                             </label>
@@ -1116,25 +1116,25 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                                                 type="text"
                                                 value={r.cifProveedor || ''}
                                                 onChange={e => handleFieldChange(r, 'cifProveedor', e.target.value)}
-                                                className="w-full h-8 text-xs bg-slate-900/50 border border-slate-700 rounded-md px-2 text-white outline-none focus:border-blue-500 font-mono"
+                                                className="w-full h-8 text-xs bg-white border border-sand-300 rounded-md px-2 text-sand-900 outline-none focus:border-terra-400 font-mono"
                                                 placeholder="B12345678"
                                             />
                                         </div>
                                         {/* Concepto */}
                                         <div className="w-1/4">
-                                            <label className="text-[10px] text-slate-500 uppercase font-bold mb-1 block">Concepto</label>
+                                            <label className="text-[10px] text-sand-500 uppercase font-bold mb-1 block">Concepto</label>
                                             <input
                                                 type="text"
                                                 value={r.concepto || ''}
                                                 onChange={e => handleFieldChange(r, 'concepto', e.target.value)}
-                                                className="w-full h-8 text-xs bg-slate-900/50 border border-slate-700 rounded-md px-2 text-white outline-none focus:border-blue-500"
+                                                className="w-full h-8 text-xs bg-white border border-sand-300 rounded-md px-2 text-sand-900 outline-none focus:border-terra-400"
                                             />
                                         </div>
                                     </div>
 
                                     {/* Fase 3.2: Suggest crear regla quan hi ha modificacions */}
                                     {modifiedSet.has(r) && onOpenRuleCreator && (
-                                        <div className="mt-2 flex items-center gap-2 bg-cyan-500/8 border border-cyan-500/15 rounded-lg px-2.5 py-1.5" onClick={e => e.stopPropagation()}>
+                                        <div className="mt-2 flex items-center gap-2 bg-cyan-500/8 border border-cyan-500/15 rounded-button px-2.5 py-1.5" onClick={e => e.stopPropagation()}>
                                             <Tag size={11} className="text-cyan-400 flex-shrink-0" />
                                             <span className="text-cyan-300 text-[10px]">Has modificat camps.</span>
                                             <button
@@ -1152,15 +1152,15 @@ const ScanResultModal = ({ open, onClose, results, onImport, onOpenRuleCreator }
                 })}
 
                 {results.length === 0 && (
-                    <div className="py-10 text-center text-slate-500">No s'han trobat resultats.</div>
+                    <div className="py-10 text-center text-sand-500">No s'han trobat resultats.</div>
                 )}
             </div>
 
-            <div className="flex justify-between items-center pt-6 mt-4 border-t border-slate-800">
-                <span className="text-slate-400 text-sm font-medium">{selected.length} elements seleccionats</span>
+            <div className="flex justify-between items-center pt-6 mt-4 border-t border-sand-300">
+                <span className="text-sand-600 text-sm font-medium">{selected.length} elements seleccionats</span>
                 <div className="flex gap-3">
-                    <Button variant="ghost" onClick={onClose} className="text-slate-400 hover:text-white">Cancelar</Button>
-                    <Button onClick={handleImport} className="bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-900/20 px-6">
+                    <Button variant="ghost" onClick={onClose} className="text-sand-600 hover:text-terra-500">Cancelar</Button>
+                    <Button onClick={handleImport} className="bg-terra-400 hover:bg-terra-500 shadow-card-hover px-6">
                         Confirmar Importació
                     </Button>
                 </div>
@@ -1195,11 +1195,11 @@ const RuleSuggestionsBanner = ({ suggestions, onCreateRule, onDismiss }) => {
     return (
         <div className="space-y-2">
             {suggestions.map((sug, i) => (
-                <div key={i} className="flex items-center justify-between gap-3 bg-cyan-500/8 border border-cyan-500/20 px-4 py-3 rounded-xl">
+                <div key={i} className="flex items-center justify-between gap-3 bg-cyan-500/8 border border-cyan-500/20 px-4 py-3 rounded-soft">
                     <div className="flex items-center gap-2.5 min-w-0">
                         <TrendingUp size={14} className="text-cyan-400 flex-shrink-0" />
-                        <p className="text-xs text-slate-300 truncate">
-                            <strong className="text-white">{sug.name}</strong>
+                        <p className="text-xs text-sand-700 truncate">
+                            <strong className="text-sand-900">{sug.name}</strong>
                             {' '}apareix{' '}
                             <strong className="text-cyan-400">{sug.count} vegades</strong>
                             {' '}sense regla.
@@ -1208,13 +1208,13 @@ const RuleSuggestionsBanner = ({ suggestions, onCreateRule, onDismiss }) => {
                     <div className="flex items-center gap-2 flex-shrink-0">
                         <button
                             onClick={() => { onCreateRule(sug.data); onDismiss(i); }}
-                            className="text-xs font-bold text-cyan-400 bg-cyan-500/15 border border-cyan-500/25 px-3 py-1.5 rounded-lg hover:bg-cyan-500/25 transition-colors whitespace-nowrap"
+                            className="text-xs font-bold text-cyan-400 bg-cyan-500/15 border border-cyan-500/25 px-3 py-1.5 rounded-button hover:bg-cyan-500/25 transition-colors whitespace-nowrap"
                         >
                             Crear regla
                         </button>
                         <button
                             onClick={() => onDismiss(i)}
-                            className="text-slate-500 hover:text-slate-300 transition-colors p-1 rounded-lg hover:bg-slate-800"
+                            className="text-sand-500 hover:text-sand-700 transition-colors p-1 rounded-button hover:bg-sand-100"
                         >
                             <X size={14} />
                         </button>
@@ -1308,7 +1308,7 @@ const PrecisionDashboard = ({ onCreateRule }) => {
 
     if (!stats) {
         return (
-            <div className="py-6 text-center text-slate-500 text-sm">
+            <div className="py-6 text-center text-sand-500 text-sm">
                 No hi ha gastos per analitzar.
             </div>
         );
@@ -1318,29 +1318,29 @@ const PrecisionDashboard = ({ onCreateRule }) => {
     const totalWarnings = stats.warnings.badTotal + stats.warnings.unknownProvider + stats.warnings.noCategory;
 
     const coverageBars = [
-        { label: 'Amb regla',    count: stats.withRule,   color: 'bg-emerald-500', textColor: 'text-emerald-400', desc: 'Forçats per regla d\'usuari' },
+        { label: 'Amb regla',    count: stats.withRule,   color: 'bg-success', textColor: 'text-success', desc: 'Forçats per regla d\'usuari' },
         { label: 'Amb memòria',  count: stats.withMemory, color: 'bg-purple-500',  textColor: 'text-purple-400',  desc: 'Reconeguts per memòria' },
-        { label: 'Autodetectat', count: stats.withAuto,   color: 'bg-amber-500',   textColor: 'text-amber-400',   desc: 'Detectats automàticament' },
+        { label: 'Autodetectat', count: stats.withAuto,   color: 'bg-amber-500',   textColor: 'text-warning',   desc: 'Detectats automàticament' },
     ];
 
     return (
         <div className="space-y-5">
             {/* ── Barres de cobertura ── */}
             <div className="space-y-3">
-                <h4 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Cobertura actual</h4>
+                <h4 className="text-[10px] text-sand-500 uppercase font-bold tracking-widest">Cobertura actual</h4>
                 {coverageBars.map(({ label, count, color, textColor, desc }) => (
                     <div key={label} className="space-y-1">
                         <div className="flex justify-between items-center text-xs">
                             <div className="flex items-center gap-2">
                                 <span className={`font-semibold ${textColor}`}>{label}</span>
-                                <span className="text-slate-600 text-[10px]">{desc}</span>
+                                <span className="text-sand-400 text-[10px]">{desc}</span>
                             </div>
                             <span>
                                 <span className={`font-bold ${textColor}`}>{pct(count)}%</span>
-                                <span className="text-slate-600 ml-1.5">({count} / {stats.total})</span>
+                                <span className="text-sand-400 ml-1.5">({count} / {stats.total})</span>
                             </span>
                         </div>
-                        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div className="h-1.5 bg-sand-100 rounded-full overflow-hidden">
                             <div
                                 className={`h-full ${color} rounded-full transition-all duration-700`}
                                 style={{ width: `${pct(count)}%` }}
@@ -1353,36 +1353,36 @@ const PrecisionDashboard = ({ onCreateRule }) => {
             {/* ── Proveïdors sense regla ── */}
             {stats.unruledProviders.length > 0 ? (
                 <div className="space-y-2">
-                    <h4 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">
+                    <h4 className="text-[10px] text-sand-500 uppercase font-bold tracking-widest">
                         Proveïdors sense regla ({stats.unruledProviders.length})
                     </h4>
                     <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar pr-1">
                         {stats.unruledProviders.slice(0, 10).map((prov, i) => (
                             <div key={i}
-                                className="flex items-center justify-between gap-3 bg-slate-800/40 px-3 py-2 rounded-lg border border-slate-700/30 hover:border-slate-600/50 transition-colors">
+                                className="flex items-center justify-between gap-3 bg-sand-100 px-3 py-2 rounded-button border border-sand-300/30 hover:border-sand-400/50 transition-colors">
                                 <div className="min-w-0 flex-1">
-                                    <span className="text-slate-200 text-sm font-medium truncate block">{prov.name}</span>
-                                    <span className="text-slate-500 text-[10px]">
+                                    <span className="text-sand-800 text-sm font-medium truncate block">{prov.name}</span>
+                                    <span className="text-sand-500 text-[10px]">
                                         {prov.count} gasto{prov.count !== 1 ? 's' : ''}
                                     </span>
                                 </div>
                                 <button
                                     onClick={() => onCreateRule(prov.exampleExpense)}
-                                    className="flex-shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-lg hover:bg-blue-500/20 transition-colors"
+                                    className="flex-shrink-0 flex items-center gap-1 text-xs font-semibold text-terra-400 bg-terra-50 border border-terra-200 px-2.5 py-1 rounded-button hover:bg-terra-50 transition-colors"
                                 >
                                     <Tag size={10} /> Crear
                                 </button>
                             </div>
                         ))}
                         {stats.unruledProviders.length > 10 && (
-                            <p className="text-xs text-slate-600 text-center py-1">
+                            <p className="text-xs text-sand-400 text-center py-1">
                                 + {stats.unruledProviders.length - 10} proveïdors més
                             </p>
                         )}
                     </div>
                 </div>
             ) : (
-                <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/8 border border-emerald-500/15 px-3 py-2 rounded-lg">
+                <div className="flex items-center gap-2 text-xs text-success bg-success-light/50 border border-success/20 px-3 py-2 rounded-button">
                     <Check size={12} />
                     <span>Tots els proveïdors estan coberts per alguna regla.</span>
                 </div>
@@ -1391,23 +1391,23 @@ const PrecisionDashboard = ({ onCreateRule }) => {
             {/* ── Incidències ── */}
             {totalWarnings > 0 && (
                 <div className="space-y-1.5">
-                    <h4 className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">
+                    <h4 className="text-[10px] text-sand-500 uppercase font-bold tracking-widest">
                         Gastos amb incidències ({totalWarnings})
                     </h4>
                     {stats.warnings.badTotal > 0 && (
-                        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-lg">
+                        <div className="flex items-center gap-2 text-xs text-warning bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-button">
                             <AlertCircle size={12} className="flex-shrink-0" />
                             <span>Base + IVA ≠ Total: <strong>{stats.warnings.badTotal}</strong> gastos</span>
                         </div>
                     )}
                     {stats.warnings.unknownProvider > 0 && (
-                        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-lg">
+                        <div className="flex items-center gap-2 text-xs text-warning bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-button">
                             <AlertCircle size={12} className="flex-shrink-0" />
                             <span>Proveïdor desconegut: <strong>{stats.warnings.unknownProvider}</strong> gastos</span>
                         </div>
                     )}
                     {stats.warnings.noCategory > 0 && (
-                        <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-lg">
+                        <div className="flex items-center gap-2 text-xs text-warning bg-amber-500/8 border border-amber-500/15 px-3 py-1.5 rounded-button">
                             <AlertCircle size={12} className="flex-shrink-0" />
                             <span>Sense categoria específica: <strong>{stats.warnings.noCategory}</strong> gastos</span>
                         </div>
@@ -1416,7 +1416,7 @@ const PrecisionDashboard = ({ onCreateRule }) => {
             )}
 
             {totalWarnings === 0 && stats.unruledProviders.length === 0 && (
-                <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/8 border border-emerald-500/15 px-3 py-2.5 rounded-lg">
+                <div className="flex items-center gap-2 text-xs text-success bg-success-light/50 border border-success/20 px-3 py-2.5 rounded-button">
                     <Check size={12} />
                     <span className="font-medium">Excel·lent! Tots els gastos estan ben coberts i sense incidències.</span>
                 </div>

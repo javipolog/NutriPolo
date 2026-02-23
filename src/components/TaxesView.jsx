@@ -76,24 +76,24 @@ const TrimestralView = ({ invoices, expenses, selectedYear, selectedQuarter }) =
       {/* Model 303 - IVA */}
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="p-3 rounded-xl bg-gradient-to-br from-blue-600 to-blue-700"><Calculator size={24} className="text-white" /></div>
+          <div className="p-3 rounded-soft bg-terra-400"><Calculator size={24} className="text-white" /></div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Modelo 303 - IVA</h3>
-            <p className="text-slate-400 text-sm">Declaración trimestral T{selectedQuarter}</p>
+            <h3 className="font-serif text-lg font-semibold text-sand-900">Modelo 303 - IVA</h3>
+            <p className="text-sand-600 text-sm">Declaración trimestral T{selectedQuarter}</p>
           </div>
         </div>
         <div className="space-y-3">
-          <div className="p-4 bg-slate-800/50 rounded-xl">
-            <p className="text-sm text-slate-400">IVA Repercutido ({quarterData.numFacturas} facturas{quarterData.numRectificativas > 0 ? `, ${quarterData.numRectificativas} rect.` : ''})</p>
-            <p className="text-xl font-semibold text-white mt-1">{formatCurrency(quarterData.ivaRepercutido)}</p>
+          <div className="p-4 bg-sand-100 rounded-soft">
+            <p className="text-sm text-sand-600">IVA Repercutido ({quarterData.numFacturas} facturas{quarterData.numRectificativas > 0 ? `, ${quarterData.numRectificativas} rect.` : ''})</p>
+            <p className="font-serif text-xl font-semibold text-sand-900 mt-1">{formatCurrency(quarterData.ivaRepercutido)}</p>
           </div>
-          <div className="p-4 bg-slate-800/50 rounded-xl">
-            <p className="text-sm text-slate-400">IVA Soportado ({quarterData.numGastos} gastos)</p>
-            <p className="text-xl font-semibold text-white mt-1">-{formatCurrency(quarterData.ivaSoportado)}</p>
+          <div className="p-4 bg-sand-100 rounded-soft">
+            <p className="text-sm text-sand-600">IVA Soportado ({quarterData.numGastos} gastos)</p>
+            <p className="font-serif text-xl font-semibold text-sand-900 mt-1">-{formatCurrency(quarterData.ivaSoportado)}</p>
           </div>
-          <div className={`p-4 rounded-xl ${resultado303 >= 0 ? 'bg-red-900/30 border border-red-800' : 'bg-emerald-900/30 border border-emerald-800'}`}>
-            <p className="text-sm text-slate-400">Resultado (a ingresar)</p>
-            <p className={`text-2xl font-bold mt-1 ${resultado303 >= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+          <div className={`p-4 rounded-soft ${resultado303 >= 0 ? 'bg-danger-light border border-danger/30' : 'bg-success-light border border-success/30'}`}>
+            <p className="text-sm text-sand-600">Resultado (a ingresar)</p>
+            <p className={`text-2xl font-bold mt-1 ${resultado303 >= 0 ? 'text-danger' : 'text-success'}`}>
               {resultado303 < 0 ? '-' : ''}{formatCurrency(Math.abs(resultado303))}
             </p>
           </div>
@@ -103,46 +103,46 @@ const TrimestralView = ({ invoices, expenses, selectedYear, selectedQuarter }) =
       {/* Model 130 - IRPF */}
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="p-3 rounded-xl bg-gradient-to-br from-amber-600 to-amber-700"><FileText size={24} className="text-white" /></div>
+          <div className="p-3 rounded-soft bg-gradient-to-br from-amber-600 to-amber-700"><FileText size={24} className="text-white" /></div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Modelo 130 - IRPF</h3>
-            <p className="text-slate-400 text-sm">Pago fraccionado acumulado T1-T{selectedQuarter}</p>
+            <h3 className="font-serif text-lg font-semibold text-sand-900">Modelo 130 - IRPF</h3>
+            <p className="text-sand-600 text-sm">Pago fraccionado acumulado T1-T{selectedQuarter}</p>
           </div>
         </div>
         <div className="space-y-3">
-          <div className="p-4 bg-slate-800/50 rounded-xl">
-            <p className="text-sm text-slate-400">Ingresos acumulados (T1-T{selectedQuarter})</p>
-            <p className="text-xl font-semibold text-white mt-1">{formatCurrency(accumulatedData.baseIngresos)}</p>
+          <div className="p-4 bg-sand-100 rounded-soft">
+            <p className="text-sm text-sand-600">Ingresos acumulados (T1-T{selectedQuarter})</p>
+            <p className="font-serif text-xl font-semibold text-sand-900 mt-1">{formatCurrency(accumulatedData.baseIngresos)}</p>
           </div>
-          <div className="p-4 bg-slate-800/50 rounded-xl">
-            <p className="text-sm text-slate-400">Gastos deducibles acumulados</p>
-            <p className="text-xl font-semibold text-white mt-1">-{formatCurrency(accumulatedData.baseGastos)}</p>
+          <div className="p-4 bg-sand-100 rounded-soft">
+            <p className="text-sm text-sand-600">Gastos deducibles acumulados</p>
+            <p className="font-serif text-xl font-semibold text-sand-900 mt-1">-{formatCurrency(accumulatedData.baseGastos)}</p>
           </div>
-          <div className="p-4 bg-slate-800/50 rounded-xl">
-            <p className="text-sm text-slate-400">Retenciones IRPF acumuladas</p>
-            <p className="text-xl font-semibold text-white mt-1">-{formatCurrency(accumulatedData.irpfRetenido)}</p>
+          <div className="p-4 bg-sand-100 rounded-soft">
+            <p className="text-sm text-sand-600">Retenciones IRPF acumuladas</p>
+            <p className="font-serif text-xl font-semibold text-sand-900 mt-1">-{formatCurrency(accumulatedData.irpfRetenido)}</p>
           </div>
           {selectedQuarter > 1 && (
-            <div className="p-4 bg-slate-800/50 rounded-xl">
-              <p className="text-sm text-slate-400">Pagos realizados trimestres anteriores</p>
-              <p className="text-xl font-semibold text-amber-400 mt-1">-{formatCurrency(pagamentsAnteriors)}</p>
+            <div className="p-4 bg-sand-100 rounded-soft">
+              <p className="text-sm text-sand-600">Pagos realizados trimestres anteriores</p>
+              <p className="text-xl font-semibold text-warning mt-1">-{formatCurrency(pagamentsAnteriors)}</p>
             </div>
           )}
-          <div className={`p-4 rounded-xl ${resultado130 > 0 ? 'bg-red-900/30 border border-red-800' : 'bg-emerald-900/30 border border-emerald-800'}`}>
-            <p className="text-sm text-slate-400">A ingresar este trimestre</p>
-            <p className={`text-2xl font-bold mt-1 ${resultado130 > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+          <div className={`p-4 rounded-soft ${resultado130 > 0 ? 'bg-danger-light border border-danger/30' : 'bg-success-light border border-success/30'}`}>
+            <p className="text-sm text-sand-600">A ingresar este trimestre</p>
+            <p className={`text-2xl font-bold mt-1 ${resultado130 > 0 ? 'text-danger' : 'text-success'}`}>
               {formatCurrency(resultado130)}
             </p>
           </div>
         </div>
-        <div className="mt-4 p-3 bg-slate-900/50 rounded-xl border border-slate-800 text-xs text-slate-500 space-y-1">
-          <p className="font-semibold text-slate-400 mb-2">Cálculo acumulado:</p>
+        <div className="mt-4 p-3 bg-white rounded-soft border border-sand-300 text-xs text-sand-500 space-y-1">
+          <p className="font-semibold text-sand-600 mb-2">Cálculo acumulado:</p>
           <p>Rendimiento neto: {formatCurrency(rendimentAcumulat)}</p>
           <p>20% s/rendimiento: {formatCurrency(rendimentAcumulat * 0.20)}</p>
           <p>- Retenciones: -{formatCurrency(accumulatedData.irpfRetenido)}</p>
           <p>= Total fraccionado: {formatCurrency(pagamentFraccionatTotal)}</p>
           {selectedQuarter > 1 && <p>- Pagos anteriores: -{formatCurrency(pagamentsAnteriors)}</p>}
-          <p className="font-semibold text-slate-300">= A ingresar T{selectedQuarter}: {formatCurrency(resultado130)}</p>
+          <p className="font-semibold text-sand-700">= A ingresar T{selectedQuarter}: {formatCurrency(resultado130)}</p>
         </div>
       </Card>
     </div>
@@ -228,63 +228,63 @@ const AnualView = ({ invoices, expenses, selectedYear }) => {
     <div className="space-y-6">
       {/* Taula de 4 trimestres */}
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-          <TrendingUp size={20} className="text-blue-400" />
+        <h3 className="font-serif text-lg font-semibold text-sand-900 mb-4 flex items-center gap-2">
+          <TrendingUp size={20} className="text-terra-400" />
           Resumen por trimestres — {selectedYear}
         </h3>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
-              <tr className="border-b border-slate-700">
-                <th className="py-2 px-4 text-left text-slate-400 font-medium">Trimestre</th>
-                <th className="py-2 px-4 text-right text-slate-400 font-medium">Base Ingresos</th>
-                <th className="py-2 px-4 text-right text-slate-400 font-medium">IVA Rep.</th>
-                <th className="py-2 px-4 text-right text-slate-400 font-medium">IVA Sop.</th>
-                <th className="py-2 px-4 text-right text-slate-400 font-medium">Mod. 303</th>
-                <th className="py-2 px-4 text-right text-slate-400 font-medium">IRPF Ret.</th>
-                <th className="py-2 px-4 text-right text-slate-400 font-medium">Mod. 130</th>
-                <th className="py-2 px-4 text-left text-slate-400 font-medium">Plazo</th>
+              <tr className="border-b border-sand-300">
+                <th className="py-2 px-4 text-left text-sand-600 font-medium">Trimestre</th>
+                <th className="py-2 px-4 text-right text-sand-600 font-medium">Base Ingresos</th>
+                <th className="py-2 px-4 text-right text-sand-600 font-medium">IVA Rep.</th>
+                <th className="py-2 px-4 text-right text-sand-600 font-medium">IVA Sop.</th>
+                <th className="py-2 px-4 text-right text-sand-600 font-medium">Mod. 303</th>
+                <th className="py-2 px-4 text-right text-sand-600 font-medium">IRPF Ret.</th>
+                <th className="py-2 px-4 text-right text-sand-600 font-medium">Mod. 130</th>
+                <th className="py-2 px-4 text-left text-sand-600 font-medium">Plazo</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50">
+            <tbody className="divide-y divide-sand-200">
               {quarters.map(({ q, d, resultado303, resultado130, deadline }) => {
                 const isPast = selectedYear < currentYear || (selectedYear === currentYear && q < currentQ);
                 const isCurrent = selectedYear === currentYear && q === currentQ;
                 return (
-                  <tr key={q} className={`transition-colors ${isCurrent ? 'bg-blue-900/20' : 'hover:bg-slate-800/20'}`}>
+                  <tr key={q} className={`transition-colors ${isCurrent ? 'bg-terra-50' : 'hover:bg-sand-50'}`}>
                     <td className="py-3 px-4">
                       <div className="flex items-center gap-2">
-                        <span className={`font-semibold ${isCurrent ? 'text-blue-300' : 'text-white'}`}>T{q}</span>
-                        {isCurrent && <span className="text-xs bg-blue-600/30 text-blue-300 px-1.5 rounded">actual</span>}
-                        {isPast && !isCurrent && <span className="text-xs text-slate-600">pasado</span>}
+                        <span className={`font-semibold ${isCurrent ? 'text-terra-500' : 'text-sand-800'}`}>T{q}</span>
+                        {isCurrent && <span className="text-xs bg-terra-400/30 text-terra-300 px-1.5 rounded">actual</span>}
+                        {isPast && !isCurrent && <span className="text-xs text-sand-400">pasado</span>}
                       </div>
                     </td>
-                    <td className="py-3 px-4 text-right font-mono text-slate-300">{formatCurrency(d.baseIngresos)}</td>
-                    <td className="py-3 px-4 text-right font-mono text-slate-400">{formatCurrency(d.ivaRepercutido)}</td>
-                    <td className="py-3 px-4 text-right font-mono text-slate-400">{formatCurrency(d.ivaSoportado)}</td>
-                    <td className={`py-3 px-4 text-right font-mono font-semibold ${resultado303 >= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                    <td className="py-3 px-4 text-right font-mono text-sand-700">{formatCurrency(d.baseIngresos)}</td>
+                    <td className="py-3 px-4 text-right font-mono text-sand-600">{formatCurrency(d.ivaRepercutido)}</td>
+                    <td className="py-3 px-4 text-right font-mono text-sand-600">{formatCurrency(d.ivaSoportado)}</td>
+                    <td className={`py-3 px-4 text-right font-mono font-semibold ${resultado303 >= 0 ? 'text-danger' : 'text-success'}`}>
                       {resultado303 < 0 ? '-' : ''}{formatCurrency(Math.abs(resultado303))}
                     </td>
-                    <td className="py-3 px-4 text-right font-mono text-slate-400">{formatCurrency(d.irpfRetenido)}</td>
-                    <td className={`py-3 px-4 text-right font-mono font-semibold ${resultado130 > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                    <td className="py-3 px-4 text-right font-mono text-sand-600">{formatCurrency(d.irpfRetenido)}</td>
+                    <td className={`py-3 px-4 text-right font-mono font-semibold ${resultado130 > 0 ? 'text-danger' : 'text-success'}`}>
                       {formatCurrency(resultado130)}
                     </td>
-                    <td className="py-3 px-4 text-xs text-slate-500">{deadline}</td>
+                    <td className="py-3 px-4 text-xs text-sand-500">{deadline}</td>
                   </tr>
                 );
               })}
             </tbody>
-            <tfoot className="border-t-2 border-slate-600">
-              <tr className="bg-slate-800/30">
-                <td className="py-3 px-4 font-bold text-white">TOTAL {selectedYear}</td>
-                <td className="py-3 px-4 text-right font-mono font-bold text-white">{formatCurrency(totalAnual.baseIngresos)}</td>
-                <td className="py-3 px-4 text-right font-mono font-bold text-white">{formatCurrency(totalAnual.ivaRepercutido)}</td>
-                <td className="py-3 px-4 text-right font-mono text-slate-300">{formatCurrency(totalAnual.ivaSoportado)}</td>
-                <td className={`py-3 px-4 text-right font-mono font-bold ${totalAnual.total303 >= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+            <tfoot className="border-t-2 border-sand-400">
+              <tr className="bg-sand-50">
+                <td className="py-3 px-4 font-bold text-sand-900">TOTAL {selectedYear}</td>
+                <td className="py-3 px-4 text-right font-mono font-bold text-sand-900">{formatCurrency(totalAnual.baseIngresos)}</td>
+                <td className="py-3 px-4 text-right font-mono font-bold text-sand-900">{formatCurrency(totalAnual.ivaRepercutido)}</td>
+                <td className="py-3 px-4 text-right font-mono text-sand-700">{formatCurrency(totalAnual.ivaSoportado)}</td>
+                <td className={`py-3 px-4 text-right font-mono font-bold ${totalAnual.total303 >= 0 ? 'text-danger' : 'text-success'}`}>
                   {totalAnual.total303 < 0 ? '-' : ''}{formatCurrency(Math.abs(totalAnual.total303))}
                 </td>
-                <td className="py-3 px-4 text-right font-mono text-slate-300">{formatCurrency(totalAnual.irpfRetenido)}</td>
-                <td className={`py-3 px-4 text-right font-mono font-bold ${totalAnual.total130 > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+                <td className="py-3 px-4 text-right font-mono text-sand-700">{formatCurrency(totalAnual.irpfRetenido)}</td>
+                <td className={`py-3 px-4 text-right font-mono font-bold ${totalAnual.total130 > 0 ? 'text-danger' : 'text-success'}`}>
                   {formatCurrency(totalAnual.total130)}
                 </td>
                 <td />
@@ -297,35 +297,35 @@ const AnualView = ({ invoices, expenses, selectedYear }) => {
       {/* Modelo 100 estimat */}
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-5">
-          <div className="p-3 rounded-xl bg-gradient-to-br from-violet-600 to-violet-700"><TrendingUp size={22} className="text-white" /></div>
+          <div className="p-3 rounded-soft bg-info"><TrendingUp size={22} className="text-white" /></div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Modelo 100 — Estimación IRPF Anual</h3>
-            <p className="text-slate-400 text-sm">Renta {selectedYear} (estimación simplificada al 20%)</p>
+            <h3 className="font-serif text-lg font-semibold text-sand-900">Modelo 100 — Estimación IRPF Anual</h3>
+            <p className="text-sand-600 text-sm">Renta {selectedYear} (estimación simplificada al 20%)</p>
           </div>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           {[
-            { label: 'Ingresos brutos', value: modelo100.ingresos, color: 'text-white' },
-            { label: 'Gastos deducibles', value: -modelo100.gastos, color: 'text-red-400', prefix: '-' },
-            { label: 'Rendimiento neto', value: modelo100.rendimiento, color: 'text-blue-300', bold: true },
-            { label: 'Cuota estimada (20%)', value: modelo100.cuotaEstimada, color: 'text-amber-400' },
-            { label: 'Retenciones practicadas', value: -modelo100.retenciones, color: 'text-emerald-400', prefix: '-' },
-            { label: 'Pagos a cuenta (130)', value: -modelo100.pagosAcuenta, color: 'text-emerald-400', prefix: '-' },
+            { label: 'Ingresos brutos', value: modelo100.ingresos, color: 'text-sand-900' },
+            { label: 'Gastos deducibles', value: -modelo100.gastos, color: 'text-danger', prefix: '-' },
+            { label: 'Rendimiento neto', value: modelo100.rendimiento, color: 'text-terra-300', bold: true },
+            { label: 'Cuota estimada (20%)', value: modelo100.cuotaEstimada, color: 'text-warning' },
+            { label: 'Retenciones practicadas', value: -modelo100.retenciones, color: 'text-success', prefix: '-' },
+            { label: 'Pagos a cuenta (130)', value: -modelo100.pagosAcuenta, color: 'text-success', prefix: '-' },
           ].map(({ label, value, color, bold }) => (
-            <div key={label} className="p-4 bg-slate-800/40 rounded-xl">
-              <p className="text-xs text-slate-400">{label}</p>
+            <div key={label} className="p-4 bg-sand-100 rounded-soft">
+              <p className="text-xs text-sand-600">{label}</p>
               <p className={`text-lg font-${bold ? 'bold' : 'semibold'} ${color} mt-1 font-mono`}>
                 {formatCurrency(Math.abs(value))}
               </p>
             </div>
           ))}
         </div>
-        <div className={`mt-4 p-4 rounded-xl border ${modelo100.resultadoEstimado >= 0 ? 'bg-red-900/20 border-red-800/50' : 'bg-emerald-900/20 border-emerald-800/50'}`}>
-          <p className="text-sm text-slate-400">Resultado estimado (a ingresar / a devolver)</p>
-          <p className={`text-3xl font-bold mt-1 font-mono ${modelo100.resultadoEstimado >= 0 ? 'text-red-400' : 'text-emerald-400'}`}>
+        <div className={`mt-4 p-4 rounded-soft border ${modelo100.resultadoEstimado >= 0 ? 'bg-danger-light border-danger/20' : 'bg-success-light border-success/20'}`}>
+          <p className="text-sm text-sand-600">Resultado estimado (a ingresar / a devolver)</p>
+          <p className={`text-3xl font-bold mt-1 font-mono ${modelo100.resultadoEstimado >= 0 ? 'text-danger' : 'text-success'}`}>
             {modelo100.resultadoEstimado < 0 ? '' : '+'}{formatCurrency(modelo100.resultadoEstimado)}
           </p>
-          <p className="text-xs text-slate-500 mt-2">
+          <p className="text-xs text-sand-500 mt-2">
             * Estimación simplificada. Consulta con tu gestor para el cálculo definitivo (deducciones personales, mínimo vital, etc.).
           </p>
         </div>
@@ -369,18 +369,18 @@ export const TaxesView = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Impuestos</h1>
-          <p className="text-slate-400 mt-1">Modelos 303, 130 y resumen fiscal anual</p>
+          <h1 className="font-serif text-2xl font-bold text-sand-900">Impuestos</h1>
+          <p className="text-sand-600 mt-1">Modelos 303, 130 y resumen fiscal anual</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Tab: Trimestral / Anual */}
-          <div className="flex gap-1 p-1 bg-slate-800 rounded-xl">
+          <div className="flex gap-1 p-1 bg-sand-100 rounded-soft">
             <button onClick={() => setViewMode('trimestral')}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode === 'trimestral' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+              className={`px-4 py-1.5 rounded-button text-sm font-medium transition-all ${viewMode === 'trimestral' ? 'bg-terra-400 text-white' : 'text-sand-600 hover:text-sand-800'}`}>
               Trimestral
             </button>
             <button onClick={() => setViewMode('anual')}
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode === 'anual' ? 'bg-violet-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+              className={`px-4 py-1.5 rounded-button text-sm font-medium transition-all ${viewMode === 'anual' ? 'bg-violet-600 text-white' : 'text-sand-600 hover:text-sand-800'}`}>
               Resumen Anual
             </button>
           </div>
@@ -410,14 +410,14 @@ export const TaxesView = () => {
 
       {/* Dates de presentació */}
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Fechas de presentación {selectedYear}</h3>
+        <h3 className="font-serif text-lg font-semibold text-sand-900 mb-4">Fechas de presentación {selectedYear}</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[{ q: 1, date: '20 abril' }, { q: 2, date: '20 julio' }, { q: 3, date: '20 octubre' }, { q: 4, date: '30 enero' }].map(({ q, date }) => (
-            <div key={q} className={`p-4 rounded-xl border ${viewMode === 'trimestral' && q === selectedQuarter ? 'bg-blue-900/30 border-blue-700' : 'bg-slate-800/30 border-slate-700'}`}>
-              <p className="text-sm font-medium text-slate-400">T{q}</p>
-              <p className="text-white font-semibold mt-1">{date}</p>
+            <div key={q} className={`p-4 rounded-soft border ${viewMode === 'trimestral' && q === selectedQuarter ? 'bg-terra-50 border-terra-300' : 'bg-sand-50 border-sand-300'}`}>
+              <p className="text-sm font-medium text-sand-600">T{q}</p>
+              <p className="text-sand-900 font-semibold mt-1">{date}</p>
               {viewMode === 'trimestral' && q === selectedQuarter && (
-                <span className="inline-block mt-2 text-xs bg-blue-600 text-white px-2 py-0.5 rounded">Actual</span>
+                <span className="inline-block mt-2 text-xs bg-terra-400 text-white px-2 py-0.5 rounded">Actual</span>
               )}
             </div>
           ))}

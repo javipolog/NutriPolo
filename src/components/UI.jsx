@@ -9,7 +9,6 @@ const ToastContext = createContext(null);
 export const useToast = () => {
   const context = useContext(ToastContext);
   if (!context) {
-    // Fallback for when context is not available
     return {
       success: (msg) => console.log('Toast success:', msg),
       error: (msg) => console.error('Toast error:', msg),
@@ -26,13 +25,11 @@ export const ToastProvider = ({ children }) => {
   const addToast = useCallback((message, type = 'info', duration = 4000) => {
     const id = Date.now() + Math.random();
     setToasts(prev => [...prev, { id, message, type }]);
-    
     if (duration > 0) {
       setTimeout(() => {
         setToasts(prev => prev.filter(t => t.id !== id));
       }, duration);
     }
-    
     return id;
   }, []);
 
@@ -42,9 +39,9 @@ export const ToastProvider = ({ children }) => {
 
   const toast = {
     success: (msg, duration) => addToast(msg, 'success', duration),
-    error: (msg, duration) => addToast(msg, 'error', duration),
+    error:   (msg, duration) => addToast(msg, 'error',   duration),
     warning: (msg, duration) => addToast(msg, 'warning', duration),
-    info: (msg, duration) => addToast(msg, 'info', duration),
+    info:    (msg, duration) => addToast(msg, 'info',    duration),
   };
 
   return (
@@ -57,7 +54,6 @@ export const ToastProvider = ({ children }) => {
 
 const ToastContainer = ({ toasts, onRemove }) => {
   if (toasts.length === 0) return null;
-
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
       {toasts.map(toast => (
@@ -68,55 +64,39 @@ const ToastContainer = ({ toasts, onRemove }) => {
 };
 
 export const Toast = ({ message, type = 'info', onClose }) => {
+  // Barra lateral de color + icona semàntica, fons blanc
   const config = {
-    success: {
-      bg: 'bg-emerald-600 border-emerald-500',
-      icon: CheckCircle,
-    },
-    error: {
-      bg: 'bg-red-600 border-red-500',
-      icon: AlertCircle,
-    },
-    warning: {
-      bg: 'bg-amber-600 border-amber-500',
-      icon: AlertTriangle,
-    },
-    info: {
-      bg: 'bg-blue-600 border-blue-500',
-      icon: Info,
-    },
+    success: { bar: 'bg-success',   icon: CheckCircle,    text: 'text-success'   },
+    error:   { bar: 'bg-danger',    icon: AlertCircle,    text: 'text-danger'    },
+    warning: { bar: 'bg-warning',   icon: AlertTriangle,  text: 'text-warning'   },
+    info:    { bar: 'bg-info',      icon: Info,           text: 'text-info'      },
   };
 
-  const { bg, icon: Icon } = config[type] || config.info;
+  const { bar, icon: Icon, text } = config[type] || config.info;
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (onClose) onClose();
-    }, 4000);
+    const timer = setTimeout(() => { if (onClose) onClose(); }, 4000);
     return () => clearTimeout(timer);
   }, [onClose]);
 
   return (
-    <div 
-      className={`${bg} text-white px-4 py-3 rounded-xl border shadow-xl flex items-center gap-3 min-w-[280px] max-w-md animate-slideIn`}
-      style={{
-        animation: 'slideIn 0.3s ease-out'
-      }}
-    >
-      <Icon size={18} className="shrink-0" />
-      <span className="flex-1 text-sm font-medium">{message}</span>
-      {onClose && (
-        <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors">
-          <X size={14} />
-        </button>
-      )}
+    <div className="bg-white border border-sand-300 shadow-toast rounded-soft flex items-stretch min-w-[280px] max-w-md toast-enter overflow-hidden">
+      <div className={`${bar} w-1 shrink-0`} />
+      <div className="flex items-center gap-3 px-3 py-3 flex-1">
+        <Icon size={16} className={`${text} shrink-0`} />
+        <span className="flex-1 text-sm font-medium text-sand-800">{message}</span>
+        {onClose && (
+          <button onClick={onClose} className="p-1 hover:bg-sand-100 rounded transition-colors">
+            <X size={13} className="text-sand-500" />
+          </button>
+        )}
+      </div>
     </div>
   );
 };
 
 // ============================================
 // ERROR BOUNDARY (#23)
-// Atrapa errors de rendering i mostra missatge amigable
 // ============================================
 export class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -137,19 +117,19 @@ export class ErrorBoundary extends React.Component {
       return (
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center max-w-md px-6">
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-              <AlertCircle size={32} className="text-red-400" />
+            <div className="w-16 h-16 bg-danger-light rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={32} className="text-danger" />
             </div>
-            <h2 className="text-xl font-bold text-white mb-2">Ha ocurrido un error</h2>
-            <p className="text-slate-400 mb-1 text-sm">
+            <h2 className="font-serif text-xl font-semibold text-sand-900 mb-2">Ha ocurrido un error</h2>
+            <p className="text-sand-600 mb-1 text-sm">
               {this.state.error?.message || 'Error desconocido'}
             </p>
-            <p className="text-slate-600 mb-6 text-xs">
+            <p className="text-sand-500 mb-6 text-xs">
               Si el problema persiste, exporta tus datos desde Configuración.
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
-              className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors text-sm font-medium"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-terra-400 hover:bg-terra-500 text-white rounded-button transition-colors text-sm font-medium"
             >
               <RefreshCw size={14} />
               Reintentar
@@ -163,39 +143,36 @@ export class ErrorBoundary extends React.Component {
 }
 
 // ============================================
-// CONFIRM MODAL (Reemplaça confirm() natiu)
+// CONFIRM MODAL
 // ============================================
-export const ConfirmModal = ({ 
-  open, 
-  onClose, 
-  onConfirm, 
-  title = 'Confirmar acción', 
+export const ConfirmModal = ({
+  open,
+  onClose,
+  onConfirm,
+  title = 'Confirmar acción',
   message = '¿Estás seguro de que quieres continuar?',
   confirmText = 'Confirmar',
   cancelText = 'Cancelar',
-  danger = false 
+  danger = false
 }) => {
   if (!open) return null;
 
-  const handleConfirm = () => {
-    onConfirm();
-    onClose();
-  };
+  const handleConfirm = () => { onConfirm(); onClose(); };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] animate-fadeIn"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden animate-slideIn"
+        className="w-full max-w-md bg-white border border-sand-300 rounded-soft shadow-modal overflow-hidden animate-scaleIn"
         onClick={e => e.stopPropagation()}
       >
         <div className="p-6">
-          <h3 className="text-lg font-semibold text-white mb-2">{title}</h3>
-          <p className="text-slate-400 text-sm">{message}</p>
+          <h3 className="font-serif text-lg font-semibold text-sand-900 mb-2">{title}</h3>
+          <p className="text-sand-600 text-sm">{message}</p>
         </div>
-        <div className="flex justify-end gap-3 px-6 py-4 bg-slate-800/50 border-t border-slate-800">
+        <div className="flex justify-end gap-3 px-6 py-4 bg-sand-50 border-t border-sand-300">
           <Button variant="ghost" onClick={onClose}>{cancelText}</Button>
           <Button variant={danger ? 'danger' : 'primary'} onClick={handleConfirm}>{confirmText}</Button>
         </div>
@@ -205,15 +182,11 @@ export const ConfirmModal = ({
 };
 
 // ============================================
-// useConfirm Hook - Per usar confirmacions fàcilment
+// useConfirm Hook
 // ============================================
 export const useConfirm = () => {
   const [state, setState] = useState({
-    open: false,
-    title: '',
-    message: '',
-    danger: false,
-    resolve: null,
+    open: false, title: '', message: '', danger: false, resolve: null,
   });
 
   const confirm = useCallback(({ title, message, danger = false }) => {
@@ -246,20 +219,26 @@ export const useConfirm = () => {
   return { confirm, ConfirmDialog };
 };
 
-// Button Component
+// ============================================
+// BUTTON
+// ============================================
 export const Button = ({ children, variant = 'primary', size = 'md', icon: Icon, className = '', ...props }) => {
   const variants = {
-    primary: 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20',
-    secondary: 'bg-slate-700 hover:bg-slate-600 text-white',
-    ghost: 'bg-transparent hover:bg-slate-800 text-slate-300',
-    danger: 'bg-red-600 hover:bg-red-700 text-white',
-    success: 'bg-emerald-600 hover:bg-emerald-700 text-white'
+    primary:   'bg-terra-400 hover:bg-terra-500 text-white shadow-sm',
+    secondary: 'bg-sand-200 hover:bg-sand-300 text-sand-700 border border-sand-300',
+    ghost:     'bg-transparent hover:bg-sand-100 text-sand-700',
+    danger:    'bg-danger hover:bg-danger-dark text-white',
+    success:   'bg-success hover:bg-success-dark text-white',
   };
-  const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-6 py-3 text-base' };
+  const sizes = {
+    sm: 'px-3 py-1.5 text-xs',
+    md: 'px-4 py-2 text-sm',
+    lg: 'px-6 py-3 text-base',
+  };
 
   return (
     <button
-      className={`inline-flex items-center justify-center gap-2 font-medium rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
+      className={`inline-flex items-center justify-center gap-2 font-medium rounded-button transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     >
       {Icon && <Icon size={size === 'sm' ? 14 : size === 'lg' ? 20 : 16} />}
@@ -268,90 +247,94 @@ export const Button = ({ children, variant = 'primary', size = 'md', icon: Icon,
   );
 };
 
-// Input Component
+// ============================================
+// INPUT
+// ============================================
 export const Input = ({ label, icon: Icon, error, className = '', ...props }) => (
   <div className={className}>
-    {label && <label className="block text-xs font-medium text-slate-400 mb-1.5">{label}</label>}
+    {label && <label className="block text-sm font-medium text-sand-700 mb-1.5">{label}</label>}
     <div className="relative">
-      {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={16} />}
+      {Icon && <Icon className="absolute left-3 top-1/2 -translate-y-1/2 text-sand-500" size={16} />}
       <input
-        className={`w-full bg-slate-800/50 border ${error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all ${Icon ? 'pl-10' : ''}`}
+        className={`w-full bg-white border ${error ? 'border-danger' : 'border-sand-300'} rounded-button px-4 py-2.5 text-sand-900 placeholder-sand-500 focus:outline-none focus:border-terra-400 focus:ring-2 focus:ring-terra-400/10 transition-colors ${Icon ? 'pl-10' : ''}`}
         {...props}
       />
     </div>
-    {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
+    {error && <p className="text-danger text-xs mt-1">{error}</p>}
   </div>
 );
 
-// Textarea Component
+// ============================================
+// TEXTAREA
+// ============================================
 export const Textarea = ({ label, error, className = '', ...props }) => (
   <div className={className}>
-    {label && <label className="block text-xs font-medium text-slate-400 mb-1.5">{label}</label>}
+    {label && <label className="block text-sm font-medium text-sand-700 mb-1.5">{label}</label>}
     <textarea
-      className={`w-full bg-slate-800/50 border ${error ? 'border-red-500' : 'border-slate-700'} rounded-lg px-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all resize-none`}
+      className={`w-full bg-white border ${error ? 'border-danger' : 'border-sand-300'} rounded-button px-4 py-2.5 text-sand-900 placeholder-sand-500 focus:outline-none focus:border-terra-400 focus:ring-2 focus:ring-terra-400/10 transition-colors resize-none`}
       {...props}
     />
-    {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
+    {error && <p className="text-danger text-xs mt-1">{error}</p>}
   </div>
 );
 
-// Select Component
+// ============================================
+// SELECT
+// ============================================
 export const Select = ({ label, options, error, className = '', ...props }) => (
   <div className={className}>
-    {label && <label className="block text-xs font-medium text-slate-400 mb-1.5 uppercase tracking-wider">{label}</label>}
-    <div className="relative group">
+    {label && <label className="block text-sm font-medium text-sand-700 mb-1.5">{label}</label>}
+    <div className="relative">
       <select
-        className={`w-full bg-slate-800 border ${error ? 'border-red-500' : 'border-slate-700/50'} rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all appearance-none cursor-pointer hover:border-slate-600 shadow-inner`}
+        className={`w-full bg-white border ${error ? 'border-danger' : 'border-sand-300'} rounded-button px-4 py-2.5 text-sand-900 focus:outline-none focus:border-terra-400 focus:ring-2 focus:ring-terra-400/10 transition-colors appearance-none cursor-pointer hover:border-sand-400`}
         {...props}
       >
         {options.map(opt => (
-          <option key={opt.value} value={opt.value} className="bg-slate-900 text-slate-100 py-2">
+          <option key={opt.value} value={opt.value}>
             {opt.label}
           </option>
         ))}
       </select>
     </div>
-    {error && <p className="text-red-400 text-xs mt-1.5 font-medium">{error}</p>}
+    {error && <p className="text-danger text-xs mt-1">{error}</p>}
   </div>
 );
 
-// Card Component
+// ============================================
+// CARD
+// ============================================
 export const Card = ({ children, className = '', hover = false, variant = 'default', onClick }) => {
-  const variants = {
-    default: 'bg-slate-900/50 backdrop-blur border border-slate-800',
-    glass: 'bg-slate-900/30 backdrop-blur-md border border-slate-700/50 shadow-xl',
-    gradient: 'bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 border border-slate-700/50',
-    solid: 'bg-slate-900 border border-slate-800'
-  };
+  // variant "glass" i "gradient" ara fan servir el disseny default net
+  const base = 'bg-white border border-sand-300 rounded-soft shadow-card';
+  const hoverCls = hover ? 'hover:shadow-card-hover hover:border-sand-400 transition-all duration-200 cursor-pointer' : '';
 
   return (
-    <div
-      className={`${variants[variant]} rounded-2xl ${hover ? 'hover:border-slate-600 hover:shadow-lg hover:-translate-y-0.5 transition-all duration-300 cursor-pointer' : ''} ${className}`}
-      onClick={onClick}
-    >
+    <div className={`${base} ${hoverCls} ${className}`} onClick={onClick}>
       {children}
     </div>
   );
 };
 
-// Modal Component
+// ============================================
+// MODAL
+// ============================================
 export const Modal = ({ open, onClose, title, children, size = 'md' }) => {
   if (!open) return null;
   const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-7xl' };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] animate-fadeIn"
       onClick={onClose}
     >
       <div
-        className={`w-full ${sizes[size]} bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl max-h-[90vh] overflow-hidden flex flex-col animate-slideIn`}
+        className={`w-full ${sizes[size]} bg-white border border-sand-300 rounded-soft shadow-modal max-h-[90vh] overflow-hidden flex flex-col animate-scaleIn`}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-6 border-b border-slate-800">
-          <h2 className="text-xl font-semibold text-white">{title}</h2>
-          <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-lg transition-colors">
-            <X size={20} className="text-slate-400" />
+        <div className="flex items-center justify-between px-6 py-5 border-b border-sand-300">
+          <h2 className="font-serif text-heading text-sand-900">{title}</h2>
+          <button onClick={onClose} className="p-2 hover:bg-sand-100 rounded-button transition-colors">
+            <X size={18} className="text-sand-500" />
           </button>
         </div>
         <div className="p-6 overflow-y-auto flex-1">{children}</div>
@@ -360,67 +343,67 @@ export const Modal = ({ open, onClose, title, children, size = 'md' }) => {
   );
 };
 
-// StatCard Component
-export const StatCard = ({ icon: Icon, label, value, subValue, trend, trendUp, color = 'blue', onClick }) => {
-  const colors = {
-    blue: 'from-blue-500 to-blue-700 shadow-blue-500/20',
-    emerald: 'from-emerald-500 to-emerald-700 shadow-emerald-500/20',
-    amber: 'from-amber-500 to-amber-700 shadow-amber-500/20',
-    red: 'from-red-500 to-red-700 shadow-red-500/20',
-    purple: 'from-purple-500 to-purple-700 shadow-purple-500/20',
-    indigo: 'from-indigo-500 to-indigo-700 shadow-indigo-500/20',
-    pink: 'from-pink-500 to-pink-700 shadow-pink-500/20'
-  };
-
+// ============================================
+// STAT CARD
+// ============================================
+export const StatCard = ({ icon: Icon, label, value, subValue, trend, trendUp, color = 'terra', onClick }) => {
   const iconColors = {
-    blue: 'bg-blue-500/10 text-blue-400',
-    emerald: 'bg-emerald-500/10 text-emerald-400',
-    amber: 'bg-amber-500/10 text-amber-400',
-    red: 'bg-red-500/10 text-red-400',
-    purple: 'bg-purple-500/10 text-purple-400',
-    indigo: 'bg-indigo-500/10 text-indigo-400',
-    pink: 'bg-pink-500/10 text-pink-400'
+    terra:   'bg-terra-50 text-terra-400',
+    success: 'bg-success-light text-success',
+    warning: 'bg-warning-light text-warning',
+    danger:  'bg-danger-light text-danger',
+    info:    'bg-info-light text-info',
+    blue:    'bg-info-light text-info',
+    emerald: 'bg-success-light text-success',
+    amber:   'bg-warning-light text-warning',
+    red:     'bg-danger-light text-danger',
+    purple:  'bg-purple-50 text-purple-600',
+    indigo:  'bg-info-light text-info',
+    pink:    'bg-pink-50 text-pink-600',
   };
 
   return (
-    <Card className="p-6 relative overflow-hidden group" hover={!!onClick} onClick={onClick} variant="gradient">
-      <div className="absolute top-0 right-0 -mr-4 -mt-4 w-24 h-24 rounded-full bg-slate-800/30 blur-2xl group-hover:bg-slate-700/30 transition-all duration-500"></div>
-
-      <div className="flex items-start justify-between relative z-10">
-        <div>
-          <p className="text-slate-400 text-sm font-medium mb-1">{label}</p>
-          <h3 className="text-2xl font-bold text-white tracking-tight">{value}</h3>
-          {subValue && <p className="text-slate-500 text-xs mt-1">{subValue}</p>}
+    <Card
+      className="p-6"
+      hover={!!onClick}
+      onClick={onClick}
+    >
+      <div className="flex items-start justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-sand-600 mb-1">{label}</p>
+          <h3 className="font-mono text-display text-sand-950 tracking-tight leading-none">{value}</h3>
+          {subValue && <p className="text-sand-500 text-xs mt-1.5">{subValue}</p>}
         </div>
-
-        <div className={`p-3 rounded-xl ${iconColors[color]} transition-colors duration-300`}>
-          <Icon size={22} />
+        <div className={`p-3 rounded-full ${iconColors[color] || iconColors.terra} shrink-0 ml-4`}>
+          <Icon size={20} />
         </div>
       </div>
 
       {trend && (
-        <div className="mt-4 flex items-center gap-2 relative z-10">
-          <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${trendUp ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-            {trendUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+        <div className="mt-4 flex items-center gap-2">
+          <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-badge ${trendUp ? 'bg-success-light text-success' : 'bg-danger-light text-danger'}`}>
+            {trendUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
             {trend}
           </span>
-          <span className="text-slate-500 text-xs">vs mes anterior</span>
+          <span className="text-sand-500 text-xs">vs mes anterior</span>
         </div>
       )}
     </Card>
   );
 };
 
-// StatusBadge Component
+// ============================================
+// STATUS BADGE
+// ============================================
 export const StatusBadge = ({ status }) => {
   const styles = {
-    borrador: 'bg-slate-700 text-slate-300',
-    emitida: 'bg-amber-900/50 text-amber-400 border border-amber-700',
-    pagada: 'bg-emerald-900/50 text-emerald-400 border border-emerald-700',
-    anulada: 'bg-red-900/50 text-red-400 border border-red-700',
-    parcial: 'bg-blue-900/50 text-blue-300 border border-blue-700',
-    presupuesto: 'bg-purple-900/50 text-purple-300 border border-purple-700',
-    rectificativa: 'bg-orange-900/50 text-orange-300 border border-orange-700',
+    borrador:     'bg-sand-100 text-sand-600 border border-sand-300',
+    emitida:      'bg-warning-light text-warning border border-warning/20',
+    pagada:       'bg-success-light text-success border border-success/20',
+    anulada:      'bg-danger-light text-danger border border-danger/20',
+    parcial:      'bg-info-light text-info border border-info/20',
+    presupuesto:  'bg-purple-50 text-purple-700 border border-purple-200',
+    rectificativa:'bg-orange-50 text-orange-700 border border-orange-200',
   };
   const labels = {
     borrador: 'Borrador', emitida: 'Pendiente', pagada: 'Pagada', anulada: 'Anulada',
@@ -428,41 +411,30 @@ export const StatusBadge = ({ status }) => {
   };
 
   return (
-    <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${styles[status] || styles.borrador}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-badge text-xs font-medium ${styles[status] || styles.borrador}`}>
       {labels[status] || status}
     </span>
   );
 };
 
-// Loading Spinner
+// ============================================
+// SPINNER
+// ============================================
 export const Spinner = ({ size = 'md' }) => {
-  const sizes = { sm: 'w-4 h-4', md: 'w-8 h-8', lg: 'w-12 h-12' };
+  const sizes = { sm: 'w-4 h-4 border-2', md: 'w-8 h-8 border-[3px]', lg: 'w-12 h-12 border-4' };
   return (
-    <div className={`${sizes[size]} border-4 border-blue-600 border-t-transparent rounded-full animate-spin`}></div>
+    <div className={`${sizes[size]} border-terra-400 border-t-transparent rounded-full animate-spin`}></div>
   );
 };
 
-// Empty State
+// ============================================
+// EMPTY STATE
+// ============================================
 export const EmptyState = ({ icon: Icon, title, description, action }) => (
-  <div className="text-center py-12">
-    {Icon && <Icon size={48} className="text-slate-600 mx-auto mb-4" />}
-    <h3 className="text-lg font-medium text-white mb-2">{title}</h3>
-    {description && <p className="text-slate-400 mb-4">{description}</p>}
+  <div className="text-center py-16">
+    {Icon && <Icon size={44} className="text-sand-400 mx-auto mb-4" />}
+    <h3 className="font-serif text-lg text-sand-800 mb-2">{title}</h3>
+    {description && <p className="text-sand-600 text-sm mb-5">{description}</p>}
     {action}
   </div>
 );
-
-// ============================================
-// CSS KEYFRAMES (Afegir a styles.css o inline)
-// ============================================
-// Aquests estils s'han d'afegir al fitxer styles.css
-// @keyframes slideIn {
-//   from { opacity: 0; transform: translateY(10px); }
-//   to { opacity: 1; transform: translateY(0); }
-// }
-// @keyframes fadeIn {
-//   from { opacity: 0; }
-//   to { opacity: 1; }
-// }
-// .animate-slideIn { animation: slideIn 0.3s ease-out; }
-// .animate-fadeIn { animation: fadeIn 0.2s ease-out; }

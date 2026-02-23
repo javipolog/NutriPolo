@@ -21,19 +21,19 @@ class DesignErrorBoundary extends React.Component {
     if (this.state.hasError) {
       return (
         <div className="flex flex-col items-center justify-center h-full gap-4 p-8">
-          <div className="text-red-400 text-lg font-semibold">Error al carregar el dissenyador</div>
-          <p className="text-slate-400 text-sm text-center max-w-md">
+          <div className="text-danger text-lg font-semibold">Error al carregar el dissenyador</div>
+          <p className="text-sand-600 text-sm text-center max-w-md">
             Pot ser que les dades guardades estiguen corruptes. Prova a restaurar els valors per defecte.
           </p>
           <button onClick={() => {
             try { useDesignStore.getState().resetDesign(); } catch(e) { console.error(e); }
             this.setState({ hasError: false, error: null });
-          }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors">
+          }} className="px-4 py-2 bg-terra-400 hover:bg-terra-500 text-white rounded-button text-sm font-medium transition-colors">
             Restaurar i reintentar
           </button>
-          <details className="text-xs text-slate-600 mt-2 max-w-md">
+          <details className="text-xs text-sand-400 mt-2 max-w-md">
             <summary className="cursor-pointer">Detalls de l'error</summary>
-            <pre className="mt-2 p-2 bg-slate-900 rounded text-slate-400 overflow-auto">{this.state.error?.message}</pre>
+            <pre className="mt-2 p-2 bg-white rounded text-sand-600 overflow-auto">{this.state.error?.message}</pre>
           </details>
         </div>
       );
@@ -49,7 +49,7 @@ class DesignErrorBoundary extends React.Component {
 const ColorSwatch = ({ value, onChange, size = 'md' }) => {
   const dim = size === 'sm' ? 'w-7 h-7' : 'w-9 h-9';
   return (
-    <label className={`${dim} rounded-lg border-2 border-slate-600 cursor-pointer relative overflow-hidden shrink-0 hover:border-slate-400 transition-colors`}
+    <label className={`${dim} rounded-button border-2 border-sand-400 cursor-pointer relative overflow-hidden shrink-0 hover:border-slate-400 transition-colors`}
       style={{ backgroundColor: value }}>
       <input type="color" value={value} onChange={e => onChange(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
     </label>
@@ -60,23 +60,23 @@ const ColorRow = ({ label, value, onChange }) => (
   <div className="flex items-center gap-3 py-2">
     <ColorSwatch value={value} onChange={onChange} />
     <div className="flex-1 min-w-0">
-      <div className="text-xs text-slate-400 mb-1">{label}</div>
+      <div className="text-xs text-sand-600 mb-1">{label}</div>
       <input value={value} onChange={e => onChange(e.target.value)}
-        className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs text-white font-mono outline-none focus:border-blue-500 transition-colors" />
+        className="w-full bg-white border border-sand-300 rounded-md px-2 py-1 text-xs text-sand-900 font-mono outline-none focus:border-terra-400 transition-colors" />
     </div>
   </div>
 );
 
 const NumberInput = ({ label, value, onChange, min = 0, max = 200, step = 1, unit = 'px' }) => (
   <div>
-    {label && <div className="text-xs text-slate-500 mb-1.5 uppercase font-semibold tracking-wider">{label}</div>}
-    <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 focus-within:border-blue-500 transition-colors">
-      <button onClick={() => onChange(Math.max(min, value - step))} className="text-slate-500 hover:text-white transition-colors p-0.5"><Minus size={12} /></button>
+    {label && <div className="text-xs text-sand-500 mb-1.5 uppercase font-semibold tracking-wider">{label}</div>}
+    <div className="flex items-center gap-1.5 bg-white border border-sand-300 rounded-button px-2 py-1.5 focus-within:border-terra-400 transition-colors">
+      <button onClick={() => onChange(Math.max(min, value - step))} className="text-sand-500 hover:text-sand-700 transition-colors p-0.5"><Minus size={12} /></button>
       <input type="number" value={value} min={min} max={max} step={step}
         onChange={e => onChange(Number(e.target.value))}
-        className="flex-1 bg-transparent text-white text-sm text-center outline-none w-0 min-w-0" />
-      <button onClick={() => onChange(Math.min(max, value + step))} className="text-slate-500 hover:text-white transition-colors p-0.5"><Plus size={12} /></button>
-      {unit && <span className="text-slate-500 text-xs">{unit}</span>}
+        className="flex-1 bg-transparent text-sand-900 text-sm text-center outline-none w-0 min-w-0" />
+      <button onClick={() => onChange(Math.min(max, value + step))} className="text-sand-500 hover:text-sand-700 transition-colors p-0.5"><Plus size={12} /></button>
+      {unit && <span className="text-sand-500 text-xs">{unit}</span>}
     </div>
   </div>
 );
@@ -87,12 +87,12 @@ const FontSelect = ({ label, value, onChange, filter }) => {
   const designFonts = useDesignStore(s => s.design.fonts);
   return (
     <div>
-      {label && <div className="text-xs text-slate-500 mb-1.5 uppercase font-semibold tracking-wider">{label}</div>}
+      {label && <div className="text-xs text-sand-500 mb-1.5 uppercase font-semibold tracking-wider">{label}</div>}
       <select value={value} onChange={e => { onChange(e.target.value); loadGoogleFonts({ ...designFonts, [filter === 'mono' ? 'mono' : label?.includes('Principal') ? 'primary' : 'secondary']: e.target.value }); }}
-        className="w-full bg-slate-900 border border-slate-700 text-white text-sm px-3 py-2 rounded-lg outline-none focus:border-blue-500 transition-colors appearance-none cursor-pointer">
+        className="w-full bg-white border border-sand-300 text-sand-900 text-sm px-3 py-2 rounded-button outline-none focus:border-terra-400 transition-colors appearance-none cursor-pointer">
         {Object.entries(grouped).map(([type, list]) => (
-          <optgroup key={type} label={type.charAt(0).toUpperCase() + type.slice(1)} className="bg-slate-800">
-            {list.map(f => <option key={f.value} value={f.value} className="bg-slate-800">{f.label}</option>)}
+          <optgroup key={type} label={type.charAt(0).toUpperCase() + type.slice(1)} className="bg-sand-100">
+            {list.map(f => <option key={f.value} value={f.value} className="bg-sand-100">{f.label}</option>)}
           </optgroup>
         ))}
       </select>
@@ -102,9 +102,9 @@ const FontSelect = ({ label, value, onChange, filter }) => {
 
 const Toggle = ({ checked, onChange, label }) => (
   <label className="flex items-center justify-between gap-3 cursor-pointer py-1.5 group">
-    <span className="text-sm text-slate-300 group-hover:text-white transition-colors">{label}</span>
+    <span className="text-sm text-sand-700 group-hover:text-sand-800 transition-colors">{label}</span>
     <div onClick={() => onChange(!checked)}
-      className={`w-9 h-5 rounded-full relative transition-colors duration-200 cursor-pointer shrink-0 ${checked ? 'bg-blue-600' : 'bg-slate-700'}`}>
+      className={`w-9 h-5 rounded-full relative transition-colors duration-200 cursor-pointer shrink-0 ${checked ? 'bg-terra-400' : 'bg-sand-200'}`}>
       <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200 ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
     </div>
   </label>
@@ -112,13 +112,13 @@ const Toggle = ({ checked, onChange, label }) => (
 
 const RadioGroup = ({ label, value, onChange, options }) => (
   <div>
-    {label && <div className="text-xs text-slate-500 mb-2 uppercase font-semibold tracking-wider">{label}</div>}
-    <div className="flex gap-1 bg-slate-900 p-1 rounded-lg">
+    {label && <div className="text-xs text-sand-500 mb-2 uppercase font-semibold tracking-wider">{label}</div>}
+    <div className="flex gap-1 bg-white p-1 rounded-button">
       {options.map(opt => (
         <button key={opt.value} onClick={() => onChange(opt.value)}
           title={opt.label}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
-            value === opt.value ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+            value === opt.value ? 'bg-terra-400 text-white shadow' : 'text-sand-600 hover:text-sand-800'
           }`}>
           {opt.icon && <opt.icon size={13} />}
           {!opt.icon && opt.label}
@@ -132,26 +132,26 @@ const RadioGroup = ({ label, value, onChange, options }) => (
 const PanelSection = ({ title, icon: Icon, children, defaultOpen = false, badge }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="border border-slate-800/60 rounded-xl overflow-hidden">
+    <div className="border border-sand-300/60 rounded-soft overflow-hidden">
       <button onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-3 px-4 py-3 bg-slate-800/20 hover:bg-slate-800/40 transition-colors text-left">
-        {Icon && <Icon size={15} className="text-blue-400 shrink-0" />}
-        <span className="font-semibold text-white text-sm flex-1">{title}</span>
-        {badge && <span className="bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1.5 rounded">{badge}</span>}
-        {open ? <ChevronUp size={14} className="text-slate-500" /> : <ChevronDown size={14} className="text-slate-500" />}
+        className="w-full flex items-center gap-3 px-4 py-3 bg-sand-50 hover:bg-sand-100 transition-colors text-left">
+        {Icon && <Icon size={15} className="text-terra-400 shrink-0" />}
+        <span className="font-semibold text-sand-900 text-sm flex-1">{title}</span>
+        {badge && <span className="bg-terra-50 text-terra-400 text-[10px] font-bold px-1.5 rounded">{badge}</span>}
+        {open ? <ChevronUp size={14} className="text-sand-500" /> : <ChevronDown size={14} className="text-sand-500" />}
       </button>
-      {open && <div className="px-4 pb-4 pt-2 space-y-3 bg-slate-900/20">{children}</div>}
+      {open && <div className="px-4 pb-4 pt-2 space-y-3 bg-sand-50">{children}</div>}
     </div>
   );
 };
 
 // Tab nav
 const Tabs = ({ tabs, active, onChange }) => (
-  <div className="flex gap-1 bg-slate-900/60 p-1 rounded-xl border border-slate-800">
+  <div className="flex gap-1 bg-white p-1 rounded-soft border border-sand-300">
     {tabs.map(t => (
       <button key={t.id} onClick={() => onChange(t.id)}
-        className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg text-xs font-semibold transition-all ${
-          active === t.id ? 'bg-slate-700 text-white shadow' : 'text-slate-500 hover:text-slate-300'
+        className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-button text-xs font-semibold transition-all ${
+          active === t.id ? 'bg-sand-200 text-sand-900 shadow' : 'text-sand-500 hover:text-sand-700'
         }`}>
         {t.icon && <t.icon size={13} />}
         {t.label}
@@ -165,8 +165,8 @@ const Tabs = ({ tabs, active, onChange }) => (
 // ============================================
 const PresetCard = ({ id, preset, active, onClick }) => (
   <button onClick={onClick}
-    className={`p-3 rounded-xl border-2 text-left transition-all w-full ${
-      active ? 'border-blue-500 bg-blue-500/8' : 'border-slate-700/50 hover:border-slate-600 bg-slate-800/20'
+    className={`p-3 rounded-soft border-2 text-left transition-all w-full ${
+      active ? 'border-terra-400 bg-terra-50' : 'border-sand-200 hover:border-sand-400 bg-sand-50'
     }`}>
     <div className="flex items-center gap-2 mb-2">
       <div className="flex gap-1">
@@ -174,10 +174,10 @@ const PresetCard = ({ id, preset, active, onClick }) => (
           <div key={i} className={`rounded ${i === 0 ? 'w-4 h-4' : 'w-3 h-3 mt-0.5'}`} style={{ backgroundColor: c }} />
         ))}
       </div>
-      {active && <Check size={12} className="text-blue-400 ml-auto" />}
+      {active && <Check size={12} className="text-terra-400 ml-auto" />}
     </div>
-    <div className="text-sm font-bold text-white">{preset.name}</div>
-    <div className="text-[11px] text-slate-500 mt-0.5 leading-tight">{preset.description}</div>
+    <div className="text-sm font-bold text-sand-900">{preset.name}</div>
+    <div className="text-[11px] text-sand-500 mt-0.5 leading-tight">{preset.description}</div>
   </button>
 );
 
@@ -205,9 +205,9 @@ const LabelEditor = ({ labels, lang, onUpdate }) => {
     <div className="grid grid-cols-1 gap-2">
       {fields.map(f => (
         <div key={f.key} className="flex items-center gap-2">
-          <span className="text-xs text-slate-500 w-32 shrink-0">{f.label}</span>
+          <span className="text-xs text-sand-500 w-32 shrink-0">{f.label}</span>
           <input value={labels[f.key] || ''} onChange={e => onUpdate(lang, f.key, e.target.value)}
-            className="flex-1 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-white outline-none focus:border-blue-500 transition-colors" />
+            className="flex-1 bg-white border border-sand-300 rounded px-2 py-1 text-xs text-sand-900 outline-none focus:border-terra-400 transition-colors" />
         </div>
       ))}
     </div>
@@ -285,14 +285,14 @@ export const DesignEditorInner = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3 shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight">Disseny de Factura</h1>
-          <p className="text-slate-400 text-sm mt-0.5">Personalitza l'aspecte i l'estructura de les teues factures</p>
+          <h1 className="font-serif text-2xl font-bold text-sand-900 tracking-tight">Disseny de Factura</h1>
+          <p className="text-sand-600 text-sm mt-0.5">Personalitza l'aspecte i l'estructura de les teues factures</p>
         </div>
         <div className="flex gap-2">
           <Button variant="ghost" icon={RotateCcw} onClick={resetDesign} size="sm">Restaurar</Button>
           <Button variant="secondary" icon={Eye} onClick={() => setShowPreview(true)} size="sm">Vista Prèvia</Button>
           <Button icon={saved ? Check : Sliders} onClick={handleSave} size="sm"
-            className={saved ? 'bg-emerald-600 hover:bg-emerald-500' : ''}>
+            className={saved ? 'bg-success hover:bg-success-dark' : ''}>
             {saved ? 'Guardat!' : 'Aplicar'}
           </Button>
         </div>
@@ -310,7 +310,7 @@ export const DesignEditorInner = () => {
             <>
               {/* Presets */}
               <div>
-                <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-2">Plantilles</div>
+                <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-2">Plantilles</div>
                 <div className="grid grid-cols-2 gap-2">
                   {Object.entries(designPresets).map(([id, preset]) => (
                     <PresetCard key={id} id={id} preset={preset}
@@ -323,11 +323,11 @@ export const DesignEditorInner = () => {
               {/* Logo */}
               <PanelSection title="Logo" icon={Image} defaultOpen>
                 <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-2">Tipus</div>
-                  <div className="flex gap-1 bg-slate-900 p-1 rounded-lg mb-3">
+                  <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-2">Tipus</div>
+                  <div className="flex gap-1 bg-white p-1 rounded-button mb-3">
                     {[{v:'text',l:'Text'},{v:'image',l:'Imatge'},{v:'svg',l:'SVG'}].map(o => (
                       <button key={o.v} onClick={() => updateLogo({ type: o.v })}
-                        className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${design.logo.type === o.v ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                        className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${design.logo.type === o.v ? 'bg-terra-400 text-white' : 'text-sand-600 hover:text-sand-800'}`}>
                         {o.l}
                       </button>
                     ))}
@@ -336,9 +336,9 @@ export const DesignEditorInner = () => {
 
                 {design.logo.type === 'text' && (
                   <div>
-                    <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-1.5">Text del logo</div>
+                    <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-1.5">Text del logo</div>
                     <input value={design.logo.text} onChange={e => updateLogo({ text: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-blue-500 transition-colors" />
+                      className="w-full bg-white border border-sand-300 rounded-button px-3 py-2 text-sand-900 text-sm outline-none focus:border-terra-400 transition-colors" />
                   </div>
                 )}
 
@@ -346,13 +346,13 @@ export const DesignEditorInner = () => {
                   <div className="space-y-2">
                     <input ref={fileInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
                     <button onClick={() => fileInputRef.current?.click()}
-                      className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-slate-700 hover:border-blue-500 rounded-lg py-4 text-slate-400 hover:text-blue-400 transition-colors text-sm font-medium">
+                      className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-sand-300 hover:border-terra-400 rounded-button py-4 text-sand-600 hover:text-terra-400 transition-colors text-sm font-medium">
                       <Upload size={16} /> Pujar imatge
                     </button>
                     {design.logo.imageUrl && (
-                      <div className="flex items-center gap-2 bg-slate-900 rounded-lg p-2">
+                      <div className="flex items-center gap-2 bg-white rounded-button p-2">
                         <img src={design.logo.imageUrl} alt="Logo preview" className="h-8 object-contain" />
-                        <button onClick={() => updateLogo({ imageUrl: '' })} className="ml-auto text-slate-500 hover:text-red-400 transition-colors"><X size={14} /></button>
+                        <button onClick={() => updateLogo({ imageUrl: '' })} className="ml-auto text-sand-500 hover:text-danger transition-colors"><X size={14} /></button>
                       </div>
                     )}
                   </div>
@@ -360,10 +360,10 @@ export const DesignEditorInner = () => {
 
                 {design.logo.type === 'svg' && (
                   <div>
-                    <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-1.5">Codi SVG</div>
+                    <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-1.5">Codi SVG</div>
                     <textarea value={design.logo.svgContent} onChange={e => updateLogo({ svgContent: e.target.value })}
                       rows={5}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs font-mono outline-none focus:border-blue-500 transition-colors resize-none"
+                      className="w-full bg-white border border-sand-300 rounded-button px-3 py-2 text-sand-900 text-xs font-mono outline-none focus:border-terra-400 transition-colors resize-none"
                       placeholder='<svg viewBox="0 0 200 50">...</svg>' />
                   </div>
                 )}
@@ -403,14 +403,14 @@ export const DesignEditorInner = () => {
                 <FontSelect label="Monoespaciada (xifres)" value={design.fonts.mono}
                   onChange={v => updateFonts({ mono: v })} filter="mono" />
 
-                <div className="pt-2 border-t border-slate-800">
-                  <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-3">Mides de lletra</div>
+                <div className="pt-2 border-t border-sand-300">
+                  <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-3">Mides de lletra</div>
                   <div className="grid grid-cols-2 gap-3">
                     {[{k:'header',l:'Capçaleres'},{k:'body',l:'Cos'},{k:'small',l:'Petit'},{k:'total',l:'Total'}].map(f => (
                       <div key={f.k}>
-                        <div className="text-xs text-slate-500 mb-1">{f.l}</div>
+                        <div className="text-xs text-sand-500 mb-1">{f.l}</div>
                         <input value={design.fontSizes[f.k]} onChange={e => updateFontSizes({ [f.k]: e.target.value })}
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-xs text-white font-mono outline-none focus:border-blue-500 transition-colors" />
+                          className="w-full bg-white border border-sand-300 rounded px-2 py-1.5 text-xs text-sand-900 font-mono outline-none focus:border-terra-400 transition-colors" />
                       </div>
                     ))}
                   </div>
@@ -446,7 +446,7 @@ export const DesignEditorInner = () => {
               {/* Table style */}
               <PanelSection title="Taula de Conceptes" icon={Table2}>
                 <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-2">Estil de taula</div>
+                  <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-2">Estil de taula</div>
                   <div className="grid grid-cols-2 gap-2">
                     {[
                       { v: 'lines',    l: 'Línies',    desc: 'Separadors horitz.' },
@@ -455,8 +455,8 @@ export const DesignEditorInner = () => {
                       { v: 'minimal',  l: 'Mínim',     desc: 'Sense línies'       },
                     ].map(o => (
                       <button key={o.v} onClick={() => updateTable({ style: o.v })}
-                        className={`p-2.5 rounded-lg border text-left text-xs transition-all ${
-                          design.table.style === o.v ? 'border-blue-500 bg-blue-500/8 text-white' : 'border-slate-700 text-slate-400 hover:border-slate-500'
+                        className={`p-2.5 rounded-button border text-left text-xs transition-all ${
+                          design.table.style === o.v ? 'border-terra-400 bg-terra-50 text-sand-900' : 'border-sand-300 text-sand-600 hover:border-sand-400'
                         }`}>
                         <div className="font-semibold">{o.l}</div>
                         <div className="text-[10px] mt-0.5 opacity-70">{o.desc}</div>
@@ -489,7 +489,7 @@ export const DesignEditorInner = () => {
                   <NumberInput label="Gruix línies" value={design.layout.borderWidth}
                     onChange={v => updateLayout({ borderWidth: v })} min={0} max={5} />
                 </div>
-                <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mt-2 mb-2">Espai inferior per bloc (px)</div>
+                <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mt-2 mb-2">Espai inferior per bloc (px)</div>
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { k: 'header',  l: 'Capçalera' },
@@ -530,7 +530,7 @@ export const DesignEditorInner = () => {
               <PanelSection title="Texts i Etiquetes" icon={Languages} defaultOpen
                 badge="Multi-idioma">
                 <div>
-                  <div className="text-xs text-slate-500 uppercase font-semibold tracking-wider mb-2">Idioma a editar</div>
+                  <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-2">Idioma a editar</div>
                   <Tabs tabs={LANG_TABS.map(t => ({ ...t, id: t.id }))} active={langTab} onChange={setLangTab} />
                 </div>
                 <LabelEditor
@@ -544,15 +544,15 @@ export const DesignEditorInner = () => {
 
         {/* ── RIGHT: LIVE PREVIEW ── */}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col flex-1 min-h-0">
-            <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800 shrink-0">
-              <span className="text-sm font-semibold text-white">Previsualització en viu</span>
+          <div className="bg-white border border-sand-300 rounded-soft overflow-hidden flex flex-col flex-1 min-h-0">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b border-sand-300 shrink-0">
+              <span className="text-sm font-semibold text-sand-900">Previsualització en viu</span>
               <button onClick={() => setShowPreview(true)}
-                className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors">
+                className="flex items-center gap-1.5 text-xs text-sand-600 hover:text-sand-800 transition-colors">
                 <Maximize2 size={13} /> Ampliar
               </button>
             </div>
-            <div ref={previewContainerRef} className="flex-1 min-h-0 overflow-auto p-3 bg-slate-800/30">
+            <div ref={previewContainerRef} className="flex-1 min-h-0 overflow-auto p-3 bg-sand-50">
               <div style={{ 
                 transform: 'scale(var(--preview-scale, 0.5))', 
                 transformOrigin: 'top left', 
@@ -569,7 +569,7 @@ export const DesignEditorInner = () => {
       {/* Full Preview Modal */}
       <Modal open={showPreview} onClose={() => setShowPreview(false)} title="Vista Prèvia de Factura" size="xl">
         <div className="flex justify-center">
-          <div className="overflow-auto max-h-[75vh] bg-white rounded-xl shadow-lg" style={{ width: '210mm', maxWidth: '100%' }}>
+          <div className="overflow-auto max-h-[75vh] bg-white rounded-soft shadow-lg" style={{ width: '210mm', maxWidth: '100%' }}>
             <InvoicePreviewModern invoice={sampleInvoice} client={sampleClient} config={config} />
           </div>
         </div>

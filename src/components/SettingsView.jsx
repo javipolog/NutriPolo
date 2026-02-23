@@ -87,12 +87,12 @@ export const SettingsView = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Configuración</h1>
-        <p className="text-slate-400 mt-1">Datos del autónomo y preferencias</p>
+        <h1 className="font-serif text-2xl font-bold text-sand-900">Configuración</h1>
+        <p className="text-sand-600 mt-1">Datos del autónomo y preferencias</p>
       </div>
 
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-white mb-6">Datos personales</h3>
+        <h3 className="font-serif text-lg font-semibold text-sand-900 mb-6">Datos personales</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Input label="Nombre / Razón Social" value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} />
           <Input
@@ -122,7 +122,7 @@ export const SettingsView = () => {
       </Card>
 
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-white mb-6">Valores por defecto</h3>
+        <h3 className="font-serif text-lg font-semibold text-sand-900 mb-6">Valores por defecto</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Input label="IVA (%)" type="number" value={form.tipoIva} onChange={e => setForm({ ...form, tipoIva: parseFloat(e.target.value) || 0 })} />
           <Input label="IRPF (%)" type="number" value={form.tipoIrpf} onChange={e => setForm({ ...form, tipoIrpf: parseFloat(e.target.value) || 0 })} />
@@ -137,20 +137,20 @@ export const SettingsView = () => {
       {/* Backup i exportació de dades (#2, #13) */}
       <Card className="p-6">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-8 h-8 bg-emerald-500/20 rounded-lg flex items-center justify-center">
-            <Shield size={16} className="text-emerald-400" />
+          <div className="w-8 h-8 bg-success-light rounded-button flex items-center justify-center">
+            <Shield size={16} className="text-success" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-white">Backup y datos</h3>
-            <p className="text-xs text-slate-500">{lastBackupText} · Backup automático diario activado</p>
+            <h3 className="font-serif text-lg font-semibold text-sand-900">Backup y datos</h3>
+            <p className="text-xs text-sand-500">{lastBackupText} · Backup automático diario activado</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Exportar */}
-          <div className="bg-slate-800/40 rounded-xl p-4">
-            <h4 className="text-sm font-medium text-white mb-1">Exportar datos</h4>
-            <p className="text-xs text-slate-500 mb-4">
+          <div className="bg-sand-100 rounded-soft p-4">
+            <h4 className="text-sm font-medium text-sand-900 mb-1">Exportar datos</h4>
+            <p className="text-xs text-sand-500 mb-4">
               Guarda todos tus datos en un fichero JSON. Útil para hacer copias manuales o migrar a otro equipo.
             </p>
             <Button
@@ -165,9 +165,9 @@ export const SettingsView = () => {
           </div>
 
           {/* Importar */}
-          <div className="bg-slate-800/40 rounded-xl p-4">
-            <h4 className="text-sm font-medium text-white mb-1">Importar datos</h4>
-            <p className="text-xs text-slate-500 mb-3">
+          <div className="bg-sand-100 rounded-soft p-4">
+            <h4 className="text-sm font-medium text-sand-900 mb-1">Importar datos</h4>
+            <p className="text-xs text-sand-500 mb-3">
               Carga datos desde un fichero JSON exportado anteriormente.
             </p>
             <div className="mb-3">
@@ -182,9 +182,9 @@ export const SettingsView = () => {
               />
             </div>
             {importMode === 'replace' && (
-              <div className="flex items-start gap-2 mb-3 p-2 bg-amber-900/30 border border-amber-700/30 rounded-lg">
-                <AlertTriangle size={13} className="text-amber-400 mt-0.5 shrink-0" />
-                <p className="text-xs text-amber-300/80">
+              <div className="flex items-start gap-2 mb-3 p-2 bg-amber-900/30 border border-warning/20/30 rounded-button">
+                <AlertTriangle size={13} className="text-warning mt-0.5 shrink-0" />
+                <p className="text-xs text-warning/80">
                   Reemplazar eliminará todos los datos actuales.
                 </p>
               </div>
@@ -204,9 +204,9 @@ export const SettingsView = () => {
 
       {/* Aparença i tema (#19) */}
       <Card className="p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Apariencia</h3>
+        <h3 className="font-serif text-lg font-semibold text-sand-900 mb-4">Apariencia</h3>
         <div>
-          <p className="text-xs font-medium text-slate-400 mb-3 uppercase tracking-wider">Tema de color</p>
+          <p className="text-xs font-medium text-sand-600 mb-3 uppercase tracking-wider">Tema de color</p>
           <div className="flex gap-3">
             {[
               { value: 'dark',  label: 'Oscuro', icon: Moon },
@@ -216,10 +216,10 @@ export const SettingsView = () => {
               <button
                 key={value}
                 onClick={() => setAppTheme(value)}
-                className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all ${
+                className={`flex-1 flex flex-col items-center gap-2 p-4 rounded-soft border-2 transition-all ${
                   appTheme === value
-                    ? 'border-blue-500 bg-blue-500/10 text-blue-300'
-                    : 'border-slate-700 text-slate-400 hover:border-slate-600 hover:text-white'
+                    ? 'border-terra-400 bg-terra-50 text-terra-300'
+                    : 'border-sand-300 text-sand-600 hover:border-sand-400 hover:text-sand-900'
                 }`}
               >
                 <Icon size={20} />
@@ -227,7 +227,7 @@ export const SettingsView = () => {
               </button>
             ))}
           </div>
-          <p className="text-xs text-slate-500 mt-2">
+          <p className="text-xs text-sand-500 mt-2">
             {appTheme === 'auto' ? 'Sigue las preferencias del sistema operativo.' :
              appTheme === 'light' ? 'Interfaz clara, ideal para trabajar con luz natural.' :
              'Interfaz oscura, reduce la fatiga visual en entornos oscuros.'}
@@ -236,8 +236,8 @@ export const SettingsView = () => {
       </Card>
 
       {/* Sincronización con Notion */}
-      <div className="pt-6 border-t border-slate-800">
-        <h3 className="text-lg font-semibold text-white mb-4">Integración con Notion</h3>
+      <div className="pt-6 border-t border-sand-300">
+        <h3 className="font-serif text-lg font-semibold text-sand-900 mb-4">Integración con Notion</h3>
         <NotionSync />
       </div>
     </div>

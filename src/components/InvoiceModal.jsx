@@ -118,11 +118,11 @@ export const InvoiceModal = ({ open, onClose, onSave, invoice, onCreateRectifica
         <Modal open={open} onClose={onClose} title={title} size="lg">
             {/* Banner de bloqueig per factures emitides/pagades */}
             {isLocked && (
-                <div className="mb-4 p-4 bg-amber-900/30 border border-amber-700/50 rounded-xl flex items-start gap-3">
-                    <Lock size={18} className="text-amber-400 mt-0.5 shrink-0" />
+                <div className="mb-4 p-4 bg-amber-900/30 border border-warning/20/50 rounded-soft flex items-start gap-3">
+                    <Lock size={18} className="text-warning mt-0.5 shrink-0" />
                     <div className="flex-1">
-                        <p className="text-amber-200 font-medium text-sm">Factura {invoice.estado === 'pagada' ? 'pagada' : 'emitida'} — no editable</p>
-                        <p className="text-amber-300/70 text-xs mt-1">
+                        <p className="text-warning-dark font-medium text-sm">Factura {invoice.estado === 'pagada' ? 'pagada' : 'emitida'} — no editable</p>
+                        <p className="text-warning/70 text-xs mt-1">
                             Para corregir esta factura, crea una rectificativa. Solo puedes cambiar el estado.
                         </p>
                     </div>
@@ -138,10 +138,10 @@ export const InvoiceModal = ({ open, onClose, onSave, invoice, onCreateRectifica
             <form onSubmit={handleSubmit} className="space-y-4">
                 {/* Tipus de document — només per a nous documents */}
                 {!invoice && (
-                    <div className="flex gap-2 p-1 bg-slate-800/50 rounded-xl w-fit">
+                    <div className="flex gap-2 p-1 bg-sand-100 rounded-soft w-fit">
                         {[{ v: 'factura', l: 'Factura' }, { v: 'presupuesto', l: 'Presupuesto' }].map(({ v, l }) => (
                             <button key={v} type="button"
-                                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all ${form.tipoDocumento === v ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                                className={`px-4 py-1.5 rounded-button text-sm font-medium transition-all ${form.tipoDocumento === v ? 'bg-terra-400 text-white' : 'text-sand-600 hover:text-sand-800'}`}
                                 onClick={() => setForm(f => ({ ...f, tipoDocumento: v }))}>
                                 {l}
                             </button>
@@ -214,36 +214,36 @@ export const InvoiceModal = ({ open, onClose, onSave, invoice, onCreateRectifica
                         disabled={isLocked} />
                 </div>
 
-                <Card className={`p-4 bg-slate-800/30 ${errors.importe ? 'border border-red-700' : ''}`}>
+                <Card className={`p-4 bg-sand-50 ${errors.importe ? 'border border-danger/20' : ''}`}>
                     <div className="space-y-2 text-sm">
-                        <div className="flex justify-between"><span className="text-slate-400">Base Imponible</span><span className="text-white">{formatCurrency(calc.subtotal)}</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">IVA ({form.ivaPorcentaje}%)</span><span className="text-emerald-400">+{formatCurrency(calc.iva)}</span></div>
-                        <div className="flex justify-between"><span className="text-slate-400">IRPF ({form.irpfPorcentaje}%)</span><span className="text-red-400">-{formatCurrency(calc.irpf)}</span></div>
-                        <div className="flex justify-between pt-2 border-t border-slate-700"><span className="text-white font-medium">Total</span><span className="text-white font-bold text-lg">{formatCurrency(calc.total)}</span></div>
+                        <div className="flex justify-between"><span className="text-sand-600">Base Imponible</span><span className="text-sand-900">{formatCurrency(calc.subtotal)}</span></div>
+                        <div className="flex justify-between"><span className="text-sand-600">IVA ({form.ivaPorcentaje}%)</span><span className="text-success">+{formatCurrency(calc.iva)}</span></div>
+                        <div className="flex justify-between"><span className="text-sand-600">IRPF ({form.irpfPorcentaje}%)</span><span className="text-danger">-{formatCurrency(calc.irpf)}</span></div>
+                        <div className="flex justify-between pt-2 border-t border-sand-300"><span className="text-sand-900 font-medium">Total</span><span className="text-sand-900 font-bold text-lg">{formatCurrency(calc.total)}</span></div>
                     </div>
-                    {errors.importe && <p className="text-red-400 text-xs mt-2">{errors.importe}</p>}
+                    {errors.importe && <p className="text-danger text-xs mt-2">{errors.importe}</p>}
                 </Card>
 
                 {/* Secció plantilla recurrent (#8) — només per a factures */}
                 {form.tipoDocumento === 'factura' && !isLocked && (
-                    <div className="border border-slate-700 rounded-xl overflow-hidden">
+                    <div className="border border-sand-300 rounded-soft overflow-hidden">
                         <button type="button"
-                            className="w-full flex items-center justify-between px-4 py-3 bg-slate-800/30 hover:bg-slate-800/50 transition-colors text-sm"
+                            className="w-full flex items-center justify-between px-4 py-3 bg-sand-50 hover:bg-sand-100 transition-colors text-sm"
                             onClick={() => setShowRecurring(v => !v)}>
-                            <div className="flex items-center gap-2 text-slate-300">
+                            <div className="flex items-center gap-2 text-sand-700">
                                 <RefreshCw size={14} />
                                 <span>Plantilla recurrente</span>
-                                {form.esPlantilla && <span className="ml-1 px-2 py-0.5 bg-blue-600/30 text-blue-300 rounded-full text-xs">{form.periodicidad}</span>}
+                                {form.esPlantilla && <span className="ml-1 px-2 py-0.5 bg-terra-400/30 text-terra-300 rounded-full text-xs">{form.periodicidad}</span>}
                             </div>
-                            {showRecurring ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
+                            {showRecurring ? <ChevronDown size={14} className="text-sand-500" /> : <ChevronRight size={14} className="text-sand-500" />}
                         </button>
                         {showRecurring && (
-                            <div className="p-4 space-y-4 bg-slate-900/30">
+                            <div className="p-4 space-y-4 bg-sand-50">
                                 <label className="flex items-center gap-3 cursor-pointer">
                                     <input type="checkbox" checked={form.esPlantilla}
                                         onChange={e => setForm(f => ({ ...f, esPlantilla: e.target.checked }))}
                                         className="w-4 h-4 accent-blue-500" />
-                                    <span className="text-sm text-slate-300">Usar como plantilla para generar facturas recurrentes</span>
+                                    <span className="text-sm text-sand-700">Usar como plantilla para generar facturas recurrentes</span>
                                 </label>
                                 {form.esPlantilla && (
                                     <div className="grid grid-cols-2 gap-4">

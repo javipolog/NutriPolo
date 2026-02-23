@@ -24,7 +24,7 @@ const highlight = (text, query) => {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="bg-blue-500/40 text-blue-200 rounded">{text.slice(idx, idx + query.length)}</mark>
+      <mark className="bg-terra-100 text-terra-600 rounded">{text.slice(idx, idx + query.length)}</mark>
       {text.slice(idx + query.length)}
     </>
   );
@@ -176,42 +176,42 @@ export const CommandPalette = ({ open, onClose }) => {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-black/60 backdrop-blur-[2px]"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden"
+        className="w-full max-w-xl bg-white border border-sand-300 rounded-soft shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
         {/* Input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800">
-          <Search size={18} className="text-slate-400 shrink-0" />
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-sand-300">
+          <Search size={18} className="text-sand-600 shrink-0" />
           <input
             ref={inputRef}
             value={query}
             onChange={e => { setQuery(e.target.value); setActiveIdx(0); }}
             placeholder="Buscar facturas, clientes, secciones..."
-            className="flex-1 bg-transparent text-white placeholder-slate-500 outline-none text-sm"
+            className="flex-1 bg-transparent text-sand-900 placeholder-sand-500 outline-none text-sm"
           />
           {query && (
-            <button onClick={() => setQuery('')} className="text-slate-500 hover:text-slate-300">
+            <button onClick={() => setQuery('')} className="text-sand-500 hover:text-sand-700">
               <X size={16} />
             </button>
           )}
-          <kbd className="text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-500 rounded border border-slate-700">ESC</kbd>
+          <kbd className="text-[10px] px-1.5 py-0.5 bg-sand-100 text-sand-500 rounded border border-sand-300">ESC</kbd>
         </div>
 
         {/* Results */}
         <div ref={listRef} className="max-h-80 overflow-y-auto py-2">
           {results.length === 0 ? (
-            <p className="text-center text-slate-500 text-sm py-8">Sin resultados</p>
+            <p className="text-center text-sand-500 text-sm py-8">Sin resultados</p>
           ) : (
             results.map((item, i) => {
               if (item.type === 'group') {
                 return (
                   <div key={`group-${i}`} className="px-4 py-1.5 mt-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">{item.label}</p>
+                    <p className="text-[10px] font-semibold text-sand-500 uppercase tracking-wider">{item.label}</p>
                   </div>
                 );
               }
@@ -227,22 +227,22 @@ export const CommandPalette = ({ open, onClose }) => {
                   onClick={() => handleSelect(item)}
                   onMouseEnter={() => setActiveIdx(myIdx)}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                    isActive ? 'bg-blue-600/20 text-white' : 'text-slate-300 hover:bg-slate-800/50'
+                    isActive ? 'bg-terra-50 text-terra-500' : 'text-sand-700 hover:bg-sand-100'
                   }`}
                 >
-                  <div className={`p-1.5 rounded-lg ${isActive ? 'bg-blue-600/30' : 'bg-slate-800'}`}>
-                    <Icon size={14} className={isActive ? 'text-blue-400' : 'text-slate-400'} />
+                  <div className={`p-1.5 rounded-button ${isActive ? 'bg-terra-400/30' : 'bg-sand-100'}`}>
+                    <Icon size={14} className={isActive ? 'text-terra-400' : 'text-sand-600'} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{highlight(item.label, query)}</p>
                     {item.description && (
-                      <p className="text-xs text-slate-500 truncate">{item.description}</p>
+                      <p className="text-xs text-sand-500 truncate">{item.description}</p>
                     )}
                   </div>
                   {item.meta && (
-                    <span className="text-xs font-mono text-slate-400 shrink-0">{item.meta}</span>
+                    <span className="text-xs font-mono text-sand-600 shrink-0">{item.meta}</span>
                   )}
-                  {isActive && <ArrowRight size={14} className="text-blue-400 shrink-0" />}
+                  {isActive && <ArrowRight size={14} className="text-terra-400 shrink-0" />}
                 </button>
               );
             })
@@ -250,10 +250,10 @@ export const CommandPalette = ({ open, onClose }) => {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-2 border-t border-slate-800 flex items-center gap-4 text-[10px] text-slate-600">
-          <span><kbd className="bg-slate-800 px-1 rounded">↑↓</kbd> navegar</span>
-          <span><kbd className="bg-slate-800 px-1 rounded">↵</kbd> seleccionar</span>
-          <span><kbd className="bg-slate-800 px-1 rounded">ESC</kbd> cerrar</span>
+        <div className="px-4 py-2 border-t border-sand-300 flex items-center gap-4 text-[10px] text-sand-400">
+          <span><kbd className="bg-sand-100 px-1 rounded">↑↓</kbd> navegar</span>
+          <span><kbd className="bg-sand-100 px-1 rounded">↵</kbd> seleccionar</span>
+          <span><kbd className="bg-sand-100 px-1 rounded">ESC</kbd> cerrar</span>
         </div>
       </div>
     </div>

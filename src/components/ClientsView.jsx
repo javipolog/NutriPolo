@@ -77,8 +77,8 @@ export const ClientsView = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Clientes</h1>
-          <p className="text-slate-400 mt-1">{clients.length} clientes</p>
+          <h1 className="font-serif text-2xl font-bold text-sand-900">Clientes</h1>
+          <p className="text-sand-600 mt-1">{clients.length} clientes</p>
         </div>
         <Button icon={Plus} onClick={openNew}>Nuevo Cliente</Button>
       </div>
@@ -102,16 +102,16 @@ export const ClientsView = () => {
           return (
             <Card key={client.id} className="p-6" hover>
               <div className="flex items-start justify-between mb-3">
-                <span className="bg-blue-600/20 text-blue-400 text-xs font-mono px-2 py-1 rounded">{client.codigo}</span>
+                <span className="bg-terra-400/20 text-terra-400 text-xs font-mono px-2 py-1 rounded">{client.codigo}</span>
                 <div className="text-right">
-                  <p className="text-white font-semibold">{formatCurrency(stats.total)}</p>
-                  <p className="text-slate-500 text-xs">{stats.count} facturas</p>
+                  <p className="text-sand-900 font-semibold">{formatCurrency(stats.total)}</p>
+                  <p className="text-sand-500 text-xs">{stats.count} facturas</p>
                 </div>
               </div>
-              <h3 className="text-white font-medium truncate">{client.nombre}</h3>
-              <p className="text-slate-400 text-sm mt-1">{client.cifNif}</p>
-              <p className="text-slate-500 text-sm mt-2 line-clamp-2">{client.direccion}</p>
-              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-slate-800">
+              <h3 className="text-sand-900 font-medium truncate">{client.nombre}</h3>
+              <p className="text-sand-600 text-sm mt-1">{client.cifNif}</p>
+              <p className="text-sand-500 text-sm mt-2 line-clamp-2">{client.direccion}</p>
+              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-sand-300">
                 <Button variant="ghost" size="sm" icon={Edit2} onClick={() => openEdit(client)}>Editar</Button>
                 <Button variant="ghost" size="sm" icon={Trash2} onClick={() => handleDelete(client.id)}>Eliminar</Button>
               </div>

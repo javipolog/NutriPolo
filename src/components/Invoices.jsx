@@ -62,18 +62,18 @@ const ColumnPicker = ({ visibleColumns, onChange }) => {
     <div
       ref={dropRef}
       style={{ position: 'fixed', top: pos.top, right: pos.right, zIndex: 9999 }}
-      className="w-44 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1"
+      className="w-44 bg-white border border-sand-300 rounded-soft shadow-2xl py-1"
     >
-      <p className="px-3 py-1.5 text-[10px] font-semibold text-slate-500 uppercase">Columnas visibles</p>
+      <p className="px-3 py-1.5 text-[10px] font-semibold text-sand-500 uppercase">Columnas visibles</p>
       {ALL_COLUMNS.filter(c => !c.alwaysVisible).map(col => (
-        <label key={col.key} className="flex items-center gap-2.5 px-3 py-2 hover:bg-slate-800 cursor-pointer">
+        <label key={col.key} className="flex items-center gap-2.5 px-3 py-2 hover:bg-sand-100 cursor-pointer">
           <input
             type="checkbox"
             checked={visibleColumns[col.key] !== false}
             onChange={e => onChange({ ...visibleColumns, [col.key]: e.target.checked })}
             className="rounded"
           />
-          <span className="text-sm text-slate-300">{col.label}</span>
+          <span className="text-sm text-sand-700">{col.label}</span>
         </label>
       ))}
     </div>,
@@ -85,8 +85,8 @@ const ColumnPicker = ({ visibleColumns, onChange }) => {
       <button
         ref={btnRef}
         onClick={handleOpen}
-        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${
-          open ? 'bg-slate-700 text-white border-slate-600' : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-white hover:border-slate-600'
+        className={`flex items-center gap-1.5 px-3 py-2 rounded-button text-sm font-medium transition-colors border ${
+          open ? 'bg-sand-200 text-sand-800 border-sand-400' : 'bg-sand-100 text-sand-600 border-sand-300 hover:text-sand-800 hover:border-sand-400'
         }`}
         title="Mostrar/ocultar columnas"
       >
@@ -127,25 +127,25 @@ const PartialPaymentModal = ({ open, onClose, invoice, onAdd, onDelete }) => {
     return (
         <Modal open={open} onClose={onClose} title="Gestionar Pagos" size="md">
             <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3 p-4 bg-slate-800/40 rounded-xl text-center">
-                    <div><p className="text-xs text-slate-400">Total factura</p><p className="text-white font-bold">{formatCurrency(invoice.total)}</p></div>
-                    <div><p className="text-xs text-slate-400">Pagado</p><p className="text-emerald-400 font-bold">{formatCurrency(pagado)}</p></div>
-                    <div><p className="text-xs text-slate-400">Pendiente</p><p className="text-red-400 font-bold">{formatCurrency(pendiente)}</p></div>
+                <div className="grid grid-cols-3 gap-3 p-4 bg-sand-100 rounded-soft text-center">
+                    <div><p className="text-xs text-sand-600">Total factura</p><p className="text-sand-900 font-bold">{formatCurrency(invoice.total)}</p></div>
+                    <div><p className="text-xs text-sand-600">Pagado</p><p className="text-success font-bold">{formatCurrency(pagado)}</p></div>
+                    <div><p className="text-xs text-sand-600">Pendiente</p><p className="text-danger font-bold">{formatCurrency(pendiente)}</p></div>
                 </div>
 
                 {/* Historial de pagaments */}
                 {(invoice.pagos || []).length > 0 && (
                     <div className="space-y-2">
-                        <p className="text-xs font-semibold text-slate-400 uppercase">Pagos registrados</p>
+                        <p className="text-xs font-semibold text-sand-600 uppercase">Pagos registrados</p>
                         {(invoice.pagos || []).map(p => (
-                            <div key={p.id} className="flex items-center justify-between p-3 bg-slate-800/30 rounded-lg">
+                            <div key={p.id} className="flex items-center justify-between p-3 bg-sand-50 rounded-button">
                                 <div className="flex items-center gap-3">
-                                    <CreditCard size={14} className="text-emerald-400" />
-                                    <span className="text-sm text-white font-mono">{formatCurrency(p.importe)}</span>
-                                    <span className="text-xs text-slate-400">{formatDateShort(p.fecha)}</span>
-                                    <span className="text-xs text-slate-500 capitalize">{p.metodo}</span>
+                                    <CreditCard size={14} className="text-success" />
+                                    <span className="text-sm text-sand-900 font-mono">{formatCurrency(p.importe)}</span>
+                                    <span className="text-xs text-sand-600">{formatDateShort(p.fecha)}</span>
+                                    <span className="text-xs text-sand-500 capitalize">{p.metodo}</span>
                                 </div>
-                                <button onClick={() => onDelete(p.id)} className="text-red-400 hover:text-red-300 p-1">
+                                <button onClick={() => onDelete(p.id)} className="text-danger hover:text-danger p-1">
                                     <X size={14} />
                                 </button>
                             </div>
@@ -155,8 +155,8 @@ const PartialPaymentModal = ({ open, onClose, invoice, onAdd, onDelete }) => {
 
                 {/* Afegir pagament */}
                 {pendiente > 0.01 && (
-                    <div className="space-y-3 border-t border-slate-700 pt-4">
-                        <p className="text-xs font-semibold text-slate-400 uppercase">Añadir pago</p>
+                    <div className="space-y-3 border-t border-sand-300 pt-4">
+                        <p className="text-xs font-semibold text-sand-600 uppercase">Añadir pago</p>
                         <div className="grid grid-cols-3 gap-3">
                             <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
                             <Input label="Importe (€)" type="number" step="0.01" value={form.importe}
@@ -451,8 +451,8 @@ export const Invoices = () => {
     };
 
     const SortIcon = ({ column }) => {
-        if (sortConfig.key !== column) return <ArrowUpDown size={12} className="text-slate-600 opacity-0 group-hover:opacity-50" />;
-        return <ArrowUpDown size={12} className={`text-blue-400 ${sortConfig.direction === 'asc' ? 'rotate-180' : ''}`} />;
+        if (sortConfig.key !== column) return <ArrowUpDown size={12} className="text-sand-400 opacity-0 group-hover:opacity-50" />;
+        return <ArrowUpDown size={12} className={`text-terra-400 ${sortConfig.direction === 'asc' ? 'rotate-180' : ''}`} />;
     };
 
     const isFacturas = docType === 'facturas';
@@ -461,16 +461,16 @@ export const Invoices = () => {
         <div className="space-y-4 h-full flex flex-col">
             {/* Alerta de plantilles recurrents pendents (#8) */}
             {isFacturas && recurringDue.length > 0 && (
-                <div className="bg-blue-900/30 border border-blue-700/50 rounded-xl px-4 py-3 flex items-center gap-3">
-                    <RefreshCw size={16} className="text-blue-400 shrink-0" />
-                    <span className="text-blue-200 text-sm flex-1">
+                <div className="bg-terra-50 border border-terra-300 rounded-soft px-4 py-3 flex items-center gap-3">
+                    <RefreshCw size={16} className="text-terra-400 shrink-0" />
+                    <span className="text-terra-200 text-sm flex-1">
                         {recurringDue.length} plantilla{recurringDue.length > 1 ? 's' : ''} recurrente{recurringDue.length > 1 ? 's' : ''} pendiente{recurringDue.length > 1 ? 's' : ''} de generar:
                         {' '}<span className="font-medium">{recurringDue.map(i => i.concepto || i.numero).join(', ')}</span>
                     </span>
                     <div className="flex gap-1">
                         {recurringDue.slice(0, 3).map(inv => (
                             <Button key={inv.id} size="sm" onClick={() => handleGenerateFromTemplate(inv.id)}
-                                className="text-xs bg-blue-700 hover:bg-blue-600">
+                                className="text-xs bg-terra-400 hover:bg-terra-500">
                                 Generar
                             </Button>
                         ))}
@@ -479,21 +479,21 @@ export const Invoices = () => {
             )}
 
             {/* Header & Controls */}
-            <div className="flex flex-col gap-4 bg-slate-900/50 p-4 rounded-2xl border border-slate-800 backdrop-blur-sm">
+            <div className="flex flex-col gap-4 bg-white p-4 rounded-soft border border-sand-300 backdrop-blur-[2px]">
                 <div className="flex items-center justify-between">
                     <div>
-                        <h1 className="text-2xl font-bold text-white">Facturación</h1>
-                        <p className="text-slate-400 text-sm mt-0.5">{filteredInvoices.length} documentos encontrados</p>
+                        <h1 className="font-serif text-2xl font-bold text-sand-900">Facturación</h1>
+                        <p className="text-sand-600 text-sm mt-0.5">{filteredInvoices.length} documentos encontrados</p>
                     </div>
                     <div className="flex items-center gap-2">
                         {/* Tab switcher: Facturas / Presupuestos */}
-                        <div className="flex gap-1 p-1 bg-slate-800 rounded-xl">
+                        <div className="flex gap-1 p-1 bg-sand-100 rounded-soft">
                             <button onClick={() => setDocType('facturas')}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${isFacturas ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-button text-sm font-medium transition-all ${isFacturas ? 'bg-terra-400 text-white' : 'text-sand-600 hover:text-sand-800'}`}>
                                 <FileText size={14} />Facturas
                             </button>
                             <button onClick={() => setDocType('presupuestos')}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${!isFacturas ? 'bg-purple-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-button text-sm font-medium transition-all ${!isFacturas ? 'bg-purple-600 text-white' : 'text-sand-600 hover:text-sand-800'}`}>
                                 <FileCheck size={14} />Presupuestos
                             </button>
                         </div>
@@ -513,7 +513,7 @@ export const Invoices = () => {
                     <div className="flex gap-2 text-sm overflow-x-auto pb-1 lg:pb-0">
                         <select value={filters.status}
                             onChange={e => setFilters({ ...filters, status: e.target.value })}
-                            className="bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2 outline-none focus:border-blue-500 appearance-none font-medium hover:border-slate-600 transition-all shadow-inner">
+                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Todos los estados</option>
                             <option value="borrador">Borrador</option>
                             <option value="emitida">Pendiente</option>
@@ -523,19 +523,19 @@ export const Invoices = () => {
                         </select>
                         <select value={filters.client}
                             onChange={e => setFilters({ ...filters, client: e.target.value })}
-                            className="bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2 outline-none focus:border-blue-500 max-w-[180px] appearance-none font-medium hover:border-slate-600 transition-all shadow-inner">
+                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 max-w-[180px] appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Todos los clientes</option>
                             {sortedClients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                         </select>
                         <select value={filters.year}
                             onChange={e => setFilters({ ...filters, year: e.target.value })}
-                            className="bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2 outline-none focus:border-blue-500 appearance-none font-medium hover:border-slate-600 transition-all shadow-inner">
+                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Años</option>
                             {years.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
                         <select value={filters.month}
                             onChange={e => setFilters({ ...filters, month: e.target.value })}
-                            className="bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-2 outline-none focus:border-blue-500 appearance-none font-medium hover:border-slate-600 transition-all shadow-inner">
+                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Mes</option>
                             {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                         </select>
@@ -544,38 +544,38 @@ export const Invoices = () => {
             </div>
 
             {/* Table */}
-            <div className="flex-1 bg-slate-900/30 border border-slate-800 rounded-2xl overflow-hidden flex flex-col">
+            <div className="flex-1 bg-sand-50 border border-sand-300 rounded-soft overflow-hidden flex flex-col">
                 <div className="overflow-auto flex-1 custom-scrollbar">
                     <table className="w-full text-left border-collapse whitespace-nowrap">
-                        <thead className="bg-slate-900 border-b border-slate-800 sticky top-0 z-10">
+                        <thead className="bg-white border-b border-sand-300 sticky top-0 z-10">
                             <tr>
-                                {cols.cod && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase cursor-pointer group hover:text-slate-300" onClick={() => handleSort('numero')}>
+                                {cols.cod && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('numero')}>
                                     <div className="flex items-center gap-1">COD <SortIcon column="numero" /></div>
                                 </th>}
-                                {cols.work && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase cursor-pointer group hover:text-slate-300" onClick={() => handleSort('concepto')}>
+                                {cols.work && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('concepto')}>
                                     <div className="flex items-center gap-1">CONCEPTO <SortIcon column="concepto" /></div>
                                 </th>}
-                                {cols.cliente && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase cursor-pointer group hover:text-slate-300" onClick={() => handleSort('clienteId')}>
+                                {cols.cliente && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('clienteId')}>
                                     <div className="flex items-center gap-1">CLIENTE <SortIcon column="clienteId" /></div>
                                 </th>}
-                                {cols.importe && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase text-right">IMPORTE</th>}
-                                {cols.iva && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase text-right">IVA</th>}
-                                {cols.irpf && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase text-right">IRPF</th>}
-                                {cols.total && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase text-right cursor-pointer group hover:text-slate-300" onClick={() => handleSort('total')}>
+                                {cols.importe && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">IMPORTE</th>}
+                                {cols.iva && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">IVA</th>}
+                                {cols.irpf && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">IRPF</th>}
+                                {cols.total && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right cursor-pointer group hover:text-sand-700" onClick={() => handleSort('total')}>
                                     <div className="flex items-center justify-end gap-1">TOTAL <SortIcon column="total" /></div>
                                 </th>}
-                                {cols.pagado && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase text-right">PAGADO</th>}
-                                {cols.pendiente && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase text-right">PENDIENTE</th>}
-                                {cols.status && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase text-center">STATUS</th>}
-                                {cols.fecha && <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase cursor-pointer group hover:text-slate-300" onClick={() => handleSort('fecha')}>
+                                {cols.pagado && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">PAGADO</th>}
+                                {cols.pendiente && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">PENDIENTE</th>}
+                                {cols.status && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-center">STATUS</th>}
+                                {cols.fecha && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('fecha')}>
                                     <div className="flex items-center gap-1">FECHA <SortIcon column="fecha" /></div>
                                 </th>}
-                                <th className="py-3 px-4 text-xs font-semibold text-slate-500 uppercase sticky right-0 bg-slate-900 shadow-xl">
+                                <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase sticky right-0 bg-white shadow-xl">
                                     ACCIONES
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-slate-800/50">
+                        <tbody className="divide-y divide-sand-200">
                             {filteredInvoices.map(inv => {
                                 const client = clients.find(c => c.id === inv.clienteId);
                                 const isPaid = inv.estado === 'pagada';
@@ -588,18 +588,18 @@ export const Invoices = () => {
                                 const isTemplate = inv.esPlantilla;
 
                                 return (
-                                    <tr key={inv.id} className={`hover:bg-slate-800/30 transition-colors group ${isRectificativa ? 'opacity-80' : ''}`}>
+                                    <tr key={inv.id} className={`hover:bg-sand-50 transition-colors group ${isRectificativa ? 'opacity-80' : ''}`}>
                                         {/* COD */}
-                                        {cols.cod && <td className="py-2 px-4 text-sm font-mono text-slate-300 border-r border-slate-800/50">
+                                        {cols.cod && <td className="py-2 px-4 text-sm font-mono text-sand-700 border-r border-sand-200">
                                             <div className="flex items-center gap-1.5">
                                                 {isRectificativa && <RotateCcw size={11} className="text-orange-400 shrink-0" title="Rectificativa" />}
-                                                {isTemplate && <RefreshCw size={11} className="text-blue-400 shrink-0" title="Plantilla recurrente" />}
+                                                {isTemplate && <RefreshCw size={11} className="text-terra-400 shrink-0" title="Plantilla recurrente" />}
                                                 {inv.numero}
                                             </div>
                                         </td>}
 
                                         {/* WORK */}
-                                        {cols.work && <td className="py-2 px-4 text-sm text-white max-w-[200px] truncate" title={inv.concepto}>
+                                        {cols.work && <td className="py-2 px-4 text-sm text-sand-700 max-w-[200px] truncate" title={inv.concepto}>
                                             {inv.concepto}
                                             {isRectificativa && inv.rectificadaId && (
                                                 <span className="ml-1 text-xs text-orange-400/70">rectif.</span>
@@ -608,41 +608,41 @@ export const Invoices = () => {
 
                                         {/* CLIENTE */}
                                         {cols.cliente && <td className="py-2 px-4 text-sm">
-                                            <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-xs border border-slate-700">
+                                            <span className="bg-sand-100 text-sand-700 px-2 py-0.5 rounded text-xs border border-sand-300">
                                                 {client?.nombre || 'Sin Cliente'}
                                             </span>
                                         </td>}
 
                                         {/* IMPORTE */}
-                                        {cols.importe && <td className={`py-2 px-4 text-sm text-right font-mono ${isRectificativa ? 'text-orange-400' : 'text-slate-400'}`}>
+                                        {cols.importe && <td className={`py-2 px-4 text-sm text-right font-mono ${isRectificativa ? 'text-orange-400' : 'text-sand-600'}`}>
                                             {formatCurrency(inv.subtotal)}
                                         </td>}
 
                                         {/* IVA */}
-                                        {cols.iva && <td className="py-2 px-4 text-sm text-right text-slate-400 font-mono">
+                                        {cols.iva && <td className="py-2 px-4 text-sm text-right text-sand-600 font-mono">
                                             {formatCurrency(inv.iva)}
                                         </td>}
 
                                         {/* IRPF */}
-                                        {cols.irpf && <td className="py-2 px-4 text-sm text-right text-slate-400 font-mono">
+                                        {cols.irpf && <td className="py-2 px-4 text-sm text-right text-sand-600 font-mono">
                                             {formatCurrency(inv.irpf)}
                                         </td>}
 
                                         {/* TOTAL */}
-                                        {cols.total && <td className={`py-2 px-4 text-sm text-right font-mono font-bold bg-slate-800/20 ${isRectificativa ? 'text-orange-400' : 'text-white'}`}>
+                                        {cols.total && <td className={`py-2 px-4 text-sm text-right font-mono font-bold bg-sand-50 ${isRectificativa ? 'text-orange-700' : 'text-sand-900'}`}>
                                             {formatCurrency(inv.total)}
                                         </td>}
 
                                         {/* PAGADO */}
                                         {cols.pagado && <td className="py-2 px-4 text-sm text-right font-mono">
-                                            <span className={pagado > 0 ? 'text-emerald-400' : 'text-slate-600'}>
+                                            <span className={pagado > 0 ? 'text-success' : 'text-sand-400'}>
                                                 {formatCurrency(pagado)}
                                             </span>
                                         </td>}
 
                                         {/* PENDIENTE */}
                                         {cols.pendiente && <td className="py-2 px-4 text-sm text-right font-mono">
-                                            <span className={pendiente > 0 && inv.estado !== 'anulada' && inv.estado !== 'borrador' ? 'text-red-400' : 'text-slate-600'}>
+                                            <span className={pendiente > 0 && inv.estado !== 'anulada' && inv.estado !== 'borrador' ? 'text-danger' : 'text-sand-400'}>
                                                 {formatCurrency(inv.estado !== 'anulada' ? pendiente : 0)}
                                             </span>
                                         </td>}
@@ -654,40 +654,40 @@ export const Invoices = () => {
 
                                         {/* FECHA */}
                                         {cols.fecha && <td className="py-2 px-4 text-sm font-mono">
-                                            <div className="text-slate-300">{formatDateShort(inv.fecha)}</div>
+                                            <div className="text-sand-700">{formatDateShort(inv.fecha)}</div>
                                             {inv.fechaFacturacion && (
-                                                <div className="text-xs text-slate-500">{formatDateShort(inv.fechaFacturacion)}</div>
+                                                <div className="text-xs text-sand-500">{formatDateShort(inv.fechaFacturacion)}</div>
                                             )}
                                             {isTemplate && inv.proximaFecha && (
-                                                <div className="text-xs text-blue-400">→ {formatDateShort(inv.proximaFecha)}</div>
+                                                <div className="text-xs text-terra-400">→ {formatDateShort(inv.proximaFecha)}</div>
                                             )}
                                         </td>}
 
                                         {/* ACCIONES */}
-                                        <td className="py-2 px-4 sticky right-0 bg-slate-900 group-hover:bg-slate-800 transition-colors shadow-xl border-l border-slate-800">
+                                        <td className="py-2 px-4 sticky right-0 bg-white group-hover:bg-sand-100 transition-colors shadow-xl border-l border-sand-300">
                                             <div className="flex items-center justify-center gap-1">
                                                 <Button variant="ghost" size="sm" icon={Eye} onClick={() => handleOpenPreview(inv)} title="Ver" className="h-8 w-8 p-0" />
                                                 <Button variant="ghost" size="sm" icon={Download} onClick={() => generatePDF(inv)} disabled={generating} title="PDF" className="h-8 w-8 p-0" />
                                                 <Button variant="ghost" size="sm" icon={Send} onClick={() => setSendInvoice(inv)} title="Enviar email"
-                                                    className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10" />
+                                                    className="h-8 w-8 p-0 text-terra-400 hover:text-terra-300 hover:bg-terra-50" />
 
                                                 {/* Pagament parcial — per a emitides i parcials */}
                                                 {(inv.estado === 'emitida' || inv.estado === 'parcial') && (
                                                     <Button variant="ghost" size="sm" icon={CreditCard}
                                                         onClick={() => setPagoInvoice(inv)}
                                                         title="Gestionar pagos"
-                                                        className="h-8 w-8 p-0 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10" />
+                                                        className="h-8 w-8 p-0 text-success hover:text-success hover:bg-success-light/50" />
                                                 )}
 
                                                 {inv.dropboxLink && (
                                                     <Button variant="ghost" size="sm" icon={ExternalLink} onClick={() => openUrl(inv.dropboxLink)} title="Dropbox"
-                                                        className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300" />
+                                                        className="h-8 w-8 p-0 text-terra-400 hover:text-terra-300" />
                                                 )}
 
                                                 {/* Marcar pagada — per a emitides sense pagos parcials */}
                                                 {inv.estado === 'emitida' && (inv.pagos || []).length === 0 && (
                                                     <Button variant="ghost" size="sm" icon={Check} onClick={() => handleMarkPaid(inv)} title="Marcar Pagada"
-                                                        className="h-8 w-8 p-0 text-emerald-400 hover:text-emerald-300" />
+                                                        className="h-8 w-8 p-0 text-success hover:text-success" />
                                                 )}
 
                                                 {/* Convertir pressupost a factura */}
@@ -695,7 +695,7 @@ export const Invoices = () => {
                                                     <Button variant="ghost" size="sm" icon={FileText}
                                                         onClick={() => handleConvertToFactura(inv.id)}
                                                         title="Convertir a Factura"
-                                                        className="h-8 w-8 p-0 text-purple-400 hover:text-purple-300 hover:bg-purple-500/10" />
+                                                        className="h-8 w-8 p-0 text-purple-400 hover:text-purple-700 hover:bg-purple-500/10" />
                                                 )}
 
                                                 {/* Generar des de plantilla */}
@@ -703,26 +703,26 @@ export const Invoices = () => {
                                                     <Button variant="ghost" size="sm" icon={RefreshCw}
                                                         onClick={() => handleGenerateFromTemplate(inv.id)}
                                                         title="Generar factura ahora"
-                                                        className="h-8 w-8 p-0 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10" />
+                                                        className="h-8 w-8 p-0 text-terra-400 hover:text-terra-300 hover:bg-terra-50" />
                                                 )}
 
-                                                <div className="w-px h-4 bg-slate-700 mx-1" />
+                                                <div className="w-px h-4 bg-sand-200 mx-1" />
 
                                                 <Button variant="ghost" size="sm" icon={Copy} onClick={() => handleDuplicate(inv)} title="Duplicar" className="h-8 w-8 p-0" />
                                                 <Button variant="ghost" size="sm" icon={Edit2} onClick={() => handleOpenEdit(inv)}
                                                     title={isLocked ? 'Ver (bloqueada)' : 'Editar'}
-                                                    className={`h-8 w-8 p-0 ${isLocked ? 'text-slate-500' : ''}`} />
+                                                    className={`h-8 w-8 p-0 ${isLocked ? 'text-sand-500' : ''}`} />
 
                                                 {/* Crear rectificativa per a factures emitides/pagades */}
                                                 {isLocked && (
                                                     <Button variant="ghost" size="sm" icon={RotateCcw}
                                                         onClick={() => handleCreateRectificativa(inv.id)}
                                                         title="Crear Rectificativa"
-                                                        className="h-8 w-8 p-0 text-orange-400 hover:text-orange-300 hover:bg-orange-500/10" />
+                                                        className="h-8 w-8 p-0 text-orange-400 hover:text-orange-700 hover:bg-orange-500/10" />
                                                 )}
 
                                                 <Button variant="ghost" size="sm" icon={Trash2} onClick={() => handleDelete(inv.id)} title="Eliminar"
-                                                    className="h-8 w-8 p-0 text-red-400 hover:text-red-300 hover:bg-red-900/20" />
+                                                    className="h-8 w-8 p-0 text-danger hover:text-danger hover:bg-danger-light/50" />
                                             </div>
                                         </td>
                                     </tr>
@@ -742,10 +742,10 @@ export const Invoices = () => {
                 </div>
 
                 {/* Footer */}
-                <div className="bg-slate-900 border-t border-slate-800 p-3 flex gap-6 text-sm font-mono overflow-x-auto">
-                    <div className="text-slate-400">Total: <span className="text-white">{filteredInvoices.length}</span></div>
-                    <div className="text-slate-400">Importe: <span className="text-white">{formatCurrency(filteredInvoices.reduce((s, i) => s + (i.total || 0), 0))}</span></div>
-                    <div className="text-slate-400">Pendiente: <span className="text-red-400">{formatCurrency(filteredInvoices.filter(i => i.estado === 'emitida' || i.estado === 'parcial').reduce((s, i) => s + calcularPendiente(i), 0))}</span></div>
+                <div className="bg-white border-t border-sand-300 p-3 flex gap-6 text-sm font-mono overflow-x-auto">
+                    <div className="text-sand-600">Total: <span className="text-sand-900">{filteredInvoices.length}</span></div>
+                    <div className="text-sand-600">Importe: <span className="text-sand-900">{formatCurrency(filteredInvoices.reduce((s, i) => s + (i.total || 0), 0))}</span></div>
+                    <div className="text-sand-600">Pendiente: <span className="text-danger">{formatCurrency(filteredInvoices.filter(i => i.estado === 'emitida' || i.estado === 'parcial').reduce((s, i) => s + calcularPendiente(i), 0))}</span></div>
                 </div>
             </div>
 
@@ -781,12 +781,12 @@ export const Invoices = () => {
                                 {generating ? 'Generando...' : 'Descargar PDF'}
                             </Button>
                             <Button icon={Send} onClick={() => { setShowPreview(false); setSendInvoice(previewInvoice); }}
-                                className="bg-blue-600 hover:bg-blue-500">
+                                className="bg-terra-400 hover:bg-terra-500">
                                 Enviar por Email
                             </Button>
                             <Button variant="secondary" icon={Printer} onClick={() => window.print()}>Imprimir</Button>
                         </div>
-                        <div className="overflow-auto max-h-[70vh] border border-slate-700 rounded-lg">
+                        <div className="overflow-auto max-h-[70vh] border border-sand-300 rounded-button">
                             <InvoicePreviewModern
                                 invoice={previewInvoice}
                                 client={clients.find(c => c.id === previewInvoice.clienteId)}

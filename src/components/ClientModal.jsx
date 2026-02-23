@@ -67,7 +67,7 @@ export const ClientModal = ({ open, onClose, onSave, client }) => {
           />
           <div>
             <Input label="Código" value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value.toUpperCase() })} placeholder={suggestedCode} />
-            {suggestedCode && !form.codigo && <p className="text-xs text-slate-500 mt-1">Sugerido: {suggestedCode}</p>}
+            {suggestedCode && !form.codigo && <p className="text-xs text-sand-500 mt-1">Sugerido: {suggestedCode}</p>}
           </div>
         </div>
         <Textarea label="Dirección" value={form.direccion} onChange={e => setForm({ ...form, direccion: e.target.value })} rows={3} required />

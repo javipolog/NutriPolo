@@ -154,10 +154,10 @@ export const NotionSync = () => {
 
   const getLogIcon = (type) => {
     switch (type) {
-      case 'success': return <CheckCircle size={14} className="text-emerald-400" />;
-      case 'error': return <XCircle size={14} className="text-red-400" />;
-      case 'info': return <Info size={14} className="text-blue-400" />;
-      default: return <Info size={14} className="text-slate-400" />;
+      case 'success': return <CheckCircle size={14} className="text-success" />;
+      case 'error': return <XCircle size={14} className="text-danger" />;
+      case 'info': return <Info size={14} className="text-terra-400" />;
+      default: return <Info size={14} className="text-sand-600" />;
     }
   };
 
@@ -168,17 +168,17 @@ export const NotionSync = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {isConfigured ? (
-              <div className="p-2 bg-emerald-500/20 rounded-lg">
-                <Cloud size={20} className="text-emerald-400" />
+              <div className="p-2 bg-success-light rounded-button">
+                <Cloud size={20} className="text-success" />
               </div>
             ) : (
-              <div className="p-2 bg-slate-700 rounded-lg">
-                <CloudOff size={20} className="text-slate-400" />
+              <div className="p-2 bg-sand-200 rounded-button">
+                <CloudOff size={20} className="text-sand-600" />
               </div>
             )}
             <div>
-              <h3 className="text-white font-medium">Sincronización con Notion</h3>
-              <p className="text-sm text-slate-400">
+              <h3 className="text-sand-900 font-medium">Sincronización con Notion</h3>
+              <p className="text-sm text-sand-600">
                 {isConfigured ? 'Conectado' : 'No configurado'}
                 {lastSync && ` • Última sync: ${formatDate(lastSync)}`}
               </p>
@@ -208,7 +208,7 @@ export const NotionSync = () => {
 
         {/* Botones de sincronización */}
         {isConfigured && (
-          <div className="mt-4 pt-4 border-t border-slate-800">
+          <div className="mt-4 pt-4 border-t border-sand-300">
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
@@ -248,15 +248,15 @@ export const NotionSync = () => {
                   onChange={(e) => setAutoSync(e.target.checked)}
                   className="sr-only peer"
                 />
-                <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                <div className="w-9 h-5 bg-sand-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-terra-400"></div>
               </label>
-              <span className="text-sm text-slate-400">Sincronización automática al guardar</span>
+              <span className="text-sm text-sand-600">Sincronización automática al guardar</span>
             </div>
 
             {syncError && (
-              <div className="mt-3 p-2 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-2">
-                <AlertCircle size={16} className="text-red-400" />
-                <span className="text-sm text-red-400">{syncError}</span>
+              <div className="mt-3 p-2 bg-danger-light border border-danger/30 rounded-button flex items-center gap-2">
+                <AlertCircle size={16} className="text-danger" />
+                <span className="text-sm text-danger">{syncError}</span>
               </div>
             )}
           </div>
@@ -271,10 +271,10 @@ export const NotionSync = () => {
         size="md"
       >
         <div className="space-y-4">
-          <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-            <h4 className="text-blue-400 font-medium text-sm mb-2">📋 Pasos para configurar:</h4>
-            <ol className="text-xs text-slate-400 space-y-1 list-decimal list-inside">
-              <li>Ve a <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener" className="text-blue-400 hover:underline">notion.so/my-integrations</a></li>
+          <div className="p-3 bg-terra-50 border border-terra-200 rounded-button">
+            <h4 className="text-terra-400 font-medium text-sm mb-2">📋 Pasos para configurar:</h4>
+            <ol className="text-xs text-sand-600 space-y-1 list-decimal list-inside">
+              <li>Ve a <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener" className="text-terra-400 hover:underline">notion.so/my-integrations</a></li>
               <li>Crea una nueva integración y copia el token</li>
               <li>En tu base de datos, haz clic en "..." → "Add connections" → tu integración</li>
               <li>Pega el token y el ID de la base de datos aquí</li>
@@ -282,7 +282,7 @@ export const NotionSync = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">
+            <label className="block text-sm font-medium text-sand-700 mb-1">
               API Key (Internal Integration Token)
             </label>
             <div className="relative">
@@ -296,7 +296,7 @@ export const NotionSync = () => {
               <button
                 type="button"
                 onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-sand-600 hover:text-sand-700"
               >
                 {showApiKey ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
@@ -304,7 +304,7 @@ export const NotionSync = () => {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-1">
+            <label className="block text-sm font-medium text-sand-700 mb-1">
               Database ID
             </label>
             <Input
@@ -312,31 +312,31 @@ export const NotionSync = () => {
               onChange={(e) => setTempDatabaseId(e.target.value)}
               placeholder="556517bbc95945aca9f4c3a3f92d922c"
             />
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-sand-500 mt-1">
               El ID está en la URL de tu base de datos, entre notion.so/ y el ?
             </p>
           </div>
 
           {testResult && (
-            <div className={`p-3 rounded-lg flex items-center gap-2 ${testResult.success
-              ? 'bg-emerald-500/10 border border-emerald-500/30'
-              : 'bg-red-500/10 border border-red-500/30'
+            <div className={`p-3 rounded-button flex items-center gap-2 ${testResult.success
+              ? 'bg-success-light border border-success/30'
+              : 'bg-danger-light border border-danger/30'
               }`}>
               {testResult.success ? (
                 <>
-                  <Check size={18} className="text-emerald-400" />
-                  <span className="text-emerald-400 text-sm">✓ {testResult.title}</span>
+                  <Check size={18} className="text-success" />
+                  <span className="text-success text-sm">✓ {testResult.title}</span>
                 </>
               ) : (
                 <>
-                  <AlertCircle size={18} className="text-red-400" />
-                  <span className="text-red-400 text-sm">{testResult.message}</span>
+                  <AlertCircle size={18} className="text-danger" />
+                  <span className="text-danger text-sm">{testResult.message}</span>
                 </>
               )}
             </div>
           )}
 
-          <div className="flex justify-between pt-4 border-t border-slate-800">
+          <div className="flex justify-between pt-4 border-t border-sand-300">
             {isConfigured && (
               <Button
                 variant="ghost"
@@ -347,7 +347,7 @@ export const NotionSync = () => {
                   setTempDatabaseId('556517bbc95945aca9f4c3a3f92d922c');
                   setTestResult(null);
                 }}
-                className="text-red-400 hover:text-red-300"
+                className="text-danger hover:text-danger"
               >
                 Desconectar
               </Button>
@@ -380,24 +380,24 @@ export const NotionSync = () => {
       >
         <div className="space-y-2 max-h-96 overflow-y-auto">
           {syncLogs.length === 0 ? (
-            <p className="text-slate-500 text-center py-4">No hay registros</p>
+            <p className="text-sand-500 text-center py-4">No hay registros</p>
           ) : (
             syncLogs.map((log) => (
               <div
                 key={log.id}
-                className="flex items-start gap-2 p-2 bg-slate-800/50 rounded-lg"
+                className="flex items-start gap-2 p-2 bg-sand-100 rounded-button"
               >
                 {getLogIcon(log.type)}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-slate-300">{log.message}</p>
-                  <p className="text-xs text-slate-500">{formatDate(log.timestamp)}</p>
+                  <p className="text-sm text-sand-700">{log.message}</p>
+                  <p className="text-xs text-sand-500">{formatDate(log.timestamp)}</p>
                 </div>
               </div>
             ))
           )}
         </div>
         {syncLogs.length > 0 && (
-          <div className="mt-4 pt-4 border-t border-slate-800">
+          <div className="mt-4 pt-4 border-t border-sand-300">
             <Button variant="ghost" size="sm" onClick={clearLogs}>
               Limpiar registros
             </Button>
@@ -417,16 +417,16 @@ export const NotionStatusBadge = () => {
   if (!isConfigured) return null;
 
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-800/50 rounded-lg text-xs">
+    <div className="flex items-center gap-1.5 px-2 py-1 bg-sand-100 rounded-button text-xs">
       {isSyncing ? (
         <>
-          <RefreshCw size={12} className="text-blue-400 animate-spin" />
-          <span className="text-blue-400">Sincronizando...</span>
+          <RefreshCw size={12} className="text-terra-400 animate-spin" />
+          <span className="text-terra-400">Sincronizando...</span>
         </>
       ) : (
         <>
-          <Cloud size={12} className="text-emerald-400" />
-          <span className="text-slate-400">Notion</span>
+          <Cloud size={12} className="text-success" />
+          <span className="text-sand-600">Notion</span>
         </>
       )}
     </div>
