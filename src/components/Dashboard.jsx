@@ -558,12 +558,12 @@ export const Dashboard = () => {
                                 </p>
                             </div>
                             <div className="flex flex-wrap gap-1.5">
-                                <ChartModeTab active={chartMode === 'evolution'} icon={TrendingUp} label="Evolució" onClick={() => setChartMode('evolution')} />
+                                <ChartModeTab active={chartMode === 'evolution'} icon={TrendingUp} label="Evolución" onClick={() => setChartMode('evolution')} />
                                 {compareYears.length > 0 && (
                                     <>
                                         <ChartModeTab active={chartMode === 'compare'} icon={BarChart3} label="Comparar" onClick={() => setChartMode('compare')} />
                                         <ChartModeTab active={chartMode === 'yoy'} icon={ArrowUpRight} label="% YoY" onClick={() => setChartMode('yoy')} />
-                                        <ChartModeTab active={chartMode === 'accumulated'} icon={Layers} label="Acumulat" onClick={() => setChartMode('accumulated')} />
+                                        <ChartModeTab active={chartMode === 'accumulated'} icon={Layers} label="Acumulado" onClick={() => setChartMode('accumulated')} />
                                     </>
                                 )}
                             </div>
@@ -572,7 +572,7 @@ export const Dashboard = () => {
                         {/* Filtre de mètrica */}
                         {compareYears.length > 0 && (chartMode === 'compare' || chartMode === 'evolution') && (
                             <div className="flex gap-1.5 mb-4 relative z-10">
-                                {[{ key: 'both', label: 'Tot' }, { key: 'ingresos', label: 'Ingressos' }, { key: 'gastos', label: 'Gastos' }, { key: 'beneficio', label: 'Benefici' }].map(m => (
+                                {[{ key: 'both', label: 'Todo' }, { key: 'ingresos', label: 'Ingresos' }, { key: 'gastos', label: 'Gastos' }, { key: 'beneficio', label: 'Beneficio' }].map(m => (
                                     <button key={m.key} onClick={() => setCompareMetric(m.key)}
                                         className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all ${compareMetric === m.key ? 'bg-slate-700 text-white' : 'text-slate-500 hover:text-slate-300'}`}>
                                         {m.label}

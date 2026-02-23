@@ -121,6 +121,18 @@ const migrateStore = (persistedState, version) => {
     };
   }
 
+  if (version < 3) {
+    // Migrar expenses antics: `deducible` → `deducibleIrpf` + `deducibleIva`
+    state = {
+      ...state,
+      expenses: (state.expenses || []).map(exp => ({
+        ...exp,
+        deducibleIrpf: exp.deducibleIrpf ?? exp.deducible ?? true,
+        deducibleIva:  exp.deducibleIva  ?? exp.deducible ?? true,
+      })),
+    };
+  }
+
   return state;
 };
 
@@ -488,7 +500,7 @@ export const useStore = create(
     {
       name: 'contabilidad-storage',
       storage,
-      version: 2,
+      version: 3,
       migrate: migrateStore,
       partialize: (state) => ({
         config: state.config,

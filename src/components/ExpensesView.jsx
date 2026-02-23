@@ -192,9 +192,26 @@ export const ExpensesView = () => {
             );
             if (!exists) {
                 const ivaPorcentaje = item.ivaPorcentaje || 21;
-                // Calcular ivaImporte sempre des del percentatge per garantir consistència
-                const ivaImporte = parseFloat((item.baseImponible * (ivaPorcentaje / 100)).toFixed(2));
-                const total = parseFloat((item.baseImponible + ivaImporte).toFixed(2));
+                // FIX C: Preferir el total detectat pel scanner quan és coherent
+                const calculatedIva = parseFloat((item.baseImponible * (ivaPorcentaje / 100)).toFixed(2));
+                const calculatedTotal = parseFloat((item.baseImponible + calculatedIva).toFixed(2));
+                let total, ivaImporte;
+                if (item.total > 0 && Math.abs(item.total - calculatedTotal) < 0.50) {
+                    // Scanner total prop del calculat — usar scanner total per precisió
+                    total = item.total;
+                    ivaImporte = calculatedIva;
+                } else if (item.total > 0 && item.baseImponible > 0) {
+                    // Scanner total difereix — confiar en scanner total, recalcular IVA
+                    total = item.total;
+                    ivaImporte = parseFloat((total - item.baseImponible).toFixed(2));
+                    if (ivaImporte < 0 || ivaImporte >= total) {
+                        ivaImporte = calculatedIva;
+                        total = calculatedTotal;
+                    }
+                } else {
+                    ivaImporte = calculatedIva;
+                    total = calculatedTotal;
+                }
                 const expenseData = {
                     id: generateId(), fecha: item.fecha, proveedor: item.proveedor,
                     cifProveedor: item.cifProveedor || '',
@@ -202,7 +219,8 @@ export const ExpensesView = () => {
                     categoria: item.categoria || defaultCategories[0],
                     baseImponible: item.baseImponible, ivaPorcentaje,
                     ivaImporte,
-                    total, deducibleIrpf: true, deducibleIva: true, archivo: item.file
+                    total, moneda: item.moneda || 'EUR',
+                    deducibleIrpf: true, deducibleIva: true, archivo: item.file
                 };
                 addExpense(expenseData);
                 count++;
@@ -773,7 +791,12 @@ const ExpensesTable = ({ expenses, onEdit, onDelete, onOpenPdf, toggleSort, sort
                                 <div className="text-[10px] text-slate-600 font-mono">({exp.ivaPorcentaje}%)</div>
                             </td>
                             <td className="py-3 px-6 text-right">
-                                <div className="text-white font-bold font-mono">{formatCurrency(exp.total)}</div>
+                                <div className="text-white font-bold font-mono flex items-center justify-end gap-1.5">
+                                    {formatCurrency(exp.total)}
+                                    {exp.moneda && exp.moneda !== 'EUR' && (
+                                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">{exp.moneda}</span>
+                                    )}
+                                </div>
                                 <div className="text-[10px] text-slate-500 font-mono">Base: {formatCurrency(exp.baseImponible)}</div>
                             </td>
                             <td className="py-3 px-6 text-right" onClick={e => e.stopPropagation()}>

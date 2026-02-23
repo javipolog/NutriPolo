@@ -509,7 +509,10 @@ const parseInvoiceText = (metadataItems, context = {}) => {
     const totalKeywords = ['total', 'importe total', 'total a pagar', 'amount due', 'total amount', 'importe líquido', 'total factura', 'total fra', 'total eur', 'importe', 'suma total', 'neto a pagar', 'a pagar', 'import total'];
     const baseKeywords = ['base imponible', 'base imposable', 'subtotal', 'base', 'neto', 'importe neto', 'taxable amount'];
     const ivaKeywords = ['iva', 'vat', 'i.v.a', 'impuesto', 'tax', 'igic'];
-    const priceRegex = /\d{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:\.\d{2})/g;
+    // Format 1: Europeu amb milers    "1.234,56" o "88,11"
+    // Format 2: Anglès amb milers     "1,234.56" o "88.11"
+    // Format 3: Sense separador milers "1234,56"  o "1234.56"
+    const priceRegex = /\d{1,3}(?:\.\d{3})*,\d{2}|\d{1,3}(?:,\d{3})*\.\d{2}|\d+[,.]\d{2}/g;
 
     // [2.2D] parseAmount millorat per formats edge-case
     const parseAmount = (s) => {
@@ -550,6 +553,114 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         return (negativeTrailing ? -1 : 1) * (isNaN(result) ? 0 : result);
     };
 
+    // ============================================
+    // FIX A: EXTRACCIÓ D'IMPORTS BASADA EN LÍNIES
+    // Resol el problema de números fragmentats entre items del PDF
+    // (p.ex. "67" + ",54" com items separats) escanejant les línies
+    // reconstruïdes on els items ja estan units.
+    // ============================================
+    let lineBasedTotal = null;
+    let lineBasedBase = null;
+    let lineBasedVatPct = null;
+
+    const extractAmountsFromLine = (lineText) => {
+        // Normalitzar espais al voltant de separadors decimals fragmentats
+        const normalized = lineText
+            .replace(/(\d)\s+([,.])\s*(\d)/g, '$1$2$3')
+            .replace(/(\d)\s*([,.])\s+(\d)/g, '$1$2$3');
+        const matches = normalized.match(priceRegex);
+        if (!matches) return [];
+        return matches.map(m => parseAmount(m)).filter(v => v > 0 && v < 500000);
+    };
+
+    const lineTotalCandidates = [];
+    const lineBaseCandidates = [];
+    const totalLineCount = lines.length;
+
+    lines.forEach((line, lineIndex) => {
+        const lower = line.toLowerCase();
+        const amounts = extractAmountsFromLine(line);
+        if (amounts.length === 0) return;
+
+        const lastAmount = amounts[amounts.length - 1];
+        const hasTotal = totalKeywords.some(kw => lower.includes(kw));
+        const hasBase = baseKeywords.some(kw => lower.includes(kw));
+        const hasIva = ivaKeywords.some(kw => lower.includes(kw));
+        const hasPct = lower.includes('%');
+
+        // Posició: línies a la part inferior del document tenen més probabilitat de ser totals
+        const positionRatio = totalLineCount > 1 ? lineIndex / (totalLineCount - 1) : 0.5;
+
+        if (hasTotal && !hasIva && !hasPct) {
+            let score = 300;
+            if (positionRatio > 0.6) score += 100;
+            lineTotalCandidates.push({ val: lastAmount, score, lineIndex });
+            if (amounts.length > 1) {
+                const firstAmount = amounts[0];
+                if (firstAmount < lastAmount) {
+                    lineBaseCandidates.push({ val: firstAmount, score: 50, lineIndex });
+                }
+            }
+        }
+
+        if (hasBase && !hasIva) {
+            let score = 200;
+            lineBaseCandidates.push({ val: lastAmount, score, lineIndex });
+        }
+    });
+
+    // Cross-validar candidats basats en línies
+    lineTotalCandidates.sort((a, b) => b.score - a.score);
+    lineBaseCandidates.sort((a, b) => b.score - a.score);
+
+    if (lineTotalCandidates.length > 0 && lineBaseCandidates.length > 0) {
+        for (const tc of lineTotalCandidates.slice(0, 5)) {
+            for (const bc of lineBaseCandidates.slice(0, 8)) {
+                if (bc.val >= tc.val) continue;
+                const diff = tc.val - bc.val;
+                for (const vatPct of [21, 10, 4, 0]) {
+                    if (Math.abs(bc.val * (vatPct / 100) - diff) < 0.10) {
+                        lineBasedTotal = tc.val;
+                        lineBasedBase = bc.val;
+                        lineBasedVatPct = vatPct;
+                        console.log(`[pdfScanner] ✓ Line-based cross-val: Base ${bc.val} + IVA ${vatPct}% = Total ${tc.val}`);
+                        break;
+                    }
+                }
+                if (lineBasedBase !== null) break;
+            }
+            if (lineBasedBase !== null) break;
+        }
+    }
+
+    // FIX 3: Si tenim total per línies però no base, buscar base entre TOTS els imports del document
+    // Soluciona: "Total 106,61 EUR" detectat però "88,11 EUR" no té keyword de base a la seva línia
+    if (lineBasedBase === null && lineTotalCandidates.length > 0) {
+        const allLineAmounts = [];
+        lines.forEach(line => {
+            extractAmountsFromLine(line).forEach(v => { if (v > 0 && v < 500000) allLineAmounts.push(v); });
+        });
+        // Eliminar duplicats i ordenar descendent
+        const uniqueAmounts = [...new Set(allLineAmounts)].sort((a, b) => b - a);
+        for (const tc of lineTotalCandidates.slice(0, 3)) {
+            for (const baseVal of uniqueAmounts) {
+                if (baseVal >= tc.val) continue;
+                const diff = tc.val - baseVal;
+                for (const vatPct of [21, 10, 4, 0]) {
+                    if (Math.abs(baseVal * (vatPct / 100) - diff) < 0.10) {
+                        lineBasedTotal = tc.val;
+                        lineBasedBase = baseVal;
+                        lineBasedVatPct = vatPct;
+                        console.log(`[pdfScanner] ✓ Line-total+scan: Base ${baseVal} + IVA ${vatPct}% = Total ${tc.val}`);
+                        break;
+                    }
+                }
+                if (lineBasedBase !== null) break;
+            }
+            if (lineBasedBase !== null) break;
+        }
+    }
+
     let amountCandidates = [];
     metadataItems.forEach(item => {
         const matches = item.str.match(priceRegex);
@@ -559,9 +670,10 @@ const parseInvoiceText = (metadataItems, context = {}) => {
                 if (val > 0 && val < 500000) { // Límit generós per cobrir factures grans
                     let score = 0, type = 'unknown';
 
-                    if (item.isBold) score += 150;
-                    if (item.height > 10.5) score += 100;
-                    if (item.height > 14) score += 100;
+                    // FIX B: Bonus de font reduïts per evitar que línies de detall negreta superin totals
+                    if (item.isBold) score += 100;
+                    if (item.height > 10.5) score += 70;
+                    if (item.height > 14) score += 80;
 
                     // Context horitzontal
                     const hCtx = metadataItems.filter(o =>
@@ -577,12 +689,38 @@ const parseInvoiceText = (metadataItems, context = {}) => {
 
                     if (totalKeywords.some(kw => ctx.includes(kw))) { score += 250; type = 'total'; }
                     if (baseKeywords.some(kw => ctx.includes(kw))) { score += 80; type = type === 'total' ? type : 'base'; }
-                    if (ivaKeywords.some(kw => ctx.includes(kw)) && type !== 'total') { score -= 50; type = 'iva'; }
-                    if (ctx.includes('%') && type !== 'total') score -= 80;
+
+                    // FIX 1: PRIORITAT DEL CONTEXT VERTICAL (mateixa columna)
+                    // Soluciona: "88,11 EUR" als detecta com 'total' perquè "Total" és
+                    // a ±300px horitzontal, tot i que "Base Imponible" és a la columna de sobre.
+                    // La columna vertical (±60px X) identifica l'estructura de la taula.
+                    const baseInVertical = baseKeywords.some(kw => vCtx.includes(kw));
+                    const totalInVertical = totalKeywords.some(kw => vCtx.includes(kw));
+                    if (baseInVertical && !totalInVertical) {
+                        type = 'base'; // Columna amb "Base Imponible" al capçal → és base
+                    } else if (totalInVertical && !baseInVertical && type !== 'total') {
+                        type = 'total'; // Columna amb "Total" al capçal → confirmar 'total'
+                    }
+
+                    // FIX B: Penalitzacions IVA/% reforçades
+                    if (ivaKeywords.some(kw => ctx.includes(kw)) && type !== 'total') { score -= 150; type = type === 'base' ? type : 'iva'; }
+                    if (ctx.includes('%') && type !== 'total' && type !== 'base') score -= 200;
+                    // FIX B: Penalització per imports iguals a tipus IVA comuns prop de context IVA/%
+                    if ([4.00, 10.00, 21.00].includes(val) && (ivaKeywords.some(kw => ctx.includes(kw)) || ctx.includes('%')) && type !== 'base') {
+                        score -= 200;
+                    }
                     if (ctx.includes('unit') || ctx.includes('precio') || ctx.includes('p.u')) score -= 120;
                     if (ctx.includes('descuento') || ctx.includes('dto')) score -= 100;
                     if (val < 1) score -= 100;
-                    if (item.y < 200 && type === 'total') score += 50;
+                    // FIX B: Bonus posició (y baix = part inferior del document = on solen estar els totals)
+                    if (item.y < 200) score += 80;
+                    else if (item.y < 300) score += 40;
+                    // FIX 3: Bonus per símbol/codi de moneda adjacent (indica clarament import monetari)
+                    const hasCurrencyNearby = metadataItems.some(o =>
+                        Math.abs(o.y - item.y) < 8 && Math.abs(o.x - item.x) < 100 &&
+                        /[€$£¥]|EUR|USD|GBP|CHF/i.test(o.str)
+                    );
+                    if (hasCurrencyNearby) score += 120;
 
                     amountCandidates.push({ val, score, y: item.y, x: item.x, type });
                 }
@@ -593,15 +731,16 @@ const parseInvoiceText = (metadataItems, context = {}) => {
     amountCandidates.sort((a, b) => b.score - a.score || a.y - b.y);
 
     // Validació creuada Base + IVA = Total
-    const totalCands = amountCandidates.filter(c => c.type === 'total' || c.score > 200);
+    // FIX B: Llindar reduït (150 vs 200) i pool expandit (5×8 vs 3×5)
+    const totalCands = amountCandidates.filter(c => c.type === 'total' || c.score > 150);
     const baseCands = amountCandidates.filter(c => c.type === 'base');
 
     let detectedTotal = amountCandidates.length > 0 ? amountCandidates[0].val : 0;
     let validatedBase = null, validatedVatPercent = null;
 
     if (totalCands.length > 0 && baseCands.length > 0) {
-        for (const tc of totalCands.slice(0, 3)) {
-            for (const bc of baseCands.slice(0, 5)) {
+        for (const tc of totalCands.slice(0, 5)) {
+            for (const bc of baseCands.slice(0, 8)) {
                 if (bc.val >= tc.val) continue;
                 const diff = tc.val - bc.val;
                 for (const vatPct of [21, 10, 4, 0]) {
@@ -614,6 +753,41 @@ const parseInvoiceText = (metadataItems, context = {}) => {
                 if (validatedBase !== null) break;
             }
             if (validatedBase !== null) break;
+        }
+    }
+
+    // FIX A (continuació): Si la cross-validació metadata ha fallat, usar resultats de línies
+    if (validatedBase === null && lineBasedBase !== null) {
+        detectedTotal = lineBasedTotal;
+        validatedBase = lineBasedBase;
+        validatedVatPercent = lineBasedVatPct;
+        console.log(`[pdfScanner] ✓ Using line-based extraction: Base ${validatedBase} + IVA ${validatedVatPercent}% = Total ${detectedTotal}`);
+    }
+
+    // FIX 2: CROSS-VALIDACIÓ EXPANDIDA — prova TOTS els parells de candidats independentment del tipus
+    // Safety net definitiu: soluciona casos on baseCands és buit (tots marcats 'total' per context ample)
+    if (validatedBase === null && amountCandidates.length >= 2) {
+        const sortedByScore = [...amountCandidates].sort((a, b) => b.score - a.score);
+        let found = false;
+        for (let i = 0; i < Math.min(10, sortedByScore.length) && !found; i++) {
+            const tc = sortedByScore[i];
+            // Només intentar com a total si té puntuació reasonable o context de total
+            if (tc.score < 100 && tc.type !== 'total') continue;
+            for (let j = 0; j < sortedByScore.length && !found; j++) {
+                const bc = sortedByScore[j];
+                if (bc === tc || bc.val >= tc.val || bc.val <= 0) continue;
+                const diff = tc.val - bc.val;
+                for (const vatPct of [21, 10, 4, 0]) {
+                    if (Math.abs(bc.val * (vatPct / 100) - diff) < 0.10) {
+                        detectedTotal = tc.val;
+                        validatedBase = bc.val;
+                        validatedVatPercent = vatPct;
+                        console.log(`[pdfScanner] ✓ Expanded cross-val: Base ${bc.val} + IVA ${vatPct}% = Total ${tc.val}`);
+                        found = true;
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -1009,6 +1183,26 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         fieldSources.categoria = 'auto';
     }
 
+    // --- FIX 4: DETECCIÓ DE MONEDA ---
+    // Comptar ocurrències de cada codi/símbol de moneda al text per seleccionar la predominant
+    let detectedMoneda = 'EUR'; // Default per a autònoms espanyols
+    const monedaPatterns = [
+        { code: 'EUR', regex: /\bEUR\b|€/g },
+        { code: 'USD', regex: /\bUSD\b|\bUS\$|\$/g },
+        { code: 'GBP', regex: /\bGBP\b|£/g },
+        { code: 'CHF', regex: /\bCHF\b/g },
+        { code: 'JPY', regex: /\bJPY\b|¥/g },
+        { code: 'MXN', regex: /\bMXN\b/g },
+        { code: 'BRL', regex: /\bBRL\b/g },
+        { code: 'ARS', regex: /\bARS\b/g },
+    ];
+    let maxMonedaCount = 0;
+    for (const { code, regex } of monedaPatterns) {
+        const matches = cleanText.match(regex);
+        const count = matches ? matches.length : 0;
+        if (count > maxMonedaCount) { maxMonedaCount = count; detectedMoneda = code; }
+    }
+
     return {
         fecha: finalFecha,
         proveedor: finalProveedor || 'Proveedor Desconocido',
@@ -1019,6 +1213,7 @@ const parseInvoiceText = (metadataItems, context = {}) => {
         baseImponible: finalBaseImponible,
         ivaPorcentaje: detectedVatPercent,
         total: detectedTotal,
+        moneda: detectedMoneda,
         deducible: finalDeducible,
         deduciblePct: finalDeduciblePct,
         ruleApplied,
