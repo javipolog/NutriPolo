@@ -7,7 +7,7 @@ import {
     RefreshCw, AlertTriangle, CreditCard, X, FileSpreadsheet,
     FileCheck, RotateCcw, SlidersHorizontal
 } from 'lucide-react';
-import { Button, Input, Select, Card, Modal, StatusBadge, EmptyState, useToast } from './UI';
+import { Button, Input, Select, Card, Modal, StatusBadge, EmptyState, useToast, useConfirm } from './UI';
 import {
     useStore, formatCurrency, formatDate, formatDateShort, generateId,
     generateInvoiceNumber, generateClientCode,
@@ -205,6 +205,7 @@ export const Invoices = () => {
     };
     const { autoSync, isConfigured, syncSingleInvoice, deleteFromNotion } = useNotionStore();
     const toast = useToast();
+    const { confirm, ConfirmDialog } = useConfirm();
 
     const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
     const [generating, setGenerating] = useState(false);
@@ -352,9 +353,15 @@ export const Invoices = () => {
     };
 
     const handleDelete = async (id) => {
-        if (confirm('¿Estás seguro de eliminar este documento?')) {
+        const confirmed = await confirm({
+            title: 'Eliminar documento',
+            message: '¿Estás seguro? Esta acción no se puede deshacer.',
+            danger: true,
+        });
+        if (confirmed) {
             deleteInvoice(id);
             if (autoSync && isConfigured) await deleteFromNotion(id);
+            toast.success('Documento eliminado');
         }
     };
 
@@ -510,10 +517,10 @@ export const Invoices = () => {
                     <Input icon={Search} placeholder="Buscar por nº, cliente o concepto..."
                         value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
 
-                    <div className="flex gap-2 text-sm overflow-x-auto pb-1 lg:pb-0">
+                    <div className="flex gap-2 text-sm overflow-x-auto pb-1">
                         <select value={filters.status}
                             onChange={e => setFilters({ ...filters, status: e.target.value })}
-                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
+                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Todos los estados</option>
                             <option value="borrador">Borrador</option>
                             <option value="emitida">Pendiente</option>
@@ -523,19 +530,19 @@ export const Invoices = () => {
                         </select>
                         <select value={filters.client}
                             onChange={e => setFilters({ ...filters, client: e.target.value })}
-                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 max-w-[180px] appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
+                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 max-w-[180px] appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Todos los clientes</option>
                             {sortedClients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                         </select>
                         <select value={filters.year}
                             onChange={e => setFilters({ ...filters, year: e.target.value })}
-                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
+                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Años</option>
                             {years.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
                         <select value={filters.month}
                             onChange={e => setFilters({ ...filters, month: e.target.value })}
-                            className="bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
+                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
                             <option value="all">Mes</option>
                             {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                         </select>
@@ -570,7 +577,7 @@ export const Invoices = () => {
                                 {cols.fecha && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('fecha')}>
                                     <div className="flex items-center gap-1">FECHA <SortIcon column="fecha" /></div>
                                 </th>}
-                                <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase sticky right-0 bg-white shadow-xl">
+                                <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase sticky right-0 bg-white shadow-sticky-col">
                                     ACCIONES
                                 </th>
                             </tr>
@@ -664,7 +671,7 @@ export const Invoices = () => {
                                         </td>}
 
                                         {/* ACCIONES */}
-                                        <td className="py-2 px-4 sticky right-0 bg-white group-hover:bg-sand-100 transition-colors shadow-xl border-l border-sand-300">
+                                        <td className="py-2 px-4 sticky right-0 bg-white group-hover:bg-sand-50 transition-colors shadow-sticky-col border-l border-sand-300">
                                             <div className="flex items-center justify-center gap-1">
                                                 <Button variant="ghost" size="sm" icon={Eye} onClick={() => handleOpenPreview(inv)} title="Ver" className="h-8 w-8 p-0" />
                                                 <Button variant="ghost" size="sm" icon={Download} onClick={() => generatePDF(inv)} disabled={generating} title="PDF" className="h-8 w-8 p-0" />
@@ -796,6 +803,8 @@ export const Invoices = () => {
                     </div>
                 )}
             </Modal>
+
+            {ConfirmDialog}
         </div>
     );
 };

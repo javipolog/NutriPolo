@@ -161,7 +161,7 @@ export const ConfirmModal = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fadeIn"
       onClick={onClose}
     >
       <div
@@ -324,7 +324,7 @@ export const Modal = ({ open, onClose, title, children, size = 'md' }) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-[2px] animate-fadeIn"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fadeIn"
       onClick={onClose}
     >
       <div
@@ -371,7 +371,7 @@ export const StatCard = ({ icon: Icon, label, value, subValue, trend, trendUp, c
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-sand-600 mb-1">{label}</p>
-          <h3 className="font-mono text-display text-sand-950 tracking-tight leading-none">{value}</h3>
+          <h3 className="font-mono text-2xl text-sand-950 tracking-tight leading-none truncate" title={value}>{value}</h3>
           {subValue && <p className="text-sand-500 text-xs mt-1.5">{subValue}</p>}
         </div>
         <div className={`p-3 rounded-full ${iconColors[color] || iconColors.terra} shrink-0 ml-4`}>
@@ -402,8 +402,8 @@ export const StatusBadge = ({ status }) => {
     pagada:       'bg-success-light text-success border border-success/20',
     anulada:      'bg-danger-light text-danger border border-danger/20',
     parcial:      'bg-info-light text-info border border-info/20',
-    presupuesto:  'bg-purple-50 text-purple-700 border border-purple-200',
-    rectificativa:'bg-orange-50 text-orange-700 border border-orange-200',
+    presupuesto:  'bg-sand-200 text-sand-700 border border-sand-400',
+    rectificativa:'bg-terra-50 text-terra-500 border border-terra-200',
   };
   const labels = {
     borrador: 'Borrador', emitida: 'Pendiente', pagada: 'Pagada', anulada: 'Anulada',

@@ -48,7 +48,7 @@ const IntegrityWarningBanner = () => {
 // ============================================
 function AppContent() {
   const {
-    currentView, setCurrentView, config, isLoading, setIntegrityWarnings,
+    currentView, setCurrentView, config, setConfig, isLoading, setIntegrityWarnings,
     sidebarCollapsed, setSidebarCollapsed,
     appTheme, undo, redo, _history, _future,
   } = useStore();
@@ -73,10 +73,32 @@ function AppContent() {
     }
   }, [appTheme]);
 
-  // Carregar fonts Google al iniciar
+  // Carregar fonts Google al iniciar (per a factures)
   useEffect(() => {
     if (design?.fonts) loadGoogleFonts(design.fonts);
   }, [design?.fonts]);
+
+  // Aplicar font de la UI (#appFont) — suporta qualsevol Google Font
+  useEffect(() => {
+    // Normalitza claus antigues (inter→Inter, playfair→Playfair Display, mono→JetBrains Mono)
+    const LEGACY = { inter: 'Inter', playfair: 'Playfair Display', mono: 'JetBrains Mono' };
+    const raw = config.appFont || 'Inter';
+    const font = LEGACY[raw] || raw;
+    if (LEGACY[raw]) { setConfig({ ...config, appFont: font }); return; }
+
+    document.documentElement.style.setProperty('--font-ui', `'${font}', system-ui, sans-serif`);
+    if (font !== 'Inter') {
+      const id = `gf-ui-${font.replace(/\s+/g, '-').toLowerCase()}`;
+      if (!document.getElementById(id)) {
+        const link = document.createElement('link');
+        link.id = id;
+        link.rel = 'stylesheet';
+        const q = font.replace(/\s+/g, '+');
+        link.href = `https://fonts.googleapis.com/css2?family=${q}:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap`;
+        document.head.appendChild(link);
+      }
+    }
+  }, [config.appFont]);
 
   // Post-hydration: autobackup i validació d'integritat (#2, #22)
   useEffect(() => {
@@ -172,7 +194,7 @@ function AppContent() {
 
       <div className="flex flex-1 min-h-0">
         {/* Sidebar col·lapsable */}
-        <aside className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-sand-100 border-r border-sand-300 flex flex-col transition-all duration-200 shrink-0`}>
+        <aside className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-sand-100 border-r border-sand-300 flex flex-col transition-all duration-200 shrink-0 shadow-sidebar`}>
 
           {/* Header: logo + toggle */}
           <div className={`border-b border-sand-300 flex items-center ${sidebarCollapsed ? 'justify-center p-3 flex-col gap-2' : 'p-4 justify-between'}`}>
@@ -265,7 +287,7 @@ function AppContent() {
         </aside>
 
         {/* Main amb ErrorBoundary per vista (#23) */}
-        <main className="flex-1 p-8 overflow-auto bg-sand-50">
+        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto bg-sand-50">
           <ErrorBoundary key={currentView}>
             {currentView === 'dashboard' && <Dashboard />}
             {currentView === 'invoices'  && <Invoices />}

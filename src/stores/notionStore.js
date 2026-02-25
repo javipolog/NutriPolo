@@ -10,7 +10,7 @@ export const useNotionStore = create(
     (set, get) => ({
       // Configuración
       apiKey: '',
-      databaseId: '556517bbc95945aca9f4c3a3f92d922c', // Tu database ID por defecto
+      databaseId: '', // Configurable per l'usuari a Settings → Notion
       isConfigured: false,
 
       // Estado de sincronización

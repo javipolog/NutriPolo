@@ -23,8 +23,7 @@
           "$APP/*",
           "$DOCUMENT/*",
           "$DESKTOP/*",
-          "$DOWNLOAD/*",
-          "**"
+          "$DOWNLOAD/*"
         ]
       },
       "path": {

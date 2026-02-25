@@ -1,12 +1,12 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Palette, Type, Image, Layout, Eye, RotateCcw, Upload, Check,
   ChevronDown, ChevronUp, Sliders, Grid, AlignLeft, AlignCenter,
-  AlignRight, Columns, Rows, Table2, Languages, Maximize2, X,
+  AlignRight, Columns, Rows, Languages, Maximize2, X,
   ToggleLeft, ToggleRight, Minus, Plus
 } from 'lucide-react';
 import { Button, Card, Modal } from './UI';
-import { useDesignStore, designPresets, availableFonts, loadGoogleFonts } from '../stores/designStore';
+import { useDesignStore, availableFonts, loadGoogleFonts } from '../stores/designStore';
 import { InvoicePreviewModern } from './InvoicePreview';
 import { useStore } from '../stores/store';
 
@@ -161,27 +161,6 @@ const Tabs = ({ tabs, active, onChange }) => (
 );
 
 // ============================================
-// PRESET CARD
-// ============================================
-const PresetCard = ({ id, preset, active, onClick }) => (
-  <button onClick={onClick}
-    className={`p-3 rounded-soft border-2 text-left transition-all w-full ${
-      active ? 'border-terra-400 bg-terra-50' : 'border-sand-200 hover:border-sand-400 bg-sand-50'
-    }`}>
-    <div className="flex items-center gap-2 mb-2">
-      <div className="flex gap-1">
-        {preset.thumb.map((c, i) => (
-          <div key={i} className={`rounded ${i === 0 ? 'w-4 h-4' : 'w-3 h-3 mt-0.5'}`} style={{ backgroundColor: c }} />
-        ))}
-      </div>
-      {active && <Check size={12} className="text-terra-400 ml-auto" />}
-    </div>
-    <div className="text-sm font-bold text-sand-900">{preset.name}</div>
-    <div className="text-[11px] text-sand-500 mt-0.5 leading-tight">{preset.description}</div>
-  </button>
-);
-
-// ============================================
 // LABEL EDITOR
 // ============================================
 const LabelEditor = ({ labels, lang, onUpdate }) => {
@@ -214,6 +193,26 @@ const LabelEditor = ({ labels, lang, onUpdate }) => {
   );
 };
 
+// Noms humans per a les files del grid
+const ROW_LABELS = {
+  topPadding: 'Padding superior',
+  invoiceInfoHeight: 'Info factura (Nº/Data)',
+  headerImageHeight: 'Àrea header / logo',
+  headerGap: 'Gap post-header',
+  sectionLabelHeight: 'Etiquetes secció',
+  partyGap: 'Gap post-etiqueta',
+  partyLineHeight: 'Línia dades (nom/NIF)',
+  conceptGap: 'Gap pre-concepte',
+  conceptHeaderHeight: 'Capçalera concepte',
+  conceptRowHeight: 'Fila concepte',
+  totalsGap: 'Gap pre-totals',
+  totalRowHeight: 'Fila IVA/IRPF',
+  grandTotalGap: 'Gap pre-total final',
+  grandTotalHeight: 'Fila TOTAL',
+};
+
+const COL_LABELS = ['A (marge)', 'B', 'C', 'D', 'E (sep)', 'F', 'G', 'H'];
+
 // ============================================
 // MAIN EDITOR
 // ============================================
@@ -221,7 +220,7 @@ const LabelEditor = ({ labels, lang, onUpdate }) => {
 export const DesignEditorInner = () => {
   const { config, clients, invoices } = useStore();
   const { design, updateLogo, updateFonts, updateColors, updateLayout, updateSections,
-          updateFontSizes, updateTable, updateBlocks, updateLabel, applyPreset, resetDesign } = useDesignStore();
+          updateFontSizes, updateLabel, updateGrid, resetDesign } = useDesignStore();
 
   const [tab, setTab]           = useState('style');
   const [langTab, setLangTab]   = useState('es');
@@ -230,14 +229,18 @@ export const DesignEditorInner = () => {
   const fileInputRef = useRef(null);
   const previewContainerRef = useRef(null);
 
+  const grid = design.grid || {};
+  const gridCols = grid.columns || [30, 150, 110, 100, 40, 110, 80, 150];
+  const gridRows = grid.rows || {};
+
   // Auto-scale preview to fit container
   useEffect(() => {
     const container = previewContainerRef.current;
     if (!container) return;
-    const A4_WIDTH_PX = 793.7; // 210mm in px at 96dpi
+    const A4_WIDTH_PX = 793.7;
 
     const updateScale = () => {
-      const availableWidth = container.clientWidth - 24; // padding
+      const availableWidth = container.clientWidth - 24;
       const scale = Math.min(availableWidth / A4_WIDTH_PX, 0.65);
       container.style.setProperty('--preview-scale', String(Math.max(scale, 0.25)));
     };
@@ -268,6 +271,16 @@ export const DesignEditorInner = () => {
 
   const handleSave = () => { setSaved(true); setTimeout(() => setSaved(false), 2000); };
 
+  const handleColChange = (index, value) => {
+    const newCols = [...gridCols];
+    newCols[index] = value;
+    updateGrid({ columns: newCols });
+  };
+
+  const handleRowChange = (key, value) => {
+    updateGrid({ rows: { [key]: value } });
+  };
+
   const TABS = [
     { id: 'style',   label: 'Estil',    icon: Palette  },
     { id: 'layout',  label: 'Layout',   icon: Layout   },
@@ -279,6 +292,8 @@ export const DesignEditorInner = () => {
     { id: 'ca', label: 'CA' },
     { id: 'en', label: 'EN' },
   ];
+
+  const colTotal = gridCols.reduce((a, b) => a + b, 0);
 
   return (
     <div className="flex flex-col h-full min-h-0">
@@ -308,20 +323,8 @@ export const DesignEditorInner = () => {
           {/* ===== TAB: ESTIL ===== */}
           {tab === 'style' && (
             <>
-              {/* Presets */}
-              <div>
-                <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-2">Plantilles</div>
-                <div className="grid grid-cols-2 gap-2">
-                  {Object.entries(designPresets).map(([id, preset]) => (
-                    <PresetCard key={id} id={id} preset={preset}
-                      active={design.activePreset === id}
-                      onClick={() => applyPreset(id)} />
-                  ))}
-                </div>
-              </div>
-
               {/* Logo */}
-              <PanelSection title="Logo" icon={Image} defaultOpen>
+              <PanelSection title="Logo / Header" icon={Image} defaultOpen>
                 <div>
                   <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-2">Tipus</div>
                   <div className="flex gap-1 bg-white p-1 rounded-button mb-3">
@@ -369,9 +372,17 @@ export const DesignEditorInner = () => {
                 )}
 
                 <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Ample" value={design.logo.width} onChange={v => updateLogo({ width: v })} min={40} max={400} step={10} />
-                  <NumberInput label="Alt" value={design.logo.height} onChange={v => updateLogo({ height: v })} min={20} max={200} step={5} />
+                  <NumberInput label="Ample" value={design.logo.width} onChange={v => updateLogo({ width: v })} min={40} max={800} step={10} />
+                  <NumberInput label="Alt" value={design.logo.height} onChange={v => updateLogo({ height: v })} min={20} max={300} step={5} />
                 </div>
+
+                <RadioGroup label="Alineació" value={design.logo.align || 'left'}
+                  onChange={v => updateLogo({ align: v })}
+                  options={[
+                    { value: 'left',   icon: AlignLeft,   label: 'Esquerra' },
+                    { value: 'center', icon: AlignCenter, label: 'Centre'   },
+                    { value: 'right',  icon: AlignRight,  label: 'Dreta'    },
+                  ]} />
               </PanelSection>
 
               {/* Colors */}
@@ -383,7 +394,6 @@ export const DesignEditorInner = () => {
                     { key: 'accent',     label: 'Acents / títols'  },
                     { key: 'background', label: 'Fons de pàgina'   },
                     { key: 'divider',    label: 'Línies divisores' },
-                    { key: 'tableHead',  label: 'Fons capçalera taula' },
                     { key: 'highlight',  label: 'Color total final'},
                     { key: 'muted',      label: 'Text peu de pàgina' },
                   ].map(c => (
@@ -422,94 +432,50 @@ export const DesignEditorInner = () => {
           {/* ===== TAB: LAYOUT ===== */}
           {tab === 'layout' && (
             <>
-              {/* Header layout */}
-              <PanelSection title="Capçalera" icon={Layout} defaultOpen>
-                <RadioGroup label="Posició logo" value={design.layout.headerLayout}
-                  onChange={v => updateLayout({ headerLayout: v })}
-                  options={[
-                    { value: 'logo-left',   icon: AlignLeft,   label: 'Esquerra' },
-                    { value: 'logo-center', icon: AlignCenter, label: 'Centre'   },
-                    { value: 'logo-right',  icon: AlignRight,  label: 'Dreta'    },
-                  ]} />
-              </PanelSection>
-
-              {/* Parties layout */}
-              <PanelSection title="Bloc Autònom / Client" icon={Columns}>
-                <RadioGroup label="Distribució" value={design.layout.partyLayout}
-                  onChange={v => updateLayout({ partyLayout: v })}
-                  options={[
-                    { value: 'two-col', icon: Columns, label: '2 Columnes' },
-                    { value: 'stacked', icon: Rows,    label: 'Apilat'     },
-                  ]} />
-              </PanelSection>
-
-              {/* Table style */}
-              <PanelSection title="Taula de Conceptes" icon={Table2}>
-                <div>
-                  <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mb-2">Estil de taula</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { v: 'lines',    l: 'Línies',    desc: 'Separadors horitz.' },
-                      { v: 'zebra',    l: 'Zebra',     desc: 'Files alternades'   },
-                      { v: 'bordered', l: 'Bordes',    desc: 'Tots els marges'    },
-                      { v: 'minimal',  l: 'Mínim',     desc: 'Sense línies'       },
-                    ].map(o => (
-                      <button key={o.v} onClick={() => updateTable({ style: o.v })}
-                        className={`p-2.5 rounded-button border text-left text-xs transition-all ${
-                          design.table.style === o.v ? 'border-terra-400 bg-terra-50 text-sand-900' : 'border-sand-300 text-sand-600 hover:border-sand-400'
-                        }`}>
-                        <div className="font-semibold">{o.l}</div>
-                        <div className="text-[10px] mt-0.5 opacity-70">{o.desc}</div>
-                      </button>
-                    ))}
-                  </div>
+              {/* Amplada de columnes del grid */}
+              <PanelSection title="Amplada Columnes (Grid)" icon={Columns} defaultOpen>
+                <div className="grid grid-cols-4 gap-2">
+                  {COL_LABELS.map((label, i) => (
+                    <NumberInput key={i} label={label}
+                      value={gridCols[i] || 0}
+                      onChange={v => handleColChange(i, v)}
+                      min={10} max={300} step={5} />
+                  ))}
                 </div>
-                <Toggle label="Fons capçalera taula" checked={design.table.headerBg}
-                  onChange={v => updateTable({ headerBg: v })} />
-                <NumberInput label="Padding files" value={design.table.rowPadding}
-                  onChange={v => updateTable({ rowPadding: v })} min={2} max={30} />
-              </PanelSection>
-
-              {/* Totals position */}
-              <PanelSection title="Bloc Totals" icon={AlignRight}>
-                <RadioGroup label="Alineació dels totals" value={design.layout.totalsAlign}
-                  onChange={v => updateLayout({ totalsAlign: v })}
-                  options={[
-                    { value: 'left',   icon: AlignLeft,   label: 'Esquerra' },
-                    { value: 'center', icon: AlignCenter, label: 'Centre'   },
-                    { value: 'right',  icon: AlignRight,  label: 'Dreta'    },
-                  ]} />
-              </PanelSection>
-
-              {/* Spacing */}
-              <PanelSection title="Espaiat i Marges">
-                <div className="grid grid-cols-2 gap-3">
-                  <NumberInput label="Marge pàgina" value={design.layout.pageMargin}
-                    onChange={v => updateLayout({ pageMargin: v })} min={10} max={80} />
-                  <NumberInput label="Gruix línies" value={design.layout.borderWidth}
-                    onChange={v => updateLayout({ borderWidth: v })} min={0} max={5} />
+                <div className={`text-xs mt-2 font-mono ${
+                  colTotal >= 780 && colTotal <= 800 ? 'text-success' : 'text-warning'
+                }`}>
+                  Total: {colTotal}px {colTotal >= 780 && colTotal <= 800 ? '✓' : `(objectiu: ~794px)`}
                 </div>
-                <div className="text-xs text-sand-500 uppercase font-semibold tracking-wider mt-2 mb-2">Espai inferior per bloc (px)</div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { k: 'header',  l: 'Capçalera' },
-                    { k: 'parties', l: 'Parts'     },
-                    { k: 'concept', l: 'Concepte'  },
-                    { k: 'totals',  l: 'Totals'    },
-                  ].map(b => (
-                    <NumberInput key={b.k} label={b.l}
-                      value={(design.blocks?.[b.k]?.marginBottom) ?? 60}
-                      onChange={v => updateBlocks({ [b.k]: { marginBottom: v } })}
-                      min={0} max={200} step={5} />
+              </PanelSection>
+
+              {/* Altures de files / espaiat seccions */}
+              <PanelSection title="Espaiat Seccions (Files)" icon={Rows} defaultOpen>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.entries(ROW_LABELS).map(([key, label]) => (
+                    <NumberInput key={key} label={label}
+                      value={gridRows[key] ?? 20}
+                      onChange={v => handleRowChange(key, v)}
+                      min={0} max={200} step={2} />
                   ))}
                 </div>
               </PanelSection>
 
-              {/* Sections visibility */}
+              {/* Línies i marges generals */}
+              <PanelSection title="Línies i Marges">
+                <div className="grid grid-cols-2 gap-3">
+                  <NumberInput label="Gruix línies" value={design.layout.borderWidth}
+                    onChange={v => updateLayout({ borderWidth: v })} min={0} max={5} />
+                  <NumberInput label="Padding footer" value={grid.footerPadding ?? 30}
+                    onChange={v => updateGrid({ footerPadding: v })} min={10} max={80} />
+                </div>
+              </PanelSection>
+
+              {/* Seccions visibles */}
               <PanelSection title="Seccions Visibles">
                 <div className="divide-y divide-slate-800/60">
                   {[
-                    { k: 'showLogo',           l: 'Mostrar logo'              },
+                    { k: 'showLogo',           l: 'Mostrar logo / header'     },
                     { k: 'showFooterContact',   l: 'Contacte al peu'          },
                     { k: 'showBankDetails',     l: 'Dades bancàries'          },
                     { k: 'showPaymentMethod',   l: 'Forma de pagament'        },
@@ -527,6 +493,20 @@ export const DesignEditorInner = () => {
           {/* ===== TAB: CONTINGUT ===== */}
           {tab === 'content' && (
             <>
+              {/* Prefix etiquetes */}
+              <PanelSection title="Format Etiquetes" icon={Grid} defaultOpen>
+                <div>
+                  <div className="text-xs text-sand-500 mb-1.5 uppercase font-semibold tracking-wider">Prefix etiquetes seccions</div>
+                  <input value={grid.labelPrefix ?? ': '}
+                    onChange={e => updateGrid({ labelPrefix: e.target.value })}
+                    className="w-full bg-white border border-sand-300 rounded-button px-3 py-2 text-sand-900 text-sm outline-none focus:border-terra-400 transition-colors" />
+                  <div className="text-xs text-sand-400 mt-1.5">
+                    Resultat: <span className="font-mono text-sand-600">"{(grid.labelPrefix ?? ': ')}{design.labels?.es?.freelance || 'FREELANCE'}"</span>
+                  </div>
+                </div>
+              </PanelSection>
+
+              {/* Labels multi-idioma */}
               <PanelSection title="Texts i Etiquetes" icon={Languages} defaultOpen
                 badge="Multi-idioma">
                 <div>
@@ -553,9 +533,9 @@ export const DesignEditorInner = () => {
               </button>
             </div>
             <div ref={previewContainerRef} className="flex-1 min-h-0 overflow-auto p-3 bg-sand-50">
-              <div style={{ 
-                transform: 'scale(var(--preview-scale, 0.5))', 
-                transformOrigin: 'top left', 
+              <div style={{
+                transform: 'scale(var(--preview-scale, 0.5))',
+                transformOrigin: 'top left',
                 width: '210mm',
                 pointerEvents: 'none'
               }}>

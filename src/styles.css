@@ -17,6 +17,7 @@
   --accent: #C15F3C;
   --accent-hover: #A84E30;
   --accent-light: #FDF4EF;
+  --font-ui: 'Inter', system-ui, sans-serif;
   color-scheme: light;
 }
 
@@ -45,9 +46,69 @@ html,
 body,
 #root {
   height: 100%;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-ui, 'Inter', system-ui, sans-serif);
   background-color: var(--bg);
   color: var(--text);
+}
+
+/* ============================================
+   DARK MODE — OVERRIDES TAILWIND CLASSES
+   ============================================ */
+
+/* Backgrounds */
+[data-theme="dark"] .bg-white      { background-color: #2A2923; }
+[data-theme="dark"] .bg-sand-50    { background-color: #1C1B18; }
+[data-theme="dark"] .bg-sand-100   { background-color: #2A2923; }
+[data-theme="dark"] .bg-sand-200   { background-color: #3D3B35; }
+[data-theme="dark"] .bg-sand-300   { background-color: #4A4840; }
+[data-theme="dark"] .bg-sand-400   { background-color: #5A5750; }
+
+/* Terra (accent) en dark mode — lleugerament més clar */
+[data-theme="dark"] .bg-terra-50   { background-color: #352520; }
+[data-theme="dark"] .bg-terra-400  { background-color: #C87050; }
+[data-theme="dark"] .bg-terra-500  { background-color: #B05F3A; }
+
+/* Text */
+[data-theme="dark"] .text-sand-950 { color: #F0EDE6; }
+[data-theme="dark"] .text-sand-900 { color: #E8E5DE; }
+[data-theme="dark"] .text-sand-800 { color: #D4D1C8; }
+[data-theme="dark"] .text-sand-700 { color: #C0BDB4; }
+[data-theme="dark"] .text-sand-600 { color: #B8B5AC; }
+[data-theme="dark"] .text-sand-500 { color: #9C9A91; }
+[data-theme="dark"] .text-sand-400 { color: #C0BDB4; }
+[data-theme="dark"] .text-terra-400 { color: #D4845F; }
+[data-theme="dark"] .text-terra-500 { color: #C15F3C; }
+
+/* Borders */
+[data-theme="dark"] .border-sand-200  { border-color: #353430; }
+[data-theme="dark"] .border-sand-300  { border-color: #3D3C36; }
+[data-theme="dark"] .border-sand-400  { border-color: #4A4840; }
+[data-theme="dark"] .border-terra-200 { border-color: #5A3020; }
+[data-theme="dark"] .border-terra-400 { border-color: #A85030; }
+
+/* Hover states */
+[data-theme="dark"] .hover\:bg-sand-50:hover    { background-color: #222118; }
+[data-theme="dark"] .hover\:bg-sand-100:hover   { background-color: #353430; }
+[data-theme="dark"] .hover\:bg-sand-200:hover   { background-color: #3D3B35; }
+[data-theme="dark"] .hover\:text-sand-700:hover  { color: #B8B5AC; }
+[data-theme="dark"] .hover\:text-sand-800:hover  { color: #D4D1C8; }
+[data-theme="dark"] .hover\:text-sand-900:hover  { color: #F0EDE6; }
+
+/* Divide colors */
+[data-theme="dark"] .divide-sand-200 > * + * { border-color: #353430; }
+[data-theme="dark"] .divide-sand-300 > * + * { border-color: #3D3C36; }
+
+/* Ring / shadow fix */
+[data-theme="dark"] .ring-sand-200 { --tw-ring-color: #353430; }
+[data-theme="dark"] .ring-sand-300 { --tw-ring-color: #3D3C36; }
+
+/* Sidebar i panels */
+[data-theme="dark"] .shadow-sidebar { box-shadow: 1px 0 0 0 #3D3C36; }
+
+/* .font-sans respecta --font-ui (configurable per l'usuari a Settings).
+   .font-serif i .font-mono mantenen les famílies definides a tailwind.config.js */
+.font-sans {
+  font-family: var(--font-ui, 'Inter', system-ui, sans-serif);
 }
 
 /* ============================================
@@ -118,6 +179,10 @@ select {
   padding-right: 2.5rem;
 }
 
+[data-theme="dark"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23A09D94'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+}
+
 select option {
   background-color: var(--surface);
   color: var(--text);
@@ -130,7 +195,7 @@ select option {
    ============================================ */
 input[type="checkbox"] {
   cursor: pointer;
-  accent-color: #C15F3C;
+  accent-color: var(--accent, #C15F3C);
 }
 
 /* ============================================
@@ -164,6 +229,7 @@ input[type="checkbox"] {
     background: white !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+    transform: none !important;
   }
 
   @page {
@@ -242,26 +308,12 @@ input[type="checkbox"] {
    DESIGN EDITOR PREVIEW
    ============================================ */
 .design-preview-container {
-  background: linear-gradient(45deg, #EDEAE3 25%, transparent 25%),
-    linear-gradient(-45deg, #EDEAE3 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #EDEAE3 75%),
-    linear-gradient(-45deg, transparent 75%, #EDEAE3 75%);
+  background: linear-gradient(45deg, var(--surface-alt, #EDEAE3) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--surface-alt, #EDEAE3) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--surface-alt, #EDEAE3) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--surface-alt, #EDEAE3) 75%);
   background-size: 20px 20px;
   background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-  background-color: #FAF9F6;
+  background-color: var(--bg, #FAF9F6);
 }
 
-/* ============================================
-   FONT PREVIEW CLASSES (per DesignEditor)
-   ============================================ */
-.font-preview-primary {
-  font-family: var(--font-primary, 'Work Sans'), Arial, sans-serif;
-}
-
-.font-preview-secondary {
-  font-family: var(--font-secondary, 'Roboto'), Arial, sans-serif;
-}
-
-.font-preview-mono {
-  font-family: var(--font-mono, 'JetBrains Mono'), monospace;
-}

@@ -13,6 +13,22 @@ export const SettingsView = () => {
   const [isImporting, setIsImporting] = useState(false);
   const toast = useToast();
 
+  const FONT_PRESETS = [
+    { name: 'Inter',            desc: 'Sans-serif' },
+    { name: 'Playfair Display', desc: 'Serif' },
+    { name: 'JetBrains Mono',   desc: 'Monospace' },
+  ];
+  const currentFont = config.appFont || 'Inter';
+  const isPreset = FONT_PRESETS.some(f => f.name === currentFont);
+  const [customFont, setCustomFont] = useState(() => isPreset ? '' : currentFont);
+
+  const applyCustomFont = () => {
+    const name = customFont.trim();
+    if (!name) return;
+    setConfig({ ...config, appFont: name });
+    toast.success(`Fuente "${name}" aplicada`);
+  };
+
   useEffect(() => { setForm(config); }, [config]);
 
   const validateForm = () => {
@@ -233,6 +249,50 @@ export const SettingsView = () => {
              'Interfaz oscura, reduce la fatiga visual en entornos oscuros.'}
           </p>
         </div>
+      </Card>
+
+      {/* Tipografía de la interfaz */}
+      <Card className="p-6">
+        <h3 className="font-serif text-lg font-semibold text-sand-900 mb-4">Tipografía</h3>
+        <p className="text-xs font-medium text-sand-600 mb-3 uppercase tracking-wider">Fuente de la interfaz</p>
+        <div className="flex gap-3 mb-4">
+          {FONT_PRESETS.map(({ name, desc }) => (
+            <button
+              key={name}
+              onClick={() => { setConfig({ ...config, appFont: name }); setCustomFont(''); }}
+              className={`flex-1 flex flex-col items-center gap-1.5 p-4 rounded-soft border-2 transition-all ${
+                currentFont === name
+                  ? 'border-terra-400 bg-terra-50 text-terra-300'
+                  : 'border-sand-300 text-sand-600 hover:border-sand-400 hover:text-sand-900'
+              }`}
+            >
+              <span className="text-base font-medium" style={{ fontFamily: `'${name}', system-ui, sans-serif` }}>{name}</span>
+              <span className="text-xs opacity-70">{desc}</span>
+            </button>
+          ))}
+        </div>
+        <div className="border-t border-sand-200 pt-4">
+          <p className="text-xs text-sand-600 mb-2">O escribe el nombre exacto de cualquier fuente de Google Fonts:</p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={customFont}
+              onChange={e => setCustomFont(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && applyCustomFont()}
+              placeholder="Ej: Roboto, Lato, Nunito, Merriweather..."
+              className="flex-1 px-3 py-2 text-sm bg-white border border-sand-300 rounded-button text-sand-900 placeholder-sand-400 focus:outline-none focus:border-terra-400 focus:ring-2 focus:ring-terra-400/10"
+            />
+            <Button onClick={applyCustomFont} disabled={!customFont.trim()} variant="secondary">
+              Aplicar
+            </Button>
+          </div>
+          {!isPreset && currentFont && (
+            <p className="text-xs text-terra-400 mt-1.5">Fuente activa: <span style={{ fontFamily: `'${currentFont}', sans-serif` }}>{currentFont}</span></p>
+          )}
+        </div>
+        <p className="text-xs text-sand-500 mt-3">
+          La fuente de las facturas se configura en el editor de plantillas (Diseño).
+        </p>
       </Card>
 
       {/* Sincronización con Notion */}

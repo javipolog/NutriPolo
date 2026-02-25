@@ -16,7 +16,8 @@ const defaultConfig = {
   tipoIva: 21,
   tipoIrpf: 15,
   idiomaDefecto: 'es',
-  expensesFolder: ''
+  expensesFolder: '',
+  appFont: 'Inter'
 };
 
 // ============================================

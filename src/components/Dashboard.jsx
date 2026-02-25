@@ -511,7 +511,7 @@ export const Dashboard = () => {
             {/* GRÀFIC PRINCIPAL + PANEL LATERAL */}
             {(dashboardConfig.showMainChart || dashboardConfig.showAlerts || dashboardConfig.showClients || dashboardConfig.showDistribution) && (
             <div className={`grid grid-cols-1 gap-6 lg:gap-8 ${
-                dashboardConfig.showMainChart ? 'lg:grid-cols-3' : 'lg:grid-cols-2'
+                dashboardConfig.showMainChart ? 'lg:grid-cols-2 xl:grid-cols-3' : 'lg:grid-cols-2'
             }`}>
                 {dashboardConfig.showMainChart && (
                     <Card className="lg:col-span-2 p-6 flex flex-col"
@@ -551,7 +551,7 @@ export const Dashboard = () => {
                         )}
 
                         {/* CHARTS */}
-                        <div className="flex-1 w-full min-h-0">
+                        <div className="flex-1 w-full min-h-[280px]">
                             <ResponsiveContainer width="100%" height="100%">
                                 {chartMode === 'evolution' && compareYears.length === 0 ? (
                                     <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
