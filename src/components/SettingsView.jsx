@@ -29,7 +29,9 @@ export const SettingsView = () => {
     toast.success(`Fuente "${name}" aplicada`);
   };
 
-  useEffect(() => { setForm(config); }, [config]);
+  // Sync only on mount — no sincronitzar a cada canvi de config per no perdre edicions no guardades
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { setForm(config); }, []);
 
   const validateForm = () => {
     const newErrors = {};
@@ -198,7 +200,7 @@ export const SettingsView = () => {
               />
             </div>
             {importMode === 'replace' && (
-              <div className="flex items-start gap-2 mb-3 p-2 bg-amber-900/30 border border-warning/20/30 rounded-button">
+              <div className="flex items-start gap-2 mb-3 p-2 bg-warning-light border border-warning/30 rounded-button">
                 <AlertTriangle size={13} className="text-warning mt-0.5 shrink-0" />
                 <p className="text-xs text-warning/80">
                   Reemplazar eliminará todos los datos actuales.

@@ -193,6 +193,7 @@ export const Invoices = () => {
         invoiceSearch: search, setInvoiceSearch: setSearch,
         invoiceFilters: filters, setInvoiceFilters: setFilters,
         invoiceSortConfig: sortConfig, setInvoiceSortConfig: setSortConfig,
+        invoiceDocType: docType, setInvoiceDocType: setDocType,
         addPago, deletePago, createRectificativa, generateFromTemplate, convertPresupuestoToFactura,
         invoiceCounters,
         invoiceVisibleColumns, setInvoiceVisibleColumns,
@@ -209,7 +210,6 @@ export const Invoices = () => {
     const { confirm, ConfirmDialog } = useConfirm();
 
     const [generating, setGenerating] = useState(false);
-    const [docType, setDocType] = useState('facturas'); // 'facturas' | 'presupuestos'
     const [isExportingCSV, setIsExportingCSV] = useState(false);
 
     // Modal State

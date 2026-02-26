@@ -314,7 +314,7 @@ const AnualView = ({ invoices, expenses, selectedYear }) => {
           ].map(({ label, value, color, bold }) => (
             <div key={label} className="p-4 bg-sand-100 rounded-soft">
               <p className="text-xs text-sand-600">{label}</p>
-              <p className={`text-lg font-${bold ? 'bold' : 'semibold'} ${color} mt-1 font-mono`}>
+              <p className={`text-lg ${bold ? 'font-bold' : 'font-semibold'} ${color} mt-1 font-mono`}>
                 {formatCurrency(Math.abs(value))}
               </p>
             </div>
