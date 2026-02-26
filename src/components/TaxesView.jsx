@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calculator, FileText, TrendingUp, FileSpreadsheet } from 'lucide-react';
+import { Calculator, FileText, TrendingUp, FileSpreadsheet, AlertTriangle, Clock } from 'lucide-react';
 import { Button, Card, Select, useToast } from './UI';
 import { useStore, formatCurrency, getQuarter, exportDocumentsCSV, downloadCSV } from '../stores/store';
 
@@ -412,15 +412,50 @@ export const TaxesView = () => {
       <Card className="p-6">
         <h3 className="font-serif text-lg font-semibold text-sand-900 mb-4">Fechas de presentación {selectedYear}</h3>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[{ q: 1, date: '20 abril' }, { q: 2, date: '20 julio' }, { q: 3, date: '20 octubre' }, { q: 4, date: '30 enero' }].map(({ q, date }) => (
-            <div key={q} className={`p-4 rounded-soft border ${viewMode === 'trimestral' && q === selectedQuarter ? 'bg-terra-50 border-terra-300' : 'bg-sand-50 border-sand-300'}`}>
-              <p className="text-sm font-medium text-sand-600">T{q}</p>
-              <p className="text-sand-900 font-semibold mt-1">{date}</p>
-              {viewMode === 'trimestral' && q === selectedQuarter && (
-                <span className="inline-block mt-2 text-xs bg-terra-400 text-white px-2 py-0.5 rounded">Actual</span>
-              )}
-            </div>
-          ))}
+          {[
+            { q: 1, date: '20 abril',   month: 3,  day: 20 },
+            { q: 2, date: '20 julio',   month: 6,  day: 20 },
+            { q: 3, date: '20 octubre', month: 9,  day: 20 },
+            { q: 4, date: '30 enero',   month: 0,  day: 30 },
+          ].map(({ q, date, month, day }) => {
+            // T4 del year X es presenta el 30 gener de year X+1
+            const deadlineYear = q === 4 ? selectedYear + 1 : selectedYear;
+            const deadline = new Date(deadlineYear, month, day);
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const daysUntil = Math.ceil((deadline - today) / (1000 * 60 * 60 * 24));
+            const isPast = daysUntil < 0;
+            const isUrgent = !isPast && daysUntil <= 7;
+            const isSoon = !isPast && !isUrgent && daysUntil <= 30;
+            const isActive = viewMode === 'trimestral' && q === selectedQuarter;
+
+            return (
+              <div key={q} className={`p-4 rounded-soft border transition-colors ${
+                isUrgent ? 'bg-danger-light border-danger/40' :
+                isSoon   ? 'bg-warning-light border-warning/40' :
+                isActive ? 'bg-terra-50 border-terra-300' :
+                           'bg-sand-50 border-sand-300'
+              }`}>
+                <p className={`text-sm font-medium ${isUrgent ? 'text-danger' : isSoon ? 'text-warning-dark' : 'text-sand-600'}`}>T{q}</p>
+                <p className={`font-semibold mt-1 ${isUrgent ? 'text-danger' : isSoon ? 'text-warning-dark' : 'text-sand-900'}`}>{date}</p>
+                <div className="mt-2 flex flex-col gap-1">
+                  {isActive && <span className="inline-flex items-center text-xs bg-terra-400 text-white px-2 py-0.5 rounded w-fit">Actual</span>}
+                  {isUrgent && (
+                    <span className="inline-flex items-center gap-1 text-xs text-danger font-semibold">
+                      <AlertTriangle size={11} />
+                      {daysUntil === 0 ? '¡Hoy!' : `${daysUntil}d`}
+                    </span>
+                  )}
+                  {isSoon && (
+                    <span className="inline-flex items-center gap-1 text-xs text-warning-dark">
+                      <Clock size={11} />
+                      {daysUntil}d
+                    </span>
+                  )}
+                  {isPast && <span className="text-xs text-sand-400">Presentado</span>}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Card>
     </div>

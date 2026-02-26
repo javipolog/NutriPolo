@@ -6,7 +6,7 @@
  * deducibilitat i estratègia de data.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Plus, Trash2, Edit2, Check, X,
     Tag, Zap, ToggleLeft, ToggleRight, ChevronDown,
@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Modal, Button, Select } from './UI';
 import { useProviderMemory } from '../services/providerMemory';
-import { defaultCategories } from '../stores/store';
+import { defaultCategories, useStore } from '../stores/store';
 
 // ============================================
 // CONSTANTS
@@ -411,7 +411,7 @@ const RuleForm = ({ initial, onSave, onCancel }) => {
 // RULE CARD (v2 — mostra accions configurades)
 // ============================================
 
-const RuleCard = ({ rule, index, total, onEdit, onDelete, onToggle, onMoveUp, onMoveDown }) => {
+const RuleCard = ({ rule, index, total, matchCount, onEdit, onDelete, onToggle, onMoveUp, onMoveDown }) => {
     const cond = rule.conditions || {};
     const act = rule.actions || {};
     const cat = act.categoria || rule.categoria || '';
@@ -458,6 +458,15 @@ const RuleCard = ({ rule, index, total, onEdit, onDelete, onToggle, onMoveUp, on
                         ))}
                         {keywords.length > 4 && <span className="text-sand-500 text-[10px] px-1">+{keywords.length - 4}</span>}
                     </div>
+                    {matchCount != null && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold border ${
+                            matchCount > 0
+                                ? 'bg-success-light text-success border-success/30'
+                                : 'bg-sand-100 text-sand-400 border-sand-300'
+                        }`}>
+                            {matchCount} gasto{matchCount !== 1 ? 's' : ''}
+                        </span>
+                    )}
                 </div>
                 <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                     <span className="text-sand-400 text-xs">-&gt;</span>
@@ -514,6 +523,7 @@ export const RulesManager = ({ open, onClose, initialRule }) => {
         removeCustomRule,
         reorderCustomRules,
     } = useProviderMemory();
+    const { expenses } = useStore();
 
     const [showForm, setShowForm] = useState(false);
     const [editingRule, setEditingRule] = useState(null);
@@ -585,6 +595,27 @@ export const RulesManager = ({ open, onClose, initialRule }) => {
 
     const activeCount = sortedRules.filter(r => r.enabled !== false).length;
 
+    // Preview: compta quantes despeses existents coincideix amb cada regla
+    const ruleMatchCounts = useMemo(() => {
+        const counts = {};
+        for (const rule of sortedRules) {
+            if (rule.enabled === false) { counts[rule.id] = 0; continue; }
+            const cond = rule.conditions || {};
+            const kws = (cond.keywords || rule.keywords || '').split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+            if (kws.length === 0) { counts[rule.id] = 0; continue; }
+            const matchField = cond.matchField || 'any';
+            const matchAll = (cond.matchMode || 'any') === 'all';
+            counts[rule.id] = expenses.filter(exp => {
+                const parts = [];
+                if (matchField === 'any' || matchField === 'proveedor') parts.push((exp.proveedor || '').toLowerCase());
+                if (matchField === 'any' || matchField === 'concepto')  parts.push((exp.concepto  || '').toLowerCase());
+                const hay = parts.join(' ');
+                return matchAll ? kws.every(k => hay.includes(k)) : kws.some(k => hay.includes(k));
+            }).length;
+        }
+        return counts;
+    }, [sortedRules, expenses]);
+
     // Helper per comparar si una regla d'exemple ja existeix
     const isExampleAdded = (ex) => {
         return sortedRules.some(r => {
@@ -643,6 +674,7 @@ export const RulesManager = ({ open, onClose, initialRule }) => {
                     <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1 custom-scrollbar">
                         {sortedRules.map((rule, idx) => (
                             <RuleCard key={rule.id} rule={rule} index={idx} total={sortedRules.length}
+                                matchCount={ruleMatchCounts[rule.id]}
                                 onEdit={() => handleEdit(rule)}
                                 onDelete={() => handleDelete(rule.id)}
                                 onToggle={() => handleToggle(rule)}

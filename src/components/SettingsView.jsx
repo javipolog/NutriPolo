@@ -132,7 +132,7 @@ export const SettingsView = () => {
           <Input
             label="IBAN"
             value={form.iban}
-            onChange={e => setForm({ ...form, iban: e.target.value.toUpperCase() })}
+            onChange={e => setForm({ ...form, iban: formatIBAN(e.target.value) })}
             error={errors.iban}
             placeholder="ES00 0000 0000 0000 0000 0000"
           />
@@ -142,8 +142,12 @@ export const SettingsView = () => {
       <Card className="p-6">
         <h3 className="font-serif text-lg font-semibold text-sand-900 mb-6">Valores por defecto</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Input label="IVA (%)" type="number" value={form.tipoIva} onChange={e => setForm({ ...form, tipoIva: parseFloat(e.target.value) || 0 })} />
-          <Input label="IRPF (%)" type="number" value={form.tipoIrpf} onChange={e => setForm({ ...form, tipoIrpf: parseFloat(e.target.value) || 0 })} />
+          <Input label="IVA (%)" type="number" min="0" max="100" step="0.1"
+            value={form.tipoIva}
+            onChange={e => setForm({ ...form, tipoIva: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
+          <Input label="IRPF (%)" type="number" min="0" max="100" step="0.1"
+            value={form.tipoIrpf}
+            onChange={e => setForm({ ...form, tipoIrpf: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
           <Select label="Idioma por defecto" value={form.idiomaDefecto} onChange={e => setForm({ ...form, idiomaDefecto: e.target.value })} options={[{ value: 'es', label: 'Castellano' }, { value: 'ca', label: 'Català' }]} />
         </div>
       </Card>
