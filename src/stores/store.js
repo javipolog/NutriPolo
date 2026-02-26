@@ -447,6 +447,12 @@ export const useStore = create(
       },
       setInvoiceFilters: (invoiceFilters) => set({ invoiceFilters }),
 
+      invoiceSortConfig: { key: 'fecha', direction: 'desc' },
+      setInvoiceSortConfig: (invoiceSortConfig) => set({ invoiceSortConfig }),
+
+      expenseSortConfig: { key: 'fecha', direction: 'desc' },
+      setExpenseSortConfig: (expenseSortConfig) => set({ expenseSortConfig }),
+
       expenseSearch: '',
       setExpenseSearch: (expenseSearch) => set({ expenseSearch }),
       expenseFilters: {
@@ -511,6 +517,8 @@ export const useStore = create(
         expenses: state.expenses,
         invoiceSearch: state.invoiceSearch,
         invoiceFilters: state.invoiceFilters,
+        invoiceSortConfig: state.invoiceSortConfig,
+        expenseSortConfig: state.expenseSortConfig,
         expenseSearch: state.expenseSearch,
         expenseFilters: state.expenseFilters,
         dashboardFilters: state.dashboardFilters,

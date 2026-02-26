@@ -192,6 +192,7 @@ export const Invoices = () => {
         invoices, clients, addInvoice, updateInvoice, deleteInvoice, config,
         invoiceSearch: search, setInvoiceSearch: setSearch,
         invoiceFilters: filters, setInvoiceFilters: setFilters,
+        invoiceSortConfig: sortConfig, setInvoiceSortConfig: setSortConfig,
         addPago, deletePago, createRectificativa, generateFromTemplate, convertPresupuestoToFactura,
         invoiceCounters,
         invoiceVisibleColumns, setInvoiceVisibleColumns,
@@ -207,7 +208,6 @@ export const Invoices = () => {
     const toast = useToast();
     const { confirm, ConfirmDialog } = useConfirm();
 
-    const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
     const [generating, setGenerating] = useState(false);
     const [docType, setDocType] = useState('facturas'); // 'facturas' | 'presupuestos'
     const [isExportingCSV, setIsExportingCSV] = useState(false);
@@ -302,10 +302,16 @@ export const Invoices = () => {
         });
     }, [clients, invoices]);
 
+    // Filters helpers
+    const DEFAULT_FILTERS = { status: 'all', client: 'all', year: new Date().getFullYear().toString(), month: 'all' };
+    const hasActiveFilters = search !== '' || filters.status !== 'all' || filters.client !== 'all'
+        || filters.year !== new Date().getFullYear().toString() || filters.month !== 'all';
+    const handleResetFilters = () => { setSearch(''); setFilters(DEFAULT_FILTERS); };
+
     // Actions
-    const handleSort = (key) => setSortConfig(c => ({
-        key, direction: c.key === key && c.direction === 'desc' ? 'asc' : 'desc'
-    }));
+    const handleSort = (key) => setSortConfig({
+        key, direction: sortConfig.key === key && sortConfig.direction === 'desc' ? 'asc' : 'desc'
+    });
 
     const handleOpenNew = () => {
         setEditingInvoice(null);
@@ -515,7 +521,8 @@ export const Invoices = () => {
 
                 <div className="flex flex-col lg:flex-row gap-3">
                     <Input icon={Search} placeholder="Buscar por nº, cliente o concepto..."
-                        value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
+                        value={search} onChange={e => setSearch(e.target.value)} className="flex-1"
+                        onKeyDown={e => e.key === 'Escape' && (setSearch(''), e.target.blur())} />
 
                     <div className="flex gap-2 text-sm overflow-x-auto pb-1">
                         <select value={filters.status}
@@ -546,6 +553,13 @@ export const Invoices = () => {
                             <option value="all">Mes</option>
                             {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
                         </select>
+                        {hasActiveFilters && (
+                            <button onClick={handleResetFilters} title="Limpiar todos los filtros"
+                                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-button text-sm font-medium text-terra-500 bg-terra-50 border border-terra-200 hover:bg-terra-100 hover:border-terra-300 transition-all">
+                                <X size={13} />
+                                <span className="hidden sm:inline">Limpiar</span>
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
@@ -739,8 +753,15 @@ export const Invoices = () => {
                             {filteredInvoices.length === 0 && (
                                 <tr>
                                     <td colSpan={Object.values(cols).filter(Boolean).length + 1} className="py-12">
-                                        <EmptyState icon={Filter} title="No se encontraron documentos"
-                                            description="Prueba a ajustar los filtros o crea un nuevo documento." />
+                                        <EmptyState icon={Filter}
+                                            title={hasActiveFilters ? 'Sin resultados para esta búsqueda' : 'No hay documentos todavía'}
+                                            description={hasActiveFilters ? 'Prueba a cambiar los filtros o limpia la búsqueda.' : 'Crea tu primera factura o presupuesto.'}
+                                            action={hasActiveFilters ? (
+                                                <button onClick={handleResetFilters}
+                                                    className="flex items-center gap-1.5 px-4 py-2 rounded-button text-sm font-medium text-terra-500 bg-terra-50 border border-terra-200 hover:bg-terra-100 transition-colors mx-auto">
+                                                    <X size={13} /> Limpiar filtros
+                                                </button>
+                                            ) : null} />
                                     </td>
                                 </tr>
                             )}

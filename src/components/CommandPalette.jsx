@@ -31,7 +31,11 @@ const highlight = (text, query) => {
 };
 
 export const CommandPalette = ({ open, onClose }) => {
-  const { invoices, clients, expenses, setCurrentView } = useStore();
+  const {
+    invoices, clients, expenses, setCurrentView,
+    setInvoiceSearch, setInvoiceFilters,
+    setExpenseSearch, setExpenseFilters,
+  } = useStore();
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef(null);
@@ -142,8 +146,16 @@ export const CommandPalette = ({ open, onClose }) => {
   const handleSelect = (item) => {
     if (item.type === 'section') {
       setCurrentView(item.id);
-    } else if (item.type === 'invoice' || item.type === 'expense') {
-      setCurrentView(item.type === 'invoice' ? 'invoices' : 'expenses');
+    } else if (item.type === 'invoice') {
+      // Navegar a facturas i precarregar cerca pel número de la factura
+      setInvoiceSearch(item.data.numero || '');
+      setInvoiceFilters({ status: 'all', client: 'all', year: 'all', month: 'all' });
+      setCurrentView('invoices');
+    } else if (item.type === 'expense') {
+      // Navegar a gastos i precarregar cerca pel proveïdor
+      setExpenseSearch(item.data.proveedor || '');
+      setExpenseFilters({ year: 'all', period: 'all', category: 'all', groupBy: 'none' });
+      setCurrentView('expenses');
     } else if (item.type === 'client') {
       setCurrentView('clients');
     }

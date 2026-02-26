@@ -22,7 +22,8 @@ export const ExpensesView = () => {
     const {
         expenses, addExpense, updateExpense, deleteExpense, config, setConfig,
         expenseSearch: search, setExpenseSearch: setSearch,
-        expenseFilters: filters, setExpenseFilters: setFilters
+        expenseFilters: filters, setExpenseFilters: setFilters,
+        expenseSortConfig: sortConfig, setExpenseSortConfig: setSortConfig,
     } = useStore();
     const { customRules } = useProviderMemory();
     const activeRulesCount = customRules.filter(r => r.enabled !== false).length;
@@ -31,7 +32,6 @@ export const ExpensesView = () => {
     const [selectedExpenses, setSelectedExpenses] = useState([]);
     const toast = useToast();
     const { confirm, ConfirmDialog } = useConfirm();
-    const [sortConfig, setSortConfig] = useState({ key: 'fecha', direction: 'desc' });
 
     // ============================================
     // WATCHFOLDER STATE
@@ -338,6 +338,12 @@ export const ExpensesView = () => {
     const openNew = () => { setEditingExpense(null); setShowModal(true); };
     const openEdit = (exp) => { setEditingExpense(exp); setShowModal(true); };
 
+    // Filters helpers
+    const DEFAULT_EXPENSE_FILTERS = { year: new Date().getFullYear().toString(), period: 'all', category: 'all', groupBy: 'none' };
+    const hasActiveExpenseFilters = search !== '' || filters.year !== new Date().getFullYear().toString()
+        || filters.period !== 'all' || filters.category !== 'all';
+    const handleResetExpenseFilters = () => { setSearch(''); setFilters(DEFAULT_EXPENSE_FILTERS); };
+
     const saveExpense = (data) => {
         // Recalcular sempre ivaImporte i total des del percentatge per garantir persistència correcta
         const ivaImporte = parseFloat((data.baseImponible * (data.ivaPorcentaje / 100)).toFixed(2));
@@ -384,7 +390,7 @@ export const ExpensesView = () => {
         try { await invoke('open_file', { path }); } catch (e) { toast.error('No se pudo abrir el archivo'); }
     };
 
-    const toggleSort = (key) => setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc' }));
+    const toggleSort = (key) => setSortConfig({ key, direction: sortConfig.key === key && sortConfig.direction === 'desc' ? 'asc' : 'desc' });
 
     // ============================================
     // RULE CREATOR (Fase 3.2)
@@ -618,7 +624,8 @@ export const ExpensesView = () => {
                     <div className="relative flex-1">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-sand-500" size={18} />
                         <input className="w-full bg-sand-100 border border-sand-300 text-sand-900 pl-10 pr-4 py-2 rounded-soft focus:ring-2 focus:ring-terra-400/20 focus:border-terra-400 transition-all outline-none"
-                            placeholder="Buscar por proveedor o concepto..." value={search} onChange={e => setSearch(e.target.value)} />
+                            placeholder="Buscar por proveedor o concepto..." value={search} onChange={e => setSearch(e.target.value)}
+                            onKeyDown={e => e.key === 'Escape' && (setSearch(''), e.target.blur())} />
                     </div>
                     <div className="flex flex-wrap gap-2">
                         <div className="flex items-center gap-1 bg-sand-100 p-1 rounded-soft border border-sand-300 overflow-hidden shadow-inner">
@@ -661,6 +668,13 @@ export const ExpensesView = () => {
                                 <option value="provider" className="bg-white text-sand-900">Proveedor</option>
                             </select>
                         </div>
+                        {hasActiveExpenseFilters && (
+                            <button onClick={handleResetExpenseFilters} title="Limpiar todos los filtros"
+                                className="flex items-center gap-1.5 px-3 py-2 rounded-soft text-sm font-medium text-terra-500 bg-terra-50 border border-terra-200 hover:bg-terra-100 hover:border-terra-300 transition-all">
+                                <X size={13} />
+                                <span className="hidden sm:inline">Limpiar</span>
+                            </button>
+                        )}
                     </div>
                 </div>
             </Card>

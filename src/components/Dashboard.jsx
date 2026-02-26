@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     AreaChart, Area, PieChart, Pie, Cell, LineChart, Line, ComposedChart,
@@ -218,6 +218,19 @@ export const Dashboard = () => {
     const currentYear = new Date().getFullYear();
     const [showConfig, setShowConfig] = useState(false);
     const [chartMode, setChartMode] = useState('evolution');
+
+    // Dark mode detection — actualitza quan canvia data-theme al <html>
+    const [isDark, setIsDark] = useState(() => document.documentElement.getAttribute('data-theme') === 'dark');
+    useEffect(() => {
+        const obs = new MutationObserver(() =>
+            setIsDark(document.documentElement.getAttribute('data-theme') === 'dark')
+        );
+        obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+        return () => obs.disconnect();
+    }, []);
+    const ct = isDark
+        ? { axis: '#6A6860', grid: '#3A3530', cursor: '#5A4A40', tooltipBg: '#2A2420', refLine: '#4A4540' }
+        : { axis: '#9C9A91', grid: '#E8E5DD', cursor: '#F4F3EE', tooltipBg: '#ffffff',  refLine: '#D4D0C8' };
     const [compareYears, setCompareYears] = useState([]);
     const [compareMetric, setCompareMetric] = useState('both');
 
@@ -561,23 +574,23 @@ export const Dashboard = () => {
                                                 <stop offset="95%" stopColor="#C15F3C" stopOpacity={0} />
                                             </linearGradient>
                                             <linearGradient id="colorGastos" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="5%" stopColor="#9C9A91" stopOpacity={0.2} />
-                                                <stop offset="95%" stopColor="#9C9A91" stopOpacity={0} />
+                                                <stop offset="5%" stopColor={ct.axis} stopOpacity={0.25} />
+                                                <stop offset="95%" stopColor={ct.axis} stopOpacity={0} />
                                             </linearGradient>
                                         </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} vertical={false} />
+                                        <XAxis dataKey="name" stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
                                         <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#C15F3C', strokeDasharray: '4 4', strokeWidth: 1 }} />
                                         <Area type="monotone" dataKey="ingresos" stroke="#C15F3C" strokeWidth={2.5} fillOpacity={1} fill="url(#colorIngresos)" name="Ingresos" activeDot={{ r: 5, strokeWidth: 0, fill: '#C15F3C' }} animationDuration={1500} />
-                                        <Area type="monotone" dataKey="gastos" stroke="#9C9A91" strokeWidth={2.5} fillOpacity={1} fill="url(#colorGastos)" name="Gastos" activeDot={{ r: 5, strokeWidth: 0, fill: '#9C9A91' }} animationDuration={1500} />
+                                        <Area type="monotone" dataKey="gastos" stroke={ct.axis} strokeWidth={2.5} fillOpacity={1} fill="url(#colorGastos)" name="Gastos" activeDot={{ r: 5, strokeWidth: 0, fill: ct.axis }} animationDuration={1500} />
                                     </AreaChart>
 
                                 ) : chartMode === 'evolution' && compareYears.length > 0 ? (
                                     <LineChart data={comparisonChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} vertical={false} />
+                                        <XAxis dataKey="name" stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
                                         <Tooltip content={<ComparisonTooltip />} cursor={{ stroke: '#C15F3C', strokeDasharray: '4 4', strokeWidth: 1 }} />
                                         {allCompareYears.map((year, yIdx) => {
                                             const c = YEAR_COLORS[yIdx] || YEAR_COLORS[0];
@@ -594,10 +607,10 @@ export const Dashboard = () => {
 
                                 ) : chartMode === 'compare' ? (
                                     <BarChart data={comparisonChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                                        <Tooltip content={<ComparisonTooltip />} cursor={{ fill: '#F4F3EE' }} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} vertical={false} />
+                                        <XAxis dataKey="name" stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <Tooltip content={<ComparisonTooltip />} cursor={{ fill: ct.cursor }} />
                                         {allCompareYears.map((year, yIdx) => {
                                             const c = YEAR_COLORS[yIdx] || YEAR_COLORS[0];
                                             const main = yIdx === 0;
@@ -613,13 +626,13 @@ export const Dashboard = () => {
 
                                 ) : chartMode === 'yoy' ? (
                                     <ComposedChart data={yoyChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} vertical={false} />
+                                        <XAxis dataKey="name" stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
                                         <Tooltip content={<YoYTooltip />} />
-                                        <ReferenceLine y={0} stroke="#D4D0C8" strokeWidth={1.5} />
+                                        <ReferenceLine y={0} stroke={ct.refLine} strokeWidth={1.5} />
                                         <Bar dataKey={'Δ Ingresos'} fill="#C15F3C" fillOpacity={0.7} radius={[3, 3, 0, 0]} name={'Δ Ingresos'} animationDuration={1200} />
-                                        <Bar dataKey={'Δ Gastos'} fill="#9C9A91" fillOpacity={0.7} radius={[3, 3, 0, 0]} name={'Δ Gastos'} animationDuration={1200} />
+                                        <Bar dataKey={'Δ Gastos'} fill={ct.axis} fillOpacity={0.7} radius={[3, 3, 0, 0]} name={'Δ Gastos'} animationDuration={1200} />
                                         <Line type="monotone" dataKey={'Δ Benefici'} stroke="#2D7A4F" strokeWidth={2.5} dot={{ fill: '#2D7A4F', r: 4 }} name={'Δ Benefici'} animationDuration={1500} />
                                     </ComposedChart>
 
@@ -633,9 +646,9 @@ export const Dashboard = () => {
                                                 </linearGradient>
                                             ))}
                                         </defs>
-                                        <CartesianGrid strokeDasharray="3 3" stroke="#E8E5DD" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} dy={10} />
-                                        <YAxis stroke="#9C9A91" fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                                        <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} vertical={false} />
+                                        <XAxis dataKey="name" stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} dy={10} />
+                                        <YAxis stroke={ct.axis} fontSize={12} tickLine={false} axisLine={false} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
                                         <Tooltip content={<ComparisonTooltip />} cursor={{ stroke: '#C15F3C', strokeDasharray: '4 4', strokeWidth: 1 }} />
                                         {allCompareYears.map((year, yIdx) => {
                                             const c = YEAR_COLORS[yIdx] || YEAR_COLORS[0];
