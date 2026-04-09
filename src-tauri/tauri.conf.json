@@ -89,7 +89,7 @@
       "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V5ClJXUlRZMEl5MWVLSzE1U2QxMlE0Qk9OMHpZYnhGaTc5K3c1YkhWcXMveE9kc0FUWVMrMEFBQkFBQUFBQUFBQUFBQUlBQUFBQWF4VDg0eDRMQXRaRU1hNEJYSGxYTThXNDhuZ09KTDRSQ3dXK2k4S3NPcGxtcEd2MGt1UjZVK2ZPMzJBdDVpVE5XUm9za1RRUThVZVVsR0VVOTdvZmhKbFdpSEllT3VKbTVCNHBTN1VlN3VTS0R4L1c5bTZKMDNIdE0yYXkzcEFuUWxpa3gwN0ZJNk09Cg==",
       "endpoints": [
-        "https://github.com/javipolog/NutriPolo_App/releases/latest/download/latest.json"
+        "https://github.com/javipolog/NutriPolo/releases/latest/download/latest.json"
       ]
     },
     "windows": [
