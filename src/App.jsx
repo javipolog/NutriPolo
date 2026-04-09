@@ -8,7 +8,7 @@ import { useT } from './i18n';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -32,14 +32,14 @@ const WhatsNewModal = () => {
         <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
           <Sparkles size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">Google Calendar protegido</p>
+            <p className="text-sm font-semibold text-sage-800">Google Calendar bidireccional</p>
             <p className="text-xs text-sage-600 mt-1">
-              La integración con Google Calendar ahora es de <strong>solo lectura</strong>.
-              NutriPolo ya no puede crear, modificar ni eliminar eventos de tu calendario de Google.
+              El calendario <strong>"NutriPolo App"</strong> ahora se sincroniza en ambas direcciones.
+              Las consultas que crees o edites en la app se enviarán automáticamente a Google Calendar.
             </p>
             <p className="text-xs text-sage-500 mt-1.5">
-              Crear, editar o borrar consultas en la app solo afecta a los datos locales.
-              Los eventos de Google Calendar están siempre a salvo.
+              Los demás calendarios siguen en solo lectura. Puedes cambiar el modo de cada calendario
+              en Ajustes &gt; Google Calendar.
             </p>
           </div>
         </div>
