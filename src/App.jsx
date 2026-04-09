@@ -1,9 +1,60 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X } from 'lucide-react';
-import { Spinner, ToastProvider, ErrorBoundary, useToast } from './components/UI';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles } from 'lucide-react';
+import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import useStore from './stores/store';
 import { useT } from './i18n';
+
+// ============================================
+// WHAT'S NEW MODAL
+// ============================================
+const APP_VERSION = '1.1.0';
+
+const WhatsNewModal = () => {
+  const [open, setOpen] = useState(false);
+  const t = useT();
+
+  useEffect(() => {
+    const seen = localStorage.getItem('nutripolo-seen-version');
+    if (seen !== APP_VERSION) {
+      setOpen(true);
+    }
+  }, []);
+
+  const handleClose = () => {
+    localStorage.setItem('nutripolo-seen-version', APP_VERSION);
+    setOpen(false);
+  };
+
+  return (
+    <Modal open={open} onClose={handleClose} title="Novedades en NutriPolo" size="sm">
+      <div className="space-y-4">
+        <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
+          <Clock size={20} className="text-wellness-500 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-sage-800">Franjas horarias no disponibles</p>
+            <p className="text-xs text-sage-600 mt-1">
+              Ahora puedes marcar horas de descanso o cierre en tu agenda.
+              Las franjas bloqueadas aparecen en gris en el calendario semanal.
+            </p>
+            <p className="text-xs text-sage-500 mt-1.5">
+              Configúralo en <strong>Ajustes → Configuración de consulta → Horario no disponible</strong>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <button
+            onClick={handleClose}
+            className="px-4 py-2 bg-wellness-400 text-white text-sm font-medium rounded-button hover:bg-wellness-500 transition-colors"
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
 
 // Lazy-loaded views (created in later phases — placeholders until implemented)
 const LazyView = ({ name }) => (
@@ -330,6 +381,7 @@ function AppContent() {
         open={showCommandPalette}
         onClose={() => setShowCommandPalette(false)}
       />
+      <WhatsNewModal />
     </div>
   );
 }
