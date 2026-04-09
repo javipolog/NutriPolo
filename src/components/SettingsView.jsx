@@ -3,7 +3,7 @@ import {
   Check, Download, Upload, Sun, Moon, Monitor, Mail,
   Eye, EyeOff, RotateCcw, Send, Loader2, X, Plus, Edit2,
   Trash2, MapPin, ClipboardList, Languages, Calendar, RefreshCw,
-  LogOut, Wifi, Star, Palette, Image, Type, ChevronDown, ChevronUp, FileText,
+  LogOut, Wifi, Palette, Image, Type, ChevronDown, ChevronUp, FileText,
   Archive, HardDriveDownload, History, ShieldCheck, Clock
 } from 'lucide-react';
 import { Button, Input, Textarea, useToast, useConfirm } from './UI';
@@ -413,14 +413,12 @@ const GoogleCalendarSection = () => {
         syncMode: 'disabled',
       }));
 
-      // Auto-detect NutriPolo calendar and enable it as default
-      let defaultPushCalendarId = null;
+      // Auto-detect NutriPolo calendar and enable it as readonly
       const nutripoloIdx = newCalendars.findIndex(
-        c => c.name && c.name.toLowerCase().includes('nutripolo') && c.accessRole !== 'reader'
+        c => c.name && c.name.toLowerCase().includes('nutripolo')
       );
       if (nutripoloIdx !== -1) {
-        newCalendars[nutripoloIdx].syncMode = 'bidirectional';
-        defaultPushCalendarId = newCalendars[nutripoloIdx].id;
+        newCalendars[nutripoloIdx].syncMode = 'readonly';
       }
 
       setGcal({
@@ -431,14 +429,13 @@ const GoogleCalendarSection = () => {
         refreshToken,
         expiresAt,
         calendars: newCalendars,
-        defaultPushCalendarId,
         userEmail,
       });
 
       if (nutripoloIdx !== -1) {
-        toast.success(`Conectado — "${newCalendars[nutripoloIdx].name}" activado automáticamente`);
+        toast.success(`Conectado — "${newCalendars[nutripoloIdx].name}" activado en solo lectura`);
       } else {
-        toast.success('Google Calendar conectado — selecciona un calendario bidireccional');
+        toast.success('Google Calendar conectado — selecciona un calendario');
       }
     } catch (e) {
       toast.error('Error al conectar: ' + (e?.message || String(e)));
@@ -494,26 +491,17 @@ const GoogleCalendarSection = () => {
   };
 
   const handleCalendarSyncMode = (cal, newMode) => {
-    if (cal.access_role === 'reader' && newMode === 'bidirectional') return;
     const current = gcal.calendars || [];
     const exists = current.find(sc => sc.id === cal.id);
     const updated = exists
       ? current.map(sc => sc.id === cal.id ? { ...sc, syncMode: newMode } : sc)
       : [...current, { id: cal.id, name: cal.summary, color: cal.background_color, accessRole: cal.access_role, syncMode: newMode }];
-    const extra = {};
-    if (newMode !== 'bidirectional' && gcal.defaultPushCalendarId === cal.id) {
-      extra.defaultPushCalendarId = null;
-    }
-    setGcal({ calendars: updated, ...extra });
+    setGcal({ calendars: updated });
 
     // When disabling a holiday calendar, delete its synced events (they are noise, not real consultations)
     if (newMode === 'disabled' && isHolidayCalendar(cal)) {
       removeConsultationsForCalendar(cal.id);
     }
-  };
-
-  const handleSetDefaultCalendar = (calId) => {
-    setGcal({ defaultPushCalendarId: calId });
   };
 
   if (gcal.connected) {
@@ -554,27 +542,13 @@ const GoogleCalendarSection = () => {
                       <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-badge whitespace-nowrap">solo lectura</span>
                     )}
                     <select
-                      value={syncMode}
+                      value={syncMode === 'bidirectional' ? 'readonly' : syncMode}
                       onChange={e => handleCalendarSyncMode(cal, e.target.value)}
                       className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
                     >
-                      {!isReader && <option value="bidirectional">↔ Bidireccional</option>}
                       <option value="readonly">← Solo lectura</option>
                       <option value="disabled">✗ Desactivado</option>
                     </select>
-                    {syncMode === 'bidirectional' && (
-                      <button
-                        onClick={() => handleSetDefaultCalendar(cal.id)}
-                        className={`p-1 transition-colors ${
-                          gcal.defaultPushCalendarId === cal.id
-                            ? 'text-amber-500'
-                            : 'text-sage-300 hover:text-amber-400'
-                        }`}
-                        title="Calendario predeterminado para nuevas consultas"
-                      >
-                        <Star size={14} fill={gcal.defaultPushCalendarId === cal.id ? 'currentColor' : 'none'} />
-                      </button>
-                    )}
                   </div>
                 );
               })}

@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles, Download, RefreshCw } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import useStore from './stores/store';
@@ -8,7 +8,7 @@ import { useT } from './i18n';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.3.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -30,15 +30,16 @@ const WhatsNewModal = () => {
     <Modal open={open} onClose={handleClose} title="Novedades en NutriPolo" size="sm">
       <div className="space-y-4">
         <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
-          <Clock size={20} className="text-wellness-500 mt-0.5 shrink-0" />
+          <Sparkles size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">Franjas horarias no disponibles</p>
+            <p className="text-sm font-semibold text-sage-800">Google Calendar protegido</p>
             <p className="text-xs text-sage-600 mt-1">
-              Ahora puedes marcar horas de descanso o cierre en tu agenda.
-              Las franjas bloqueadas aparecen en gris en el calendario semanal.
+              La integración con Google Calendar ahora es de <strong>solo lectura</strong>.
+              NutriPolo ya no puede crear, modificar ni eliminar eventos de tu calendario de Google.
             </p>
             <p className="text-xs text-sage-500 mt-1.5">
-              Configúralo en <strong>Ajustes → Configuración de consulta → Horario no disponible</strong>
+              Crear, editar o borrar consultas en la app solo afecta a los datos locales.
+              Los eventos de Google Calendar están siempre a salvo.
             </p>
           </div>
         </div>
@@ -53,6 +54,97 @@ const WhatsNewModal = () => {
         </div>
       </div>
     </Modal>
+  );
+};
+
+// ============================================
+// AUTO-UPDATE CHECKER
+// ============================================
+const UpdateChecker = () => {
+  const [update, setUpdate] = useState(null);   // { version, body }
+  const [installing, setInstalling] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const toast = useToast();
+
+  const check = useCallback(async () => {
+    try {
+      const { checkUpdate } = await import('@tauri-apps/api/updater');
+      const { shouldUpdate, manifest } = await checkUpdate();
+      if (shouldUpdate && manifest) {
+        setUpdate({ version: manifest.version, body: manifest.body });
+      }
+    } catch {
+      // Silently ignore — expected to fail in dev mode or offline
+    }
+  }, []);
+
+  useEffect(() => {
+    // Check on mount (small delay to not block startup)
+    const timeout = setTimeout(check, 5000);
+    // Re-check every 30 minutes
+    const interval = setInterval(check, 30 * 60 * 1000);
+    return () => { clearTimeout(timeout); clearInterval(interval); };
+  }, [check]);
+
+  const handleInstall = async () => {
+    setInstalling(true);
+    try {
+      const { installUpdate } = await import('@tauri-apps/api/updater');
+      const { relaunch } = await import('@tauri-apps/api/process');
+      await installUpdate();
+      await relaunch();
+    } catch (e) {
+      toast.error('Error al actualizar: ' + (e?.message || String(e)));
+      setInstalling(false);
+    }
+  };
+
+  if (!update || dismissed) return null;
+
+  return (
+    <div className="fixed bottom-4 right-4 z-50 max-w-sm animate-in slide-in-from-bottom">
+      <div className="bg-white border border-wellness-300 rounded-soft shadow-lg p-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <Download size={20} className="text-wellness-500 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-sage-800">
+              Nueva versión disponible
+            </p>
+            <p className="text-xs text-sage-600 mt-1">
+              NutriPolo <strong>v{update.version}</strong> está lista para instalar.
+            </p>
+            {update.body && (
+              <p className="text-xs text-sage-500 mt-1">{update.body}</p>
+            )}
+          </div>
+          <button onClick={() => setDismissed(true)} className="text-sage-400 hover:text-sage-600 p-0.5">
+            <X size={14} />
+          </button>
+        </div>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={() => setDismissed(true)}
+            className="px-3 py-1.5 text-xs text-sage-600 hover:text-sage-800 transition-colors"
+          >
+            Más tarde
+          </button>
+          <button
+            onClick={handleInstall}
+            disabled={installing}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-wellness-400 text-white text-xs font-medium rounded-button hover:bg-wellness-500 transition-colors disabled:opacity-60"
+          >
+            {installing ? (
+              <>
+                <RefreshCw size={12} className="animate-spin" />
+                Instalando...
+              </>
+            ) : (
+              'Actualizar ahora'
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 };
 
@@ -382,6 +474,7 @@ function AppContent() {
         onClose={() => setShowCommandPalette(false)}
       />
       <WhatsNewModal />
+      <UpdateChecker />
     </div>
   );
 }

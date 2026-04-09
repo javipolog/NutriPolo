@@ -1,16 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Button, Modal, Input, Textarea, useToast } from './UI';
 import useStore, { todayISO } from '../stores/store';
-import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
 import { AlertTriangle } from 'lucide-react';
 
 export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, defaultHora, onClose }) => {
   const clients = useStore(s => s.clients);
-  const config = useStore(s => s.config);
   const addConsultation = useStore(s => s.addConsultation);
   const updateConsultation = useStore(s => s.updateConsultation);
-  const updateConfig = useStore(s => s.updateConfig);
   const addMeasurement = useStore(s => s.addMeasurement);
   const t = useT();
   const toast = useToast();
@@ -34,58 +31,6 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const pushToGCal = async (savedConsultation) => {
-    // Read fresh config from store — closure config may be stale if settings changed
-    const freshConfig = useStore.getState().config;
-    const gcalConfig = freshConfig.googleCalendar;
-    if (!gcalConfig?.connected) {
-      return { ok: false, reason: 'not_connected' };
-    }
-
-    // Find the target calendar: sourceCalendarId → defaultPushCalendarId → first bidirectional
-    const cals = gcalConfig.calendars || [];
-
-    let targetCal;
-    if (savedConsultation.sourceCalendarId) {
-      targetCal = cals.find(c => c.id === savedConsultation.sourceCalendarId);
-    }
-    if (!targetCal && gcalConfig.defaultPushCalendarId) {
-      targetCal = cals.find(c => c.id === gcalConfig.defaultPushCalendarId && c.syncMode === 'bidirectional');
-    }
-    if (!targetCal) {
-      targetCal = cals.find(c => c.syncMode === 'bidirectional');
-    }
-    // Skip if no bidirectional calendar or calendar is readonly
-    if (!targetCal || targetCal.syncMode === 'readonly' || targetCal.syncMode === 'disabled') {
-      return { ok: false, reason: 'no_bidirectional' };
-    }
-
-    try {
-      const tokenResult = await googleCalendar.getValidToken(gcalConfig);
-      const token = typeof tokenResult === 'string' ? tokenResult : tokenResult.newToken;
-      if (typeof tokenResult !== 'string') {
-        useStore.getState().updateConfig({
-          googleCalendar: { ...gcalConfig, accessToken: tokenResult.newToken, expiresAt: tokenResult.expiresAt, refreshToken: tokenResult.refreshToken },
-        });
-      }
-      const freshClients = useStore.getState().clients;
-      const client = freshClients.find(c => c.id === savedConsultation.clienteId);
-      const event = googleCalendar.consultationToEvent(savedConsultation, client, freshConfig.locations);
-
-      if (savedConsultation.googleEventId) {
-        await googleCalendar.updateEvent(token, targetCal.id, savedConsultation.googleEventId, event);
-        useStore.getState().updateConsultation(savedConsultation.id, { lastSyncedAt: new Date().toISOString() });
-      } else {
-        const created = await googleCalendar.createEvent(token, targetCal.id, event);
-        useStore.getState().updateConsultation(savedConsultation.id, { googleEventId: created.id, sourceCalendarId: targetCal.id, lastSyncedAt: new Date().toISOString() });
-      }
-      return { ok: true };
-    } catch (e) {
-      if (import.meta.env.DEV) console.error('[GCal Push] FAILED:', e?.message || String(e), e);
-      return { ok: false, reason: 'error', message: e?.message || String(e) };
-    }
-  };
-
   const validate = () => {
     const e = {};
     if (!form.clienteId) e.clienteId = 'Selecciona un cliente';
@@ -97,23 +42,9 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
 
-    const handleGCalResult = (result) => {
-      if (!result || result.reason === 'not_connected') return;
-      if (result.ok) {
-        toast.info('Sincronizado con Google Calendar');
-      } else if (result.reason === 'no_bidirectional') {
-        toast.warning('No hay calendario bidireccional configurado en Ajustes');
-      } else if (result.reason === 'error') {
-        toast.error('Error al sincronizar: ' + result.message);
-      }
-    };
-
     if (isEdit) {
       updateConsultation(consultation.id, form);
-      const updatedC = { ...consultation, ...form };
       toast.success('Consulta actualizada');
-      const gcConnected = useStore.getState().config.googleCalendar?.connected;
-      if (gcConnected) pushToGCal(updatedC).then(handleGCalResult);
       onClose();
     } else {
       const newC = addConsultation(form);
@@ -128,8 +59,6 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
         });
       }
       toast.success('Consulta creada');
-      const gcConnected = useStore.getState().config.googleCalendar?.connected;
-      if (gcConnected) pushToGCal(newC).then(handleGCalResult);
       onClose();
     }
   };

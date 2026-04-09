@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { Calendar, List, Plus, Edit2, Trash2, Clock, MapPin, MessageCircle } from 'lucide-react';
 import { Button, EmptyState, useToast, useConfirm } from './UI';
 import useStore, { formatDate, filterVisibleConsultations } from '../stores/store';
-import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
 import { ConsultationModal } from './ConsultationModal';
 import { openWhatsAppReminder } from '../services/whatsappService';
@@ -24,7 +23,6 @@ export const ConsultationsView = () => {
   );
   const deleteConsultation = useStore(s => s.deleteConsultation);
   const updateConsultation = useStore(s => s.updateConsultation);
-  const updateConfig = useStore(s => s.updateConfig);
   const consultationFilters = useStore(s => s.consultationFilters);
   const setConsultationFilters = useStore(s => s.setConsultationFilters);
 
@@ -72,24 +70,6 @@ export const ConsultationsView = () => {
     if (!ok) return;
     deleteConsultation(c.id);
     toast.success('Consulta eliminada');
-    if (config.googleCalendar?.connected && c.googleEventId) {
-      try {
-        const gcalConfig = config.googleCalendar;
-        const cals = gcalConfig.calendars || [];
-        const targetCal = cals.find(cal => cal.id === c.sourceCalendarId)
-          || cals.find(cal => cal.syncMode === 'bidirectional');
-        // Skip if no writable calendar found for this event
-        if (!targetCal || targetCal.syncMode === 'readonly' || targetCal.syncMode === 'disabled') return;
-        const tokenResult = await googleCalendar.getValidToken(gcalConfig);
-        const token = typeof tokenResult === 'string' ? tokenResult : tokenResult.newToken;
-        if (typeof tokenResult !== 'string') {
-          updateConfig({ googleCalendar: { ...gcalConfig, accessToken: tokenResult.newToken, expiresAt: tokenResult.expiresAt, refreshToken: tokenResult.refreshToken } });
-        }
-        await googleCalendar.deleteEvent(token, targetCal.id, c.googleEventId);
-      } catch (e) {
-        toast.error('Error al eliminar en Google Calendar: ' + (e?.message || String(e)));
-      }
-    }
   };
 
   const handleWhatsAppReminder = (consultation, client) => {

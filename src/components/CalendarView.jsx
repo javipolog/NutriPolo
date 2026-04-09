@@ -336,8 +336,7 @@ export const CalendarView = () => {
     setSyncError(null);
     try {
       const stats = await googleCalendar.syncAll(useStore.getState());
-      const parts = [`${stats.pushed} enviados`, `${stats.pulled} recibidos`, `${stats.updated} actualizados`];
-      if (stats.deleted) parts.push(`${stats.deleted} eliminados`);
+      const parts = [`${stats.pulled} recibidos`, `${stats.updated} actualizados`];
       if (stats.errors > 0) parts.push(`${stats.errors} errores`);
       toast.success(`Sincronizado — ${parts.join(', ')}`);
       setLastSyncTime(new Date());
@@ -352,21 +351,16 @@ export const CalendarView = () => {
   const handleReset = useCallback(async () => {
     const total = consultations.length;
     if (!total) { toast.info('No hay consultas que eliminar'); return; }
-    const gcalLinked = consultations.filter(c => c.googleEventId).length;
 
     const ok = await confirm({
       title: 'Resetear agenda',
-      message: `Se eliminarán ${total} consulta(s) locales${gcalLinked ? ` y ${gcalLinked} evento(s) de Google Calendar` : ''}. Esta acción no se puede deshacer.`,
+      message: `Se eliminarán ${total} consulta(s) locales. Los eventos de Google Calendar NO se verán afectados. Esta acción no se puede deshacer.`,
       danger: true,
     });
     if (!ok) return;
 
     setResetting(true);
     try {
-      if (gcalLinked && config.googleCalendar?.connected) {
-        const stats = await googleCalendar.deleteAllEvents(useStore.getState());
-        if (stats.errors) toast.warning(`${stats.errors} evento(s) no se pudieron eliminar de Google`);
-      }
       resetAgenda();
       toast.success(`Agenda reseteada — ${total} consulta(s) eliminada(s)`);
     } catch (e) {
@@ -374,7 +368,7 @@ export const CalendarView = () => {
     } finally {
       setResetting(false);
     }
-  }, [consultations, config.googleCalendar, confirm, resetAgenda, toast]);
+  }, [consultations, confirm, resetAgenda, toast]);
 
   // Keep a stable ref to the latest handleSync so the interval never goes stale
   const handleSyncRef = useRef(handleSync);
