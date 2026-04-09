@@ -1,275 +1,526 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { Lock, RefreshCw, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
-import { Modal, Input, Button, Card, Select, useToast } from './UI';
-import { useStore, formatCurrency, calcularFactura, generateInvoiceNumber, generatePresupuestoNumber } from '../stores/store';
+import React, { useState, useMemo } from 'react';
+import { Plus, Trash2 } from 'lucide-react';
+import { Modal, Textarea, Button, useToast } from './UI';
+import useStore, { todayISO, generateId, computeInvoiceTotals, formatDate } from '../stores/store';
+import { useT } from '../i18n';
+import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
+import { save } from '@tauri-apps/api/dialog';
+import { writeBinaryFile } from '@tauri-apps/api/fs';
+import { invoke } from '@tauri-apps/api/tauri';
 
-export const InvoiceModal = ({ open, onClose, onSave, invoice, onCreateRectificativa }) => {
-    const { clients, invoices, config, invoiceCounters } = useStore();
-    const [errors, setErrors] = useState({});
-    const [showRecurring, setShowRecurring] = useState(false);
-    const toast = useToast();
+const emptyItem = () => ({
+  id: generateId(),
+  descripcion: '',
+  cantidad: 1,
+  precioUnitario: '',
+  servicioId: null,
+  consultationId: null,
+});
 
-    // Sort clients by most recent invoice
-    const sortedClients = useMemo(() => {
-        const lastDates = new Map();
-        invoices.forEach(inv => {
-            const current = lastDates.get(inv.clienteId) || 0;
-            const invDate = new Date(inv.fecha).getTime();
-            if (invDate > current) lastDates.set(inv.clienteId, invDate);
-        });
-        return [...clients].sort((a, b) => {
-            const dateA = lastDates.get(a.id) || 0;
-            const dateB = lastDates.get(b.id) || 0;
-            if (dateA !== dateB) return dateB - dateA;
-            return a.nombre.localeCompare(b.nombre);
-        });
-    }, [clients, invoices]);
+export const InvoiceModal = ({ invoice, onClose }) => {
+  const clients = useStore(s => s.clients);
+  const services = useStore(s => s.services);
+  const getUnbilledConsultations = useStore(s => s.getUnbilledConsultations);
+  const config = useStore(s => s.config);
+  const addInvoice = useStore(s => s.addInvoice);
+  const updateInvoice = useStore(s => s.updateInvoice);
+  const generateInvoiceNumber = useStore(s => s.generateInvoiceNumber);
+  const t = useT();
+  const toast = useToast();
+  const isEdit = !!invoice;
 
-    const [form, setForm] = useState({
-        clienteId: '', fecha: new Date().toISOString().split('T')[0], fechaFin: '', fechaFacturacion: '',
-        tipo: 'classic', idioma: 'es', concepto: '', baseImponible: 0, jornadas: 0, tarifaDia: 0,
-        ivaPorcentaje: 21, irpfPorcentaje: 15, estado: 'borrador', numero: '', dropboxLink: '',
-        tipoDocumento: 'factura', pagos: [],
-        esPlantilla: false, periodicidad: null, proximaFecha: null,
+  const defaultIva = config?.tipoIva ?? 0;
+
+  const [form, setForm] = useState(() => {
+    if (invoice) {
+      return {
+        numero: invoice.numero || '',
+        clienteId: invoice.clienteId || '',
+        fecha: invoice.fecha || todayISO(),
+        estado: invoice.estado || 'pendiente',
+        metodoPago: invoice.metodoPago || '',
+        locationId: invoice.locationId || '',
+        notas: invoice.notas || '',
+        ivaPct: invoice.ivaPct ?? defaultIva,
+        irpfPct: invoice.irpfPct ?? 0,
+        items: invoice.items?.length
+          ? invoice.items.map(item => ({ ...item, precioUnitario: item.precioUnitario?.toString() ?? '' }))
+          : [emptyItem()],
+      };
+    }
+    return {
+      numero: generateInvoiceNumber(),
+      clienteId: '',
+      fecha: todayISO(),
+      estado: 'pendiente',
+      metodoPago: '',
+      locationId: '',
+      notas: '',
+      ivaPct: defaultIva,
+      irpfPct: 0,
+      items: [],
+    };
+  });
+
+  const [errors, setErrors] = useState({});
+  const [showConsultations, setShowConsultations] = useState(false);
+
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const unbilledConsultations = useMemo(() => {
+    if (!form.clienteId) return [];
+    return getUnbilledConsultations(form.clienteId);
+  }, [form.clienteId, getUnbilledConsultations]);
+
+  // ── Item operations ──────────────────────────────────────────
+  const updateItem = (id, field, value) => {
+    setForm(f => ({
+      ...f,
+      items: f.items.map(item => item.id === id ? { ...item, [field]: value } : item),
+    }));
+  };
+
+  const addManualItem = () => {
+    setForm(f => ({ ...f, items: [...f.items, emptyItem()] }));
+  };
+
+  const addServiceItem = (servicioId) => {
+    const svc = services.find(s => s.id === servicioId);
+    if (!svc) return;
+    setForm(f => ({
+      ...f,
+      items: [...f.items, {
+        id: generateId(),
+        descripcion: svc.nombre,
+        cantidad: 1,
+        precioUnitario: svc.precio.toString(),
+        servicioId: svc.id,
+        consultationId: null,
+      }],
+    }));
+  };
+
+  const addConsultationItem = (consultation) => {
+    const svc = services.find(s =>
+      s.activo && s.nombre.toLowerCase() === consultation.tipo?.toLowerCase()
+    );
+    setForm(f => ({
+      ...f,
+      items: [...f.items, {
+        id: generateId(),
+        descripcion: `${consultation.tipo || 'Consulta'} — ${formatDate(consultation.fecha)}`,
+        cantidad: 1,
+        precioUnitario: svc ? svc.precio.toString() : '',
+        servicioId: svc ? svc.id : null,
+        consultationId: consultation.id,
+      }],
+    }));
+  };
+
+  const removeItem = (id) => {
+    setForm(f => ({ ...f, items: f.items.filter(item => item.id !== id) }));
+  };
+
+  // ── Computed totals ──────────────────────────────────────────
+  const parsedItems = useMemo(() =>
+    form.items.map(item => ({
+      ...item,
+      cantidad: parseFloat(item.cantidad) || 0,
+      precioUnitario: parseFloat(item.precioUnitario) || 0,
+    })),
+  [form.items]);
+
+  const totals = useMemo(() =>
+    computeInvoiceTotals(parsedItems, form.ivaPct, form.irpfPct),
+  [parsedItems, form.ivaPct, form.irpfPct]);
+
+  const fmt = (n) => new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+  // ── Validation ───────────────────────────────────────────────
+  const validate = () => {
+    const e = {};
+    if (!form.clienteId) e.clienteId = 'Selecciona un cliente';
+    if (form.items.length === 0) e.items = 'Añade al menos un concepto';
+    form.items.forEach((item, idx) => {
+      if (!item.descripcion.trim()) e[`item_desc_${idx}`] = 'Requerido';
+      const qty = parseFloat(item.cantidad);
+      if (!qty || qty <= 0) e[`item_qty_${idx}`] = '> 0';
+      if (item.precioUnitario === '' || isNaN(parseFloat(item.precioUnitario))) e[`item_price_${idx}`] = 'Requerido';
     });
+    return e;
+  };
 
-    useEffect(() => {
-        if (invoice) {
-            setForm(invoice);
-            setShowRecurring(invoice.esPlantilla || false);
-        } else {
-            setForm(prev => ({
-                ...prev,
-                clienteId: clients[0]?.id || '',
-                fecha: new Date().toISOString().split('T')[0],
-                fechaFin: '', fechaFacturacion: '',
-                tipo: 'classic',
-                idioma: config.idiomaDefecto || 'es',
-                concepto: '',
-                baseImponible: 0, jornadas: 0, tarifaDia: 0,
-                ivaPorcentaje: config.tipoIva || 21,
-                irpfPorcentaje: config.tipoIrpf || 15,
-                estado: 'borrador', numero: '', dropboxLink: '',
-                tipoDocumento: 'factura', pagos: [],
-                esPlantilla: false, periodicidad: null, proximaFecha: null,
-            }));
-            setShowRecurring(false);
-        }
-        setErrors({});
-    }, [invoice, clients, config, open]);
+  // ── Save ─────────────────────────────────────────────────────
+  const handleSave = async () => {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
 
-    // Auto-generar número per a documents nous
-    useEffect(() => {
-        if (!invoice && open && form.clienteId && form.fecha) {
-            const isPresupuesto = form.tipoDocumento === 'presupuesto';
-            const num = isPresupuesto
-                ? generatePresupuestoNumber(clients, invoices, form.clienteId, form.fecha, invoiceCounters)
-                : generateInvoiceNumber(clients, invoices, form.clienteId, form.fecha, invoiceCounters);
-            setForm(prev => ({ ...prev, numero: num }));
-        }
-    }, [form.clienteId, form.fecha, form.tipoDocumento, invoice, open, clients, invoices, invoiceCounters]);
+    const cleanItems = parsedItems.map(({ id, descripcion, cantidad, precioUnitario, servicioId, consultationId }) => ({
+      id, descripcion, cantidad, precioUnitario, servicioId, consultationId,
+    }));
 
-    const calc = calcularFactura(form.tipo, form, form.ivaPorcentaje, form.irpfPorcentaje);
-
-    // Detectar si la factura està bloquejada (emitida o pagada)
-    const isLocked = invoice?.tipoDocumento === 'factura' &&
-        (invoice?.estado === 'emitida' || invoice?.estado === 'pagada');
-
-    const validateForm = () => {
-        const newErrors = {};
-        if (!form.clienteId) newErrors.clienteId = 'El cliente es obligatorio';
-        if (!form.numero?.trim()) {
-            newErrors.numero = 'El número es obligatorio';
-        } else {
-            const duplicate = invoices.find(i => i.numero === form.numero.trim() && i.id !== invoice?.id);
-            if (duplicate) newErrors.numero = `El número ${form.numero} ya existe`;
-        }
-        if (!form.fecha) newErrors.fecha = 'La fecha es obligatoria';
-        if (!form.concepto?.trim()) newErrors.concepto = 'El concepto es obligatorio';
-        if (calc.subtotal <= 0) newErrors.importe = 'El importe debe ser mayor que 0';
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
+    const data = {
+      numero: form.numero.trim(),
+      clienteId: form.clienteId,
+      fecha: form.fecha,
+      estado: form.estado,
+      metodoPago: form.metodoPago,
+      locationId: form.locationId || null,
+      notas: form.notas,
+      ivaPct: parseFloat(form.ivaPct) || 0,
+      irpfPct: parseFloat(form.irpfPct) || 0,
+      items: cleanItems,
     };
 
-    const handleSubmit = (e) => {
-        e.preventDefault();
-        if (isLocked) return; // No s'ha de poder guardar si és bloquejada
-        if (!validateForm()) {
-            toast.warning('Corrige los errores antes de guardar');
-            return;
-        }
-        const saveData = {
-            ...form,
-            numero: form.numero.trim(),
-            ...calc,
-            // Si no és plantilla, netejar camps recurrents
-            esPlantilla: form.esPlantilla || false,
-            periodicidad: form.esPlantilla ? (form.periodicidad || 'mensual') : null,
-            proximaFecha: form.esPlantilla ? form.proximaFecha : null,
-        };
-        onSave(saveData);
-    };
+    let savedInvoice;
+    if (isEdit) {
+      updateInvoice(invoice.id, data);
+      // updateInvoice recomputes totals and compat fields; fetch updated state
+      savedInvoice = useStore.getState().invoices.find(i => i.id === invoice.id);
+    } else {
+      savedInvoice = addInvoice(data);
+    }
 
-    const title = invoice?.tipoDocumento === 'rectificativa' ? 'Factura Rectificativa'
-        : invoice?.tipoDocumento === 'presupuesto' ? 'Editar Presupuesto'
-        : invoice ? 'Editar Factura' : 'Nuevo Documento';
+    try {
+      const client = useStore.getState().clients.find(c => c.id === savedInvoice.clienteId);
+      const cfg = useStore.getState().config;
+      const pdfBytes = await generateInvoicePDF(savedInvoice, client, cfg);
 
-    return (
-        <Modal open={open} onClose={onClose} title={title} size="lg">
-            {/* Banner de bloqueig per factures emitides/pagades */}
-            {isLocked && (
-                <div className="mb-4 p-4 bg-amber-900/30 border border-warning/20/50 rounded-soft flex items-start gap-3">
-                    <Lock size={18} className="text-warning mt-0.5 shrink-0" />
-                    <div className="flex-1">
-                        <p className="text-warning-dark font-medium text-sm">Factura {invoice.estado === 'pagada' ? 'pagada' : 'emitida'} — no editable</p>
-                        <p className="text-warning/70 text-xs mt-1">
-                            Para corregir esta factura, crea una rectificativa. Solo puedes cambiar el estado.
-                        </p>
-                    </div>
-                    {onCreateRectificativa && (
-                        <Button size="sm" onClick={() => { onClose(); onCreateRectificativa(invoice.id); }}
-                            className="bg-amber-700 hover:bg-amber-600 text-white text-xs shrink-0">
-                            Crear Rectificativa
-                        </Button>
-                    )}
+      const filePath = await save({
+        defaultPath: `${savedInvoice.numero}.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+
+      if (filePath) {
+        await writeBinaryFile(filePath, pdfBytes);
+        try { await invoke('open_file', { path: filePath }); } catch (_) { /* optional */ }
+        toast.success(isEdit ? 'Factura actualizada y PDF generado' : 'Factura creada y PDF generado');
+      } else {
+        toast.success(isEdit ? 'Factura actualizada' : 'Factura creada');
+      }
+    } catch (pdfErr) {
+      if (import.meta.env.DEV) console.error('PDF generation failed:', pdfErr);
+      toast.success(isEdit ? 'Factura actualizada' : 'Factura creada');
+    }
+
+    onClose();
+  };
+
+  const activeServices = services.filter(s => s.activo);
+
+  return (
+    <Modal open onClose={onClose} title={isEdit ? 'Editar factura' : t.new_invoice} size="lg">
+      <div className="space-y-4">
+
+        {/* Invoice number + Client + Date + Payment + Location */}
+        <div className="grid grid-cols-5 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">Nº Factura</label>
+            <input
+              type="text"
+              value={form.numero}
+              onChange={e => setField('numero', e.target.value)}
+              placeholder="NP-2026-001"
+              className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 font-mono"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">Cliente *</label>
+            <select
+              value={form.clienteId}
+              onChange={e => { setField('clienteId', e.target.value); setShowConsultations(false); }}
+              className={`w-full px-3 py-2 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors.clienteId ? 'border-danger' : 'border-sage-300'}`}
+            >
+              <option value="">Seleccionar cliente...</option>
+              {[...clients].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(c => (
+                <option key={c.id} value={c.id}>{c.nombre}</option>
+              ))}
+            </select>
+            {errors.clienteId && <p className="text-xs text-danger mt-1">{errors.clienteId}</p>}
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">Fecha</label>
+            <input
+              type="date"
+              value={form.fecha}
+              onChange={e => setField('fecha', e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">Método de pago</label>
+            <select
+              value={form.metodoPago}
+              onChange={e => setField('metodoPago', e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+            >
+              <option value="">Sin especificar</option>
+              <option value="efectivo">Efectivo</option>
+              <option value="transferencia">Transferencia</option>
+              <option value="bizum">Bizum</option>
+              <option value="tarjeta">Tarjeta</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">Lugar de atención</label>
+            <select
+              value={form.locationId}
+              onChange={e => setField('locationId', e.target.value)}
+              className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+            >
+              <option value="">Sin especificar</option>
+              {(config?.locations || []).map(loc => (
+                <option key={loc.id} value={loc.id}>{loc.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Estado chips */}
+        <div>
+          <label className="block text-xs font-medium text-sage-600 mb-1">Estado</label>
+          <div className="flex gap-2">
+            {['pendiente', 'pagada', 'anulada'].map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setField('estado', s)}
+                className={`px-3 py-1 text-xs rounded-badge transition-colors ${
+                  form.estado === s ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
+                }`}
+              >
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Items table */}
+        <div>
+          <label className="block text-xs font-medium text-sage-600 mb-2">Conceptos *</label>
+          {errors.items && <p className="text-xs text-danger mb-2">{errors.items}</p>}
+          <div className="border border-sage-200 rounded-soft overflow-hidden">
+            {/* Table header */}
+            <div className="grid grid-cols-[1fr_56px_96px_80px_32px] gap-0 bg-sage-50 border-b border-sage-200 px-2 py-1.5">
+              <span className="text-xs font-medium text-sage-500">Descripción</span>
+              <span className="text-xs font-medium text-sage-500 text-center">Cant.</span>
+              <span className="text-xs font-medium text-sage-500 text-right">Precio unit.</span>
+              <span className="text-xs font-medium text-sage-500 text-right">Importe</span>
+              <span />
+            </div>
+
+            {/* Item rows */}
+            {form.items.map((item, idx) => {
+              const lineTotal = (parseFloat(item.cantidad) || 0) * (parseFloat(item.precioUnitario) || 0);
+              return (
+                <div
+                  key={item.id}
+                  className="grid grid-cols-[1fr_56px_96px_80px_32px] gap-0 items-center border-b border-sage-100 last:border-b-0 px-2 py-1.5"
+                >
+                  <div>
+                    <input
+                      type="text"
+                      value={item.descripcion}
+                      onChange={e => updateItem(item.id, 'descripcion', e.target.value)}
+                      placeholder="Descripción del servicio..."
+                      className={`w-full px-2 py-1 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors[`item_desc_${idx}`] ? 'border-danger' : 'border-sage-200'}`}
+                    />
+                    {errors[`item_desc_${idx}`] && <p className="text-[10px] text-danger mt-0.5">{errors[`item_desc_${idx}`]}</p>}
+                  </div>
+                  <div className="px-1">
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={item.cantidad}
+                      onChange={e => updateItem(item.id, 'cantidad', e.target.value)}
+                      className={`w-full px-1.5 py-1 text-sm text-center border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors[`item_qty_${idx}`] ? 'border-danger' : 'border-sage-200'}`}
+                    />
+                  </div>
+                  <div className="px-1">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={item.precioUnitario}
+                      onChange={e => updateItem(item.id, 'precioUnitario', e.target.value)}
+                      placeholder="0.00"
+                      className={`w-full px-1.5 py-1 text-sm text-right border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors[`item_price_${idx}`] ? 'border-danger' : 'border-sage-200'}`}
+                    />
+                  </div>
+                  <div className="text-right pr-1">
+                    <span className="text-sm font-mono text-sage-700">{fmt(lineTotal)}</span>
+                  </div>
+                  <div className="flex justify-center">
+                    <button
+                      type="button"
+                      onClick={() => removeItem(item.id)}
+                      className="p-1 text-sage-300 hover:text-danger transition-colors"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
+              );
+            })}
+          </div>
+
+          {/* Add buttons */}
+          <div className="flex flex-wrap gap-2 mt-2">
+            <button
+              type="button"
+              onClick={addManualItem}
+              className="flex items-center gap-1 px-2.5 py-1 text-xs border border-sage-300 rounded-button text-sage-600 hover:bg-sage-50 transition-colors"
+            >
+              <Plus size={11} /> Añadir línea
+            </button>
+
+            {activeServices.length > 0 && (
+              <select
+                defaultValue=""
+                onChange={e => { if (e.target.value) { addServiceItem(e.target.value); e.target.value = ''; } }}
+                className="px-2.5 py-1 text-xs border border-sage-300 rounded-button bg-white text-sage-600 hover:bg-sage-50 focus:outline-none focus:border-wellness-400 cursor-pointer"
+              >
+                <option value="" disabled>+ Añadir servicio...</option>
+                {activeServices.map(svc => (
+                  <option key={svc.id} value={svc.id}>{svc.nombre} — {svc.precio.toFixed(2)} €</option>
+                ))}
+              </select>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Tipus de document — només per a nous documents */}
-                {!invoice && (
-                    <div className="flex gap-2 p-1 bg-sand-100 rounded-soft w-fit">
-                        {[{ v: 'factura', l: 'Factura' }, { v: 'presupuesto', l: 'Presupuesto' }].map(({ v, l }) => (
-                            <button key={v} type="button"
-                                className={`px-4 py-1.5 rounded-button text-sm font-medium transition-all ${form.tipoDocumento === v ? 'bg-terra-400 text-white' : 'text-sand-600 hover:text-sand-800'}`}
-                                onClick={() => setForm(f => ({ ...f, tipoDocumento: v }))}>
-                                {l}
-                            </button>
-                        ))}
-                    </div>
-                )}
+            {form.clienteId && unbilledConsultations.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowConsultations(v => !v)}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs border border-wellness-300 rounded-button text-wellness-600 hover:bg-wellness-50 transition-colors"
+              >
+                <Plus size={11} /> Añadir consultas ({unbilledConsultations.length})
+              </button>
+            )}
+          </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                    <Select label="Cliente" value={form.clienteId}
-                        onChange={e => { setForm({ ...form, clienteId: e.target.value }); setErrors(p => ({ ...p, clienteId: undefined })); }}
-                        options={[{ value: '', label: 'Seleccionar...' }, ...sortedClients.map(c => ({ value: c.id, label: c.nombre }))]}
-                        error={errors.clienteId} disabled={isLocked} />
-                    <Input label={`Código ${form.tipoDocumento === 'presupuesto' ? 'Presupuesto' : 'Factura'} (COD)`}
-                        value={form.numero}
-                        onChange={e => { setForm({ ...form, numero: e.target.value }); setErrors(p => ({ ...p, numero: undefined })); }}
-                        placeholder="Auto-generado" error={errors.numero} disabled={isLocked} />
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                    <Input label="Fecha Inicio" type="date" value={form.fecha}
-                        onChange={e => { setForm({ ...form, fecha: e.target.value }); setErrors(p => ({ ...p, fecha: undefined })); }}
-                        error={errors.fecha} disabled={isLocked} />
-                    <Input label="Fecha Fin" type="date" value={form.fechaFin || ''}
-                        onChange={e => setForm({ ...form, fechaFin: e.target.value })} disabled={isLocked} />
-                    <Input label="Fecha Envío (FAC.DATA)" type="date" value={form.fechaFacturacion || ''}
-                        onChange={e => setForm({ ...form, fechaFacturacion: e.target.value })} disabled={isLocked} />
-                </div>
-                <div className="grid grid-cols-3 gap-4">
-                    <Select label="Tipo" value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })}
-                        options={[{ value: 'classic', label: 'Importe fijo' }, { value: 'days', label: 'Por jornadas' }]}
-                        disabled={isLocked} />
-                    <Select label="Idioma" value={form.idioma} onChange={e => setForm({ ...form, idioma: e.target.value })}
-                        options={[{ value: 'es', label: 'Castellano' }, { value: 'ca', label: 'Català' }]}
-                        disabled={isLocked} />
-                    <Select label="Estado" value={form.estado} onChange={e => setForm({ ...form, estado: e.target.value })}
-                        options={[
-                            { value: 'borrador', label: 'Borrador' },
-                            { value: 'emitida', label: 'Emitida' },
-                            { value: 'pagada', label: 'Pagada' },
-                            { value: 'anulada', label: 'Anulada' },
-                        ]} />
-                </div>
-                <Input label="Concepto (WORK)" value={form.concepto}
-                    onChange={e => { setForm({ ...form, concepto: e.target.value }); setErrors(p => ({ ...p, concepto: undefined })); }}
-                    placeholder="Descripción del servicio..." error={errors.concepto} disabled={isLocked} />
+          {/* Unbilled consultations checklist */}
+          {showConsultations && unbilledConsultations.length > 0 && (
+            <div className="mt-2 border border-wellness-200 rounded-soft bg-wellness-50 p-3 space-y-1.5 max-h-40 overflow-y-auto">
+              <p className="text-xs font-medium text-wellness-700 mb-2">Consultas completadas sin facturar:</p>
+              {unbilledConsultations.sort((a, b) => b.fecha.localeCompare(a.fecha)).map(c => {
+                const alreadyAdded = form.items.some(item => item.consultationId === c.id);
+                return (
+                  <div key={c.id} className="flex items-center justify-between gap-2">
+                    <span className="text-xs text-sage-700">
+                      {c.tipo || 'Consulta'} — {formatDate(c.fecha)}{c.hora ? ` ${c.hora}` : ''}
+                    </span>
+                    {alreadyAdded ? (
+                      <span className="text-[10px] text-success font-medium">Añadida</span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => addConsultationItem(c)}
+                        className="text-[10px] px-2 py-0.5 bg-wellness-400 text-white rounded-badge hover:bg-wellness-500 transition-colors"
+                      >
+                        Añadir
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
-                <Input label="Link Dropbox (Opcional)" value={form.dropboxLink || ''}
-                    onChange={e => setForm({ ...form, dropboxLink: e.target.value })}
-                    placeholder="https://www.dropbox.com/s/..." disabled={isLocked} />
+        {/* Tax + Totals */}
+        <div className="bg-sage-50 rounded-soft p-3 space-y-2">
+          {/* Tax inputs */}
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-sage-600 whitespace-nowrap">IVA %</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={form.ivaPct}
+                onChange={e => setField('ivaPct', parseFloat(e.target.value) || 0)}
+                className="w-16 px-2 py-1 text-sm text-center border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-medium text-sage-600 whitespace-nowrap">IRPF %</label>
+              <input
+                type="number"
+                min="0"
+                max="100"
+                step="1"
+                value={form.irpfPct}
+                onChange={e => setField('irpfPct', parseFloat(e.target.value) || 0)}
+                className="w-16 px-2 py-1 text-sm text-center border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+              />
+              <div className="flex gap-1">
+                {[0, 7, 15].map(pct => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() => setField('irpfPct', pct)}
+                    className={`px-2 py-0.5 text-[10px] rounded-badge transition-colors ${
+                      form.irpfPct === pct ? 'bg-sage-700 text-white' : 'bg-sage-200 text-sage-600 hover:bg-sage-300'
+                    }`}
+                  >
+                    {pct}%
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
-                {form.tipo === 'classic' ? (
-                    <Input label="Base Imponible (€)" type="number" step="0.01" value={form.baseImponible}
-                        onChange={e => setForm({ ...form, baseImponible: parseFloat(e.target.value) || 0 })}
-                        disabled={isLocked} />
-                ) : (
-                    <div className="grid grid-cols-2 gap-4">
-                        <Input label="Jornadas" type="number" step="0.5" value={form.jornadas}
-                            onChange={e => setForm({ ...form, jornadas: parseFloat(e.target.value) || 0 })}
-                            disabled={isLocked} />
-                        <Input label="Tarifa/día (€)" type="number" step="0.01" value={form.tarifaDia}
-                            onChange={e => setForm({ ...form, tarifaDia: parseFloat(e.target.value) || 0 })}
-                            disabled={isLocked} />
-                    </div>
-                )}
-                <div className="grid grid-cols-2 gap-4">
-                    <Input label="IVA (%)" type="number" value={form.ivaPorcentaje}
-                        onChange={e => setForm({ ...form, ivaPorcentaje: parseFloat(e.target.value) || 0 })}
-                        disabled={isLocked} />
-                    <Input label="IRPF (%)" type="number" value={form.irpfPorcentaje}
-                        onChange={e => setForm({ ...form, irpfPorcentaje: parseFloat(e.target.value) || 0 })}
-                        disabled={isLocked} />
-                </div>
+          {/* Totals */}
+          <div className="border-t border-sage-200 pt-2 space-y-1">
+            <div className="flex justify-between text-xs text-sage-600">
+              <span>Base imponible</span>
+              <span className="font-mono">{fmt(totals.baseImponible)} €</span>
+            </div>
+            {form.ivaPct > 0 && (
+              <div className="flex justify-between text-xs text-sage-600">
+                <span>IVA ({form.ivaPct}%)</span>
+                <span className="font-mono">+{fmt(totals.ivaImporte)} €</span>
+              </div>
+            )}
+            {form.ivaPct === 0 && (
+              <div className="flex justify-between text-xs text-sage-400 italic">
+                <span>Exento de IVA</span>
+                <span className="font-mono">0,00 €</span>
+              </div>
+            )}
+            {form.irpfPct > 0 && (
+              <div className="flex justify-between text-xs text-sage-600">
+                <span>IRPF (-{form.irpfPct}%)</span>
+                <span className="font-mono text-danger">-{fmt(totals.irpfImporte)} €</span>
+              </div>
+            )}
+            <div className="flex justify-between text-sm font-bold text-sage-900 border-t border-sage-300 pt-1.5 mt-1">
+              <span>TOTAL</span>
+              <span className="font-mono text-terra-500">{fmt(totals.total)} €</span>
+            </div>
+          </div>
+        </div>
 
-                <Card className={`p-4 bg-sand-50 ${errors.importe ? 'border border-danger/20' : ''}`}>
-                    <div className="space-y-2 text-sm">
-                        <div className="flex justify-between"><span className="text-sand-600">Base Imponible</span><span className="text-sand-900">{formatCurrency(calc.subtotal)}</span></div>
-                        <div className="flex justify-between"><span className="text-sand-600">IVA ({form.ivaPorcentaje}%)</span><span className="text-success">+{formatCurrency(calc.iva)}</span></div>
-                        <div className="flex justify-between"><span className="text-sand-600">IRPF ({form.irpfPorcentaje}%)</span><span className="text-danger">-{formatCurrency(calc.irpf)}</span></div>
-                        <div className="flex justify-between pt-2 border-t border-sand-300"><span className="text-sand-900 font-medium">Total</span><span className="text-sand-900 font-bold text-lg">{formatCurrency(calc.total)}</span></div>
-                    </div>
-                    {errors.importe && <p className="text-danger text-xs mt-2">{errors.importe}</p>}
-                </Card>
+        {/* Notes */}
+        <div>
+          <label className="block text-xs font-medium text-sage-600 mb-1">Notas</label>
+          <Textarea
+            value={form.notas}
+            onChange={e => setField('notas', e.target.value)}
+            rows={2}
+            placeholder="Observaciones..."
+          />
+        </div>
+      </div>
 
-                {/* Secció plantilla recurrent (#8) — només per a factures */}
-                {form.tipoDocumento === 'factura' && !isLocked && (
-                    <div className="border border-sand-300 rounded-soft overflow-hidden">
-                        <button type="button"
-                            className="w-full flex items-center justify-between px-4 py-3 bg-sand-50 hover:bg-sand-100 transition-colors text-sm"
-                            onClick={() => setShowRecurring(v => !v)}>
-                            <div className="flex items-center gap-2 text-sand-700">
-                                <RefreshCw size={14} />
-                                <span>Plantilla recurrente</span>
-                                {form.esPlantilla && <span className="ml-1 px-2 py-0.5 bg-terra-400/30 text-terra-300 rounded-full text-xs">{form.periodicidad}</span>}
-                            </div>
-                            {showRecurring ? <ChevronDown size={14} className="text-sand-500" /> : <ChevronRight size={14} className="text-sand-500" />}
-                        </button>
-                        {showRecurring && (
-                            <div className="p-4 space-y-4 bg-sand-50">
-                                <label className="flex items-center gap-3 cursor-pointer">
-                                    <input type="checkbox" checked={form.esPlantilla}
-                                        onChange={e => setForm(f => ({ ...f, esPlantilla: e.target.checked }))}
-                                        className="w-4 h-4 accent-blue-500" />
-                                    <span className="text-sm text-sand-700">Usar como plantilla para generar facturas recurrentes</span>
-                                </label>
-                                {form.esPlantilla && (
-                                    <div className="grid grid-cols-2 gap-4">
-                                        <Select label="Periodicidad" value={form.periodicidad || 'mensual'}
-                                            onChange={e => setForm(f => ({ ...f, periodicidad: e.target.value }))}
-                                            options={[
-                                                { value: 'mensual', label: 'Mensual' },
-                                                { value: 'trimestral', label: 'Trimestral' },
-                                                { value: 'semestral', label: 'Semestral' },
-                                                { value: 'anual', label: 'Anual' },
-                                            ]} />
-                                        <Input label="Próxima generación" type="date"
-                                            value={form.proximaFecha || ''}
-                                            onChange={e => setForm(f => ({ ...f, proximaFecha: e.target.value }))} />
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                )}
-
-                <div className="flex justify-end gap-3 pt-4">
-                    <Button type="button" variant="ghost" onClick={onClose}>Cancelar</Button>
-                    {!isLocked && <Button type="submit">Guardar</Button>}
-                </div>
-            </form>
-        </Modal>
-    );
+      <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
+        <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+        <Button variant="primary" onClick={handleSave}>{t.save}</Button>
+      </div>
+    </Modal>
+  );
 };
+
+export default InvoiceModal;

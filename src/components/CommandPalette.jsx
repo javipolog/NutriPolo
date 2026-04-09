@@ -1,21 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, Home, FileText, Users, Wallet, Calculator, Settings, Palette, ArrowRight, Euro, X } from 'lucide-react';
-import { useStore, formatCurrency, formatDateShort } from '../stores/store';
-
-// ============================================
-// COMMAND PALETTE (#15)
-// Accés ràpid a tot: Ctrl+K
-// ============================================
-
-const SECTIONS = [
-  { id: 'dashboard', label: 'Dashboard', icon: Home, description: 'Vista general' },
-  { id: 'invoices', label: 'Facturas', icon: FileText, description: 'Gestión de facturas y presupuestos' },
-  { id: 'clients', label: 'Clientes', icon: Users, description: 'Directorio de clientes' },
-  { id: 'expenses', label: 'Gastos', icon: Wallet, description: 'Registro de gastos' },
-  { id: 'taxes', label: 'Impuestos', icon: Calculator, description: 'Modelos 303 y 130' },
-  { id: 'design', label: 'Diseño', icon: Palette, description: 'Editor de plantillas PDF' },
-  { id: 'settings', label: 'Configuración', icon: Settings, description: 'Ajustes de la aplicación' },
-];
+import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X } from 'lucide-react';
+import useStore, { formatCurrency, formatDateShort } from '../stores/store';
+import { useT } from '../i18n';
 
 const highlight = (text, query) => {
   if (!query) return text;
@@ -24,24 +10,36 @@ const highlight = (text, query) => {
   return (
     <>
       {text.slice(0, idx)}
-      <mark className="bg-terra-100 text-terra-600 rounded">{text.slice(idx, idx + query.length)}</mark>
+      <mark className="bg-wellness-100 text-wellness-600 rounded">{text.slice(idx, idx + query.length)}</mark>
       {text.slice(idx + query.length)}
     </>
   );
 };
 
 export const CommandPalette = ({ open, onClose }) => {
-  const {
-    invoices, clients, expenses, setCurrentView,
-    setInvoiceSearch, setInvoiceFilters,
-    setExpenseSearch, setExpenseFilters,
-  } = useStore();
+  const clients = useStore(s => s.clients);
+  const consultations = useStore(s => s.consultations);
+  const nutritionPlans = useStore(s => s.nutritionPlans);
+  const invoices = useStore(s => s.invoices);
+  const setCurrentView = useStore(s => s.setCurrentView);
+  const setSelectedClientId = useStore(s => s.setSelectedClientId);
+
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef(null);
   const listRef = useRef(null);
+  const t = useT();
 
-  // Reiniciar estat al obrir
+  const SECTIONS = useMemo(() => [
+    { id: 'dashboard', label: t.nav_dashboard, icon: Home,          description: 'Panel de control y resumen' },
+    { id: 'agenda',    label: t.nav_agenda,    icon: Calendar,      description: 'Citas y calendario' },
+    { id: 'clients',   label: t.nav_clients,   icon: Users,         description: 'Gestión de clientes' },
+    { id: 'plans',     label: t.nav_plans,     icon: ClipboardList, description: 'Planes nutricionales' },
+    { id: 'invoices',  label: t.nav_invoices,  icon: Receipt,       description: 'Facturación y pagos' },
+    { id: 'services',  label: t.nav_services,  icon: Package,       description: 'Catálogo de servicios' },
+    { id: 'settings',  label: t.nav_settings,  icon: Settings,      description: 'Configuración de la app' },
+  ], [t]);
+
   useEffect(() => {
     if (open) {
       setQuery('');
@@ -50,12 +48,10 @@ export const CommandPalette = ({ open, onClose }) => {
     }
   }, [open]);
 
-  // Resultats filtrats
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     const items = [];
 
-    // Seccions — sempre visibles si no hi ha query, o si coincideixen
     const matchedSections = SECTIONS.filter(s =>
       !q || s.label.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
     );
@@ -65,118 +61,107 @@ export const CommandPalette = ({ open, onClose }) => {
     }
 
     if (q.length >= 2) {
-      // Factures — cerca per número, concepte o client
-      const matchedInvoices = invoices
-        .filter(inv => {
-          const client = clients.find(c => c.id === inv.clienteId);
-          return (
-            (inv.numero || '').toLowerCase().includes(q) ||
-            (inv.concepto || '').toLowerCase().includes(q) ||
-            (client?.nombre || '').toLowerCase().includes(q)
-          );
-        })
-        .slice(0, 5);
-
-      if (matchedInvoices.length > 0) {
-        items.push({ type: 'group', label: 'Facturas' });
-        matchedInvoices.forEach(inv => {
-          const client = clients.find(c => c.id === inv.clienteId);
-          items.push({
-            type: 'invoice',
-            id: inv.id,
-            label: inv.numero,
-            description: `${inv.concepto} · ${client?.nombre || 'Sin cliente'}`,
-            meta: formatCurrency(inv.total),
-            data: inv,
-          });
-        });
-      }
-
-      // Clients — cerca per nom o CIF/NIF
       const matchedClients = clients
         .filter(c =>
           (c.nombre || '').toLowerCase().includes(q) ||
-          (c.cifNif || '').toLowerCase().includes(q) ||
-          (c.email || '').toLowerCase().includes(q)
+          (c.email || '').toLowerCase().includes(q) ||
+          (c.telefono || '').toLowerCase().includes(q)
         )
         .slice(0, 5);
-
       if (matchedClients.length > 0) {
         items.push({ type: 'group', label: 'Clientes' });
-        matchedClients.forEach(c => {
+        matchedClients.forEach(c => items.push({
+          type: 'client', id: c.id, label: c.nombre,
+          description: [c.email, c.telefono].filter(Boolean).join(' · '),
+          data: c,
+        }));
+      }
+
+      const matchedConsultations = consultations
+        .filter(c => {
+          const client = clients.find(x => x.id === c.clienteId);
+          return (client?.nombre || '').toLowerCase().includes(q) || (c.fecha || '').includes(q);
+        })
+        .slice(0, 3);
+      if (matchedConsultations.length > 0) {
+        items.push({ type: 'group', label: 'Consultas' });
+        matchedConsultations.forEach(c => {
+          const client = clients.find(x => x.id === c.clienteId);
           items.push({
-            type: 'client',
-            id: c.id,
-            label: c.nombre,
-            description: c.cifNif || c.email || '',
+            type: 'consultation', id: c.id,
+            label: client?.nombre || 'Sin cliente',
+            description: `${formatDateShort(c.fecha)} · ${c.tipo || ''} · ${c.estado}`,
             data: c,
           });
         });
       }
 
-      // Gastos — cerca per proveïdor o concepte
-      const matchedExpenses = expenses
-        .filter(e =>
-          (e.proveedor || '').toLowerCase().includes(q) ||
-          (e.concepto || '').toLowerCase().includes(q)
-        )
+      const matchedPlans = nutritionPlans
+        .filter(p => {
+          const client = clients.find(x => x.id === p.clienteId);
+          return (p.nombre || '').toLowerCase().includes(q) || (client?.nombre || '').toLowerCase().includes(q);
+        })
         .slice(0, 3);
-
-      if (matchedExpenses.length > 0) {
-        items.push({ type: 'group', label: 'Gastos' });
-        matchedExpenses.forEach(e => {
+      if (matchedPlans.length > 0) {
+        items.push({ type: 'group', label: 'Planes nutricionales' });
+        matchedPlans.forEach(p => {
+          const client = clients.find(x => x.id === p.clienteId);
           items.push({
-            type: 'expense',
-            id: e.id,
-            label: e.proveedor || 'Sin proveedor',
-            description: `${e.concepto} · ${formatDateShort(e.fecha)}`,
-            meta: formatCurrency(e.total),
-            data: e,
+            type: 'plan', id: p.id, label: p.nombre,
+            description: `${client?.nombre || ''} · ${p.estado}`,
+            data: p,
+          });
+        });
+      }
+
+      const matchedInvoices = invoices
+        .filter(i => {
+          const client = clients.find(x => x.id === i.clienteId);
+          return (i.numero || '').toLowerCase().includes(q) || (client?.nombre || '').toLowerCase().includes(q);
+        })
+        .slice(0, 3);
+      if (matchedInvoices.length > 0) {
+        items.push({ type: 'group', label: 'Facturas' });
+        matchedInvoices.forEach(i => {
+          const client = clients.find(x => x.id === i.clienteId);
+          items.push({
+            type: 'invoice', id: i.id, label: i.numero,
+            description: `${client?.nombre || ''} · ${formatDateShort(i.fecha)}`,
+            meta: formatCurrency(i.total || i.importe),
+            data: i,
           });
         });
       }
     }
 
     return items;
-  }, [query, invoices, clients, expenses]);
+  }, [query, clients, consultations, nutritionPlans, invoices, SECTIONS]);
 
-  // Índexs seleccionables (exclou grups)
   const selectableItems = results.filter(r => r.type !== 'group');
 
   const handleSelect = (item) => {
     if (item.type === 'section') {
       setCurrentView(item.id);
-    } else if (item.type === 'invoice') {
-      // Navegar a facturas i precarregar cerca pel número de la factura
-      setInvoiceSearch(item.data.numero || '');
-      setInvoiceFilters({ status: 'all', client: 'all', year: 'all', month: 'all' });
-      setCurrentView('invoices');
-    } else if (item.type === 'expense') {
-      // Navegar a gastos i precarregar cerca pel proveïdor
-      setExpenseSearch(item.data.proveedor || '');
-      setExpenseFilters({ year: 'all', period: 'all', category: 'all', groupBy: 'none' });
-      setCurrentView('expenses');
     } else if (item.type === 'client') {
+      setSelectedClientId(item.id);
       setCurrentView('clients');
+    } else if (item.type === 'consultation') {
+      setCurrentView('agenda');
+    } else if (item.type === 'plan') {
+      setCurrentView('plans');
+    } else if (item.type === 'invoice') {
+      setCurrentView('invoices');
     }
     onClose();
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Escape') { onClose(); return; }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setActiveIdx(i => Math.min(i + 1, selectableItems.length - 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setActiveIdx(i => Math.max(i - 1, 0));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      if (selectableItems[activeIdx]) handleSelect(selectableItems[activeIdx]);
-    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, selectableItems.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (selectableItems[activeIdx]) handleSelect(selectableItems[activeIdx]); }
   };
 
-  // Mantenir l'element actiu visible
   useEffect(() => {
     const el = listRef.current?.querySelector('[data-active="true"]');
     if (el) el.scrollIntoView({ block: 'nearest' });
@@ -192,46 +177,42 @@ export const CommandPalette = ({ open, onClose }) => {
       onClick={onClose}
     >
       <div
-        className="w-full max-w-xl bg-white border border-sand-300 rounded-soft shadow-2xl overflow-hidden"
+        className="w-full max-w-xl bg-white border border-sage-300 rounded-soft shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        {/* Input */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-sand-300">
-          <Search size={18} className="text-sand-600 shrink-0" />
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-sage-300">
+          <Search size={18} className="text-sage-600 shrink-0" />
           <input
             ref={inputRef}
             value={query}
             onChange={e => { setQuery(e.target.value); setActiveIdx(0); }}
-            placeholder="Buscar facturas, clientes, secciones..."
-            className="flex-1 bg-transparent text-sand-900 placeholder-sand-500 outline-none text-sm"
+            placeholder="Buscar clientes, consultas, planes..."
+            className="flex-1 bg-transparent text-sage-900 placeholder-sage-500 outline-none text-sm"
           />
           {query && (
-            <button onClick={() => setQuery('')} className="text-sand-500 hover:text-sand-700">
+            <button onClick={() => setQuery('')} className="text-sage-500 hover:text-sage-700">
               <X size={16} />
             </button>
           )}
-          <kbd className="text-[10px] px-1.5 py-0.5 bg-sand-100 text-sand-500 rounded border border-sand-300">ESC</kbd>
+          <kbd className="text-[10px] px-1.5 py-0.5 bg-sage-100 text-sage-500 rounded border border-sage-300">ESC</kbd>
         </div>
 
-        {/* Results */}
         <div ref={listRef} className="max-h-80 overflow-y-auto py-2">
           {results.length === 0 ? (
-            <p className="text-center text-sand-500 text-sm py-8">Sin resultados</p>
+            <p className="text-center text-sage-500 text-sm py-8">Sin resultados</p>
           ) : (
             results.map((item, i) => {
               if (item.type === 'group') {
                 return (
                   <div key={`group-${i}`} className="px-4 py-1.5 mt-1">
-                    <p className="text-[10px] font-semibold text-sand-500 uppercase tracking-wider">{item.label}</p>
+                    <p className="text-[10px] font-semibold text-sage-500 uppercase tracking-wider">{item.label}</p>
                   </div>
                 );
               }
-
               const myIdx = selectableCount++;
               const isActive = myIdx === activeIdx;
-              const Icon = item.icon || (item.type === 'invoice' ? FileText : item.type === 'client' ? Users : item.type === 'expense' ? Wallet : Euro);
-
+              const Icon = item.icon || (item.type === 'client' ? Users : item.type === 'invoice' ? Receipt : item.type === 'plan' ? ClipboardList : Leaf);
               return (
                 <button
                   key={`${item.type}-${item.id || i}`}
@@ -239,33 +220,28 @@ export const CommandPalette = ({ open, onClose }) => {
                   onClick={() => handleSelect(item)}
                   onMouseEnter={() => setActiveIdx(myIdx)}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                    isActive ? 'bg-terra-50 text-terra-500' : 'text-sand-700 hover:bg-sand-100'
+                    isActive ? 'bg-wellness-50 text-wellness-500' : 'text-sage-700 hover:bg-sage-100'
                   }`}
                 >
-                  <div className={`p-1.5 rounded-button ${isActive ? 'bg-terra-400/30' : 'bg-sand-100'}`}>
-                    <Icon size={14} className={isActive ? 'text-terra-400' : 'text-sand-600'} />
+                  <div className={`p-1.5 rounded-button ${isActive ? 'bg-wellness-400/30' : 'bg-sage-100'}`}>
+                    <Icon size={14} className={isActive ? 'text-wellness-400' : 'text-sage-600'} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{highlight(item.label, query)}</p>
-                    {item.description && (
-                      <p className="text-xs text-sand-500 truncate">{item.description}</p>
-                    )}
+                    {item.description && <p className="text-xs text-sage-500 truncate">{item.description}</p>}
                   </div>
-                  {item.meta && (
-                    <span className="text-xs font-mono text-sand-600 shrink-0">{item.meta}</span>
-                  )}
-                  {isActive && <ArrowRight size={14} className="text-terra-400 shrink-0" />}
+                  {item.meta && <span className="text-xs font-mono text-sage-600 shrink-0">{item.meta}</span>}
+                  {isActive && <ArrowRight size={14} className="text-wellness-400 shrink-0" />}
                 </button>
               );
             })
           )}
         </div>
 
-        {/* Footer */}
-        <div className="px-4 py-2 border-t border-sand-300 flex items-center gap-4 text-[10px] text-sand-400">
-          <span><kbd className="bg-sand-100 px-1 rounded">↑↓</kbd> navegar</span>
-          <span><kbd className="bg-sand-100 px-1 rounded">↵</kbd> seleccionar</span>
-          <span><kbd className="bg-sand-100 px-1 rounded">ESC</kbd> cerrar</span>
+        <div className="px-4 py-2 border-t border-sage-300 flex items-center gap-4 text-[10px] text-sage-400">
+          <span><kbd className="bg-sage-100 px-1 rounded">↑↓</kbd> Navegar</span>
+          <span><kbd className="bg-sage-100 px-1 rounded">↵</kbd> Seleccionar</span>
+          <span><kbd className="bg-sage-100 px-1 rounded">ESC</kbd> Cerrar</span>
         </div>
       </div>
     </div>

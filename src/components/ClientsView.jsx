@@ -1,132 +1,209 @@
 import React, { useState, useMemo } from 'react';
-import { Users, Plus, Edit2, Trash2, Search } from 'lucide-react';
-import { Button, Input, Select, Card, EmptyState, useToast, useConfirm } from './UI';
-import { useStore, formatCurrency, generateId, generateClientCode, validateNIFOrCIF } from '../stores/store';
+import { Users, Plus, Edit2, Trash2, Search, MessageCircle, ChevronRight, Phone } from 'lucide-react';
+import { Button, Input, EmptyState, useToast, useConfirm } from './UI';
+import useStore, { formatDate } from '../stores/store';
+import { useT } from '../i18n';
 import { ClientModal } from './ClientModal';
+import { ClientDetailView } from './ClientDetailView';
+import { deleteClientDocumentsDir } from '../services/documentService';
+
+const OBJETIVO_LABELS = {
+  perdida_grasa: 'Pérdida grasa',
+  ganancia_muscular: 'Ganancia muscular',
+  mejora_digestiva: 'Mejora digestiva',
+  rendimiento_deportivo: 'Deporte',
+  dietoterapia: 'Dietoterapia',
+  relacion_alimentacion: 'Relación alimentación',
+};
 
 export const ClientsView = () => {
-  const { clients, invoices, addClient, updateClient, deleteClient } = useStore();
-  const [showModal, setShowModal] = useState(false);
-  const [editingClient, setEditingClient] = useState(null);
-  const [search, setSearch] = useState('');
-  const { confirm, ConfirmDialog } = useConfirm();
+  const clients = useStore(s => s.clients);
+  const deleteClient = useStore(s => s.deleteClient);
+  const selectedClientId = useStore(s => s.selectedClientId);
+  const setSelectedClientId = useStore(s => s.setSelectedClientId);
+  const clientSearch = useStore(s => s.clientSearch);
+  const setClientSearch = useStore(s => s.setClientSearch);
+  const clientFilters = useStore(s => s.clientFilters);
+  const setClientFilters = useStore(s => s.setClientFilters);
+  const config = useStore(s => s.config);
+
+  const t = useT();
   const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
+  const [showModal, setShowModal] = useState(false);
+  const [editClient, setEditClient] = useState(null);
 
-  const [sortOrder, setSortOrder] = useState('volumeDesc');
-
-  const clientStats = useMemo(() => {
-    const stats = {};
-    clients.forEach(c => {
-      const clientInvoices = invoices.filter(i => i.clienteId === c.id && i.estado !== 'anulada');
-      stats[c.id] = {
-        count: clientInvoices.length,
-        total: clientInvoices.reduce((sum, i) => sum + (i.total || 0), 0)
-      };
+  const filtered = useMemo(() => {
+    const q = clientSearch.toLowerCase();
+    return clients.filter(c => {
+      if (q && !(c.nombre || '').toLowerCase().includes(q) &&
+               !(c.email || '').toLowerCase().includes(q) &&
+               !(c.telefono || '').toLowerCase().includes(q)) return false;
+      if (clientFilters.estado !== 'all' && c.estado !== clientFilters.estado) return false;
+      if (clientFilters.objetivo !== 'all' && !(c.objetivos || []).includes(clientFilters.objetivo)) return false;
+      return true;
     });
-    return stats;
-  }, [clients, invoices]);
+  }, [clients, clientSearch, clientFilters]);
 
-  const filteredClients = useMemo(() => {
-    let result = clients.filter(c =>
-      c.nombre?.toLowerCase().includes(search.toLowerCase()) || c.cifNif?.toLowerCase().includes(search.toLowerCase())
-    );
+  // If a client is selected, show detail view
+  if (selectedClientId) {
+    return <ClientDetailView clientId={selectedClientId} onBack={() => setSelectedClientId(null)} />;
+  }
 
-    if (sortOrder === 'volumeDesc') {
-      result.sort((a, b) => (clientStats[b.id]?.total || 0) - (clientStats[a.id]?.total || 0));
-    } else {
-      result.sort((a, b) => a.nombre.localeCompare(b.nombre));
-    }
-
-    return result;
-  }, [clients, search, sortOrder, clientStats]);
-
-  const openNew = () => { setEditingClient(null); setShowModal(true); };
-  const openEdit = (client) => { setEditingClient(client); setShowModal(true); };
-
-  const saveClient = (data) => {
-    if (editingClient) {
-      updateClient(editingClient.id, data);
-      toast.success('Cliente actualizado correctamente');
-    } else {
-      const codigo = data.codigo || generateClientCode(data.nombre);
-      addClient({ ...data, id: generateId(), codigo });
-      toast.success('Cliente creado correctamente');
-    }
-    setShowModal(false);
+  const handleDelete = async (client) => {
+    const ok = await confirm(`¿Eliminar a ${client.nombre}? Se eliminarán también sus consultas, mediciones y documentos.`);
+    if (!ok) return;
+    deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
+    deleteClient(client.id);
+    toast.success(`${client.nombre} eliminado`);
   };
 
-  const handleDelete = async (id) => {
-    if (invoices.some(i => i.clienteId === id)) {
-      toast.error('No se puede eliminar un cliente con facturas asociadas');
-      return;
-    }
-
-    const confirmed = await confirm({
-      title: 'Eliminar cliente',
-      message: '¿Estás seguro de que quieres eliminar este cliente? Esta acción no se puede deshacer.',
-      danger: true
-    });
-
-    if (confirmed) {
-      deleteClient(id);
-      toast.success('Cliente eliminado');
-    }
+  const openWhatsApp = (client) => {
+    const phone = (client.whatsapp || client.telefono || '').replace(/\D/g, '');
+    if (!phone) { toast.error('Sin número de WhatsApp'); return; }
+    const cc = (config.whatsappCountryCode || '34').replace(/\D/g, '');
+    window.open(`https://wa.me/${cc}${phone}`, '_blank');
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 animate-fadeIn">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="font-serif text-2xl font-bold text-sand-900">Clientes</h1>
-          <p className="text-sand-600 mt-1">{clients.length} clientes</p>
+        <h1 className="text-2xl font-bold text-sage-900">{t.clients_title}</h1>
+        <Button
+          variant="primary"
+          onClick={() => { setEditClient(null); setShowModal(true); }}
+          icon={Plus}
+        >
+          {t.new_client}
+        </Button>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-3">
+        <div className="relative flex-1 min-w-48">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+          <Input
+            value={clientSearch}
+            onChange={e => setClientSearch(e.target.value)}
+            placeholder={t.search_clients}
+            className="pl-9"
+          />
         </div>
-        <Button icon={Plus} onClick={openNew}>Nuevo Cliente</Button>
+        <select
+          value={clientFilters.estado}
+          onChange={e => setClientFilters({ estado: e.target.value })}
+          className="px-3 py-2 text-sm bg-white border border-sage-300 rounded-button text-sage-700 focus:outline-none focus:border-wellness-400"
+        >
+          <option value="all">Todos los estados</option>
+          <option value="activo">{t.client_status_active}</option>
+          <option value="inactivo">{t.client_status_inactive}</option>
+          <option value="alta">{t.client_status_alta}</option>
+        </select>
+        <select
+          value={clientFilters.objetivo}
+          onChange={e => setClientFilters({ objetivo: e.target.value })}
+          className="px-3 py-2 text-sm bg-white border border-sage-300 rounded-button text-sage-700 focus:outline-none focus:border-wellness-400"
+        >
+          <option value="all">Todos los objetivos</option>
+          {Object.entries(OBJETIVO_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
       </div>
 
-      <Card className="p-4 flex gap-4">
-        <Input icon={Search} placeholder="Buscar clientes..." value={search} onChange={e => setSearch(e.target.value)} className="flex-1" />
-        <Select
-          value={sortOrder}
-          onChange={e => setSortOrder(e.target.value)}
-          options={[
-            { value: 'volumeDesc', label: 'Por Volumen (€)' },
-            { value: 'nameAsc', label: 'Por Nombre (A-Z)' }
-          ]}
-          className="w-48"
+      {/* Results count */}
+      <p className="text-xs text-sage-500">{filtered.length} cliente{filtered.length !== 1 ? 's' : ''}</p>
+
+      {/* Client list */}
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          title={clients.length === 0 ? t.no_clients : t.no_results}
+          action={clients.length === 0 ? { label: t.new_client, onClick: () => setShowModal(true) } : null}
         />
-      </Card>
+      ) : (
+        <div className="grid gap-3">
+          {filtered.map(client => (
+            <div
+              key={client.id}
+              className="bg-white border border-sage-200 rounded-soft shadow-card hover:shadow-card-hover transition-shadow p-4 flex items-center gap-4"
+            >
+              {/* Avatar */}
+              <div className="w-10 h-10 rounded-full bg-wellness-100 flex items-center justify-center shrink-0 text-wellness-600 font-semibold text-sm">
+                {(client.nombre || '?').charAt(0).toUpperCase()}
+              </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredClients.map(client => {
-          const stats = clientStats[client.id] || { count: 0, total: 0 };
-          return (
-            <Card key={client.id} className="p-6" hover>
-              <div className="flex items-start justify-between mb-3">
-                <span className="bg-terra-400/20 text-terra-400 text-xs font-mono px-2 py-1 rounded">{client.codigo}</span>
-                <div className="text-right">
-                  <p className="text-sand-900 font-semibold">{formatCurrency(stats.total)}</p>
-                  <p className="text-sand-500 text-xs">{stats.count} facturas</p>
+              {/* Info */}
+              <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedClientId(client.id)}>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-sage-900 truncate">{client.nombre}</p>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-badge font-medium ${
+                    client.estado === 'activo'   ? 'bg-success-light text-success' :
+                    client.estado === 'alta'     ? 'bg-warning-light text-warning' :
+                    'bg-sage-100 text-sage-500'
+                  }`}>
+                    {t[`client_status_${client.estado}`] || client.estado}
+                  </span>
                 </div>
+                <div className="flex items-center gap-3 mt-0.5 text-xs text-sage-500">
+                  {client.telefono && <span className="flex items-center gap-1"><Phone size={10} />{client.telefono}</span>}
+                  {client.fechaUltimaConsulta && <span>Última visita: {formatDate(client.fechaUltimaConsulta)}</span>}
+                  {!client.fechaUltimaConsulta && <span className="text-warning">{t.client_no_visits}</span>}
+                </div>
+                {(client.objetivos || []).length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {client.objetivos.slice(0, 3).map(o => (
+                      <span key={o} className="text-[10px] px-1.5 py-0.5 bg-wellness-50 text-wellness-600 rounded-badge">
+                        {OBJETIVO_LABELS[o] || o}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              <h3 className="text-sand-900 font-medium truncate">{client.nombre}</h3>
-              <p className="text-sand-600 text-sm mt-1">{client.cifNif}</p>
-              <p className="text-sand-500 text-sm mt-2 line-clamp-2">{client.direccion}</p>
-              <div className="flex items-center gap-2 mt-4 pt-4 border-t border-sand-300">
-                <Button variant="ghost" size="sm" icon={Edit2} onClick={() => openEdit(client)}>Editar</Button>
-                <Button variant="ghost" size="sm" icon={Trash2} onClick={() => handleDelete(client.id)}>Eliminar</Button>
-              </div>
-            </Card>
-          );
-        })}
-        {filteredClients.length === 0 && (
-          <Card className="col-span-full p-12">
-            <EmptyState icon={Users} title="No hay clientes" description="Añade tu primer cliente para empezar" action={<Button icon={Plus} onClick={openNew}>Añadir Cliente</Button>} />
-          </Card>
-        )}
-      </div>
 
-      <ClientModal open={showModal} onClose={() => setShowModal(false)} onSave={saveClient} client={editingClient} />
+              {/* Actions */}
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => openWhatsApp(client)}
+                  title={t.whatsapp_open}
+                  className="p-2 rounded-button text-sage-400 hover:text-success hover:bg-success-light transition-colors"
+                >
+                  <MessageCircle size={15} />
+                </button>
+                <button
+                  onClick={() => { setEditClient(client); setShowModal(true); }}
+                  className="p-2 rounded-button text-sage-400 hover:text-sage-700 hover:bg-sage-100 transition-colors"
+                >
+                  <Edit2 size={15} />
+                </button>
+                <button
+                  onClick={() => handleDelete(client)}
+                  className="p-2 rounded-button text-sage-400 hover:text-danger hover:bg-danger-light transition-colors"
+                >
+                  <Trash2 size={15} />
+                </button>
+                <button
+                  onClick={() => setSelectedClientId(client.id)}
+                  className="p-2 rounded-button text-sage-400 hover:text-wellness-500 hover:bg-wellness-50 transition-colors"
+                >
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showModal && (
+        <ClientModal
+          client={editClient}
+          onClose={() => { setShowModal(false); setEditClient(null); }}
+        />
+      )}
       {ConfirmDialog}
     </div>
   );
 };
+
+export default ClientsView;

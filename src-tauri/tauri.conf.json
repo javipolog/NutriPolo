@@ -6,8 +6,8 @@
     "distDir": "../dist"
   },
   "package": {
-    "productName": "Contabilidad Autónomo",
-    "version": "1.0.0"
+    "productName": "NutriPolo",
+    "version": "1.1.0"
   },
   "tauri": {
     "allowlist": {
@@ -20,10 +20,11 @@
       "fs": {
         "all": true,
         "scope": [
-          "$APP/*",
-          "$DOCUMENT/*",
-          "$DESKTOP/*",
-          "$DOWNLOAD/*"
+          "$APP/**",
+          "$HOME/**",
+          "$DOCUMENT/**",
+          "$DESKTOP/**",
+          "$DOWNLOAD/**"
         ]
       },
       "path": {
@@ -34,16 +35,17 @@
         "open": true
       },
       "http": {
-        "all": true,
-        "request": true,
+        "all": false,
         "scope": [
-          "https://api.notion.com/*"
+          "https://oauth2.googleapis.com/**",
+          "https://www.googleapis.com/**",
+          "https://accounts.google.com/**"
         ]
       }
     },
     "bundle": {
       "active": true,
-      "category": "Finance",
+      "category": "Medical",
       "copyright": "© 2026 Javier Polo García",
       "deb": {
         "depends": []
@@ -56,8 +58,8 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "identifier": "com.javipolo.contabilidad",
-      "longDescription": "Aplicación de escritorio para gestionar la contabilidad de autónomos. Incluye facturación, gastos, clientes y cálculo de impuestos trimestrales.",
+      "identifier": "com.nutripolo.app",
+      "longDescription": "Aplicación de escritorio para gestionar la consulta nutricional. Gestión de clientes, consultas, planes nutricionales y facturación.",
       "macOS": {
         "entitlements": null,
         "exceptionDomain": "",
@@ -66,8 +68,8 @@
         "signingIdentity": null
       },
       "resources": [],
-      "shortDescription": "Contabilidad para autónomos",
-      "targets": "all",
+      "shortDescription": "Gestión de consulta nutricional",
+      "targets": ["msi", "updater"],
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
@@ -76,17 +78,22 @@
       }
     },
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https://api.notion.com; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com"
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://oauth2.googleapis.com https://www.googleapis.com https://accounts.google.com https://github.com https://*.github.com https://objects.githubusercontent.com"
     },
     "updater": {
-      "active": false
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/javipolog/NutriPolo/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE1N0MwQjc4RTJFNEE5RDIKUldUU3FlVGllQXQ4RmVVdnNtWHdsYzFoRHQzK1hRTzVvcUZnUWdrcy84M0RQcTNEL3B0RkRTYkMK"
     },
     "windows": [
       {
         "fullscreen": false,
         "height": 800,
         "resizable": true,
-        "title": "Contabilidad Autónomo",
+        "title": "NutriPolo",
         "width": 1280,
         "minWidth": 1024,
         "minHeight": 700,

@@ -1,1254 +1,1019 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
-import { save as tauriSaveDialog, open as tauriOpenDialog } from '@tauri-apps/api/dialog';
-import { writeBinaryFile, readTextFile } from '@tauri-apps/api/fs';
-
-// Default configuration
-const defaultConfig = {
-  nombre: 'Javier Polo García',
-  nif: '46088365E',
-  direccion: 'Carrer Gandia 17, baix dreta\n46007 (VALÈNCIA)',
-  email: 'polo@javipolo.com',
-  telefono: '635248644',
-  web: 'javipolo.com',
-  iban: 'ES75 0182 3033 1102 0152 4582',
-  tipoIva: 21,
-  tipoIrpf: 15,
-  idiomaDefecto: 'es',
-  expensesFolder: '',
-  appFont: 'Inter'
-};
 
 // ============================================
-// WRITE QUEUE AMB DEBOUNCE (#3)
-// Evita race conditions quan el watcher i l'usuari escriuen simultàniament
+// TAURI STORAGE — Write queue amb debounce
 // ============================================
 const writeQueue = {};
 const writeTimers = {};
 
-const flushWrite = async (name, value) => {
-  try {
-    await invoke('save_data', { key: name, value });
-  } catch (e) {
-    console.error('Failed to save:', e);
-  }
-};
+function flushWrite(name) {
+  const value = writeQueue[name];
+  if (value === undefined) return;
+  delete writeQueue[name];
+  invoke('save_data', { key: name, value }).catch(() => {});
+}
 
-// Custom storage adapter for Tauri amb write queue
 const tauriStorage = {
   getItem: async (name) => {
     try {
-      const data = await invoke('load_data', { key: name });
-      return data;
+      return await invoke('load_data', { key: name });
     } catch {
-      return null;
+      return localStorage.getItem(name);
     }
   },
   setItem: (name, value) => {
-    // Cancel timer anterior per a aquesta clau
-    if (writeTimers[name]) clearTimeout(writeTimers[name]);
     writeQueue[name] = value;
-    // Debounce 300ms: si arriben múltiples escriptures ràpides, només es fa l'última
-    writeTimers[name] = setTimeout(() => {
-      const val = writeQueue[name];
-      delete writeQueue[name];
-      delete writeTimers[name];
-      flushWrite(name, val);
-    }, 300);
+    clearTimeout(writeTimers[name]);
+    writeTimers[name] = setTimeout(() => flushWrite(name), 300);
   },
   removeItem: async (name) => {
-    // Cancelar qualsevol escriptura pendent
-    if (writeTimers[name]) clearTimeout(writeTimers[name]);
+    clearTimeout(writeTimers[name]);
     delete writeQueue[name];
     delete writeTimers[name];
-    try {
-      await invoke('delete_data', { key: name });
-    } catch (e) {
-      console.error('Failed to delete:', e);
-    }
+    try { await invoke('delete_data', { key: name }); }
+    catch { localStorage.removeItem(name); }
   },
 };
 
-// Fallback to localStorage if Tauri is not available
-const storage = window.__TAURI__ ? createJSONStorage(() => tauriStorage) : createJSONStorage(() => localStorage);
+export function flushAllPending() {
+  Object.keys(writeTimers).forEach(name => {
+    clearTimeout(writeTimers[name]);
+    delete writeTimers[name];
+    flushWrite(name);
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushAllPending);
+}
 
 // ============================================
-// MIGRACIÓ D'ESQUEMA (#21)
-// v0 → v1: normalitzar tipus numèrics i recalcular ivaImporte
-// v1 → v2: Fase 3 - tipoDocumento, pagos, plantilles recurrents, rectificatives
+// UTILITIES
 // ============================================
-const migrateStore = (persistedState, version) => {
-  let state = persistedState;
+export function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+}
 
-  if (version < 1) {
-    state = {
-      ...state,
-      invoices: (state.invoices || []).map(inv => ({
-        ...inv,
-        ivaPorcentaje: Number(inv.ivaPorcentaje) || 21,
-        irpfPorcentaje: Number(inv.irpfPorcentaje) || 15,
-        iva: Number(inv.iva) || 0,
-        irpf: Number(inv.irpf) || 0,
-        total: Number(inv.total) || 0,
-        subtotal: Number(inv.subtotal) || 0,
-      })),
-      expenses: (state.expenses || []).map(exp => ({
-        ...exp,
-        baseImponible: Number(exp.baseImponible) || 0,
-        ivaPorcentaje: Number(exp.ivaPorcentaje) || 0,
-        ivaImporte: parseFloat(
-          (parseFloat(exp.baseImponible || 0) * (parseFloat(exp.ivaPorcentaje || 0) / 100)).toFixed(2)
-        ),
-        total: Number(exp.total) || 0,
-      })),
-      invoiceCounters: state.invoiceCounters || {},
-    };
-  }
+export function formatCurrency(num) {
+  return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(num || 0);
+}
 
-  if (version < 2) {
-    // Afegir nous camps a totes les factures/documents existents
-    state = {
-      ...state,
-      invoices: (state.invoices || []).map(inv => ({
-        ...inv,
-        tipoDocumento: inv.tipoDocumento || 'factura',
-        pagos: inv.pagos || [],
-        esPlantilla: inv.esPlantilla || false,
-        periodicidad: inv.periodicidad || null,
-        proximaFecha: inv.proximaFecha || null,
-        rectificadaId: inv.rectificadaId || null,
-      })),
-    };
-  }
+export function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
 
-  if (version < 3) {
-    // Migrar expenses antics: `deducible` → `deducibleIrpf` + `deducibleIva`
-    state = {
-      ...state,
-      expenses: (state.expenses || []).map(exp => ({
-        ...exp,
-        deducibleIrpf: exp.deducibleIrpf ?? exp.deducible ?? true,
-        deducibleIva:  exp.deducibleIva  ?? exp.deducible ?? true,
-      })),
-    };
-  }
+export function formatDateShort(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
 
-  return state;
+export function todayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
+
+export function calcIMC(peso, altura) {
+  if (!peso || !altura) return null;
+  const h = altura / 100;
+  return Math.round((peso / (h * h)) * 10) / 10;
+}
+
+// ============================================
+// CALENDAR VISIBILITY FILTER
+// ============================================
+export function filterVisibleConsultations(consultations, googleCalendarConfig) {
+  const calendars = googleCalendarConfig?.calendars || [];
+  if (calendars.length === 0) return consultations;
+  // Build set of enabled (non-disabled) calendar IDs
+  const enabledIds = new Set(
+    calendars.filter(c => c.syncMode !== 'disabled').map(c => c.id)
+  );
+  return consultations.filter(c =>
+    // Keep local consultations (no sourceCalendarId) and those from enabled calendars
+    !c.sourceCalendarId || enabledIds.has(c.sourceCalendarId)
+  );
+}
+
+// ============================================
+// INVOICE TOTALS COMPUTATION
+// ============================================
+export function computeInvoiceTotals(items = [], ivaPct = 0, irpfPct = 0) {
+  const baseImponible = items.reduce((sum, item) => {
+    const qty = parseFloat(item.cantidad) || 0;
+    const price = parseFloat(item.precioUnitario) || 0;
+    return sum + qty * price;
+  }, 0);
+  const ivaImporte = Math.round(baseImponible * ivaPct) / 100;
+  const irpfImporte = Math.round(baseImponible * irpfPct) / 100;
+  const total = baseImponible + ivaImporte - irpfImporte;
+  return {
+    baseImponible: Math.round(baseImponible * 100) / 100,
+    ivaImporte: Math.round(ivaImporte * 100) / 100,
+    irpfImporte: Math.round(irpfImporte * 100) / 100,
+    total: Math.round(total * 100) / 100,
+  };
+}
+
+// ============================================
+// DEFAULT DATA
+// ============================================
+const DEFAULT_LOCATIONS = [
+  { id: 'elda',    name: 'Centro Synergia', address: 'C/ Jardines 29, Elda',         type: 'presencial' },
+  { id: 'monovar', name: 'Natura',          address: 'C/ Carlos Tortosa 5, Monóvar', type: 'presencial' },
+  { id: 'online',  name: 'Online',          address: '',                              type: 'online' },
+];
+
+const DEFAULT_SERVICES = [
+  { id: 'svc1', nombre: 'Primera visita',      descripcion: 'Valoración inicial y anamnesis completa', precio: 60,  numSesiones: 1,  duracion: 60, activo: true },
+  { id: 'svc2', nombre: 'Seguimiento mensual', descripcion: 'Consulta de seguimiento mensual',         precio: 40,  numSesiones: 1,  duracion: 45, activo: true },
+  { id: 'svc3', nombre: 'Pack 4 sesiones',     descripcion: 'Bono de 4 consultas de seguimiento',      precio: 140, numSesiones: 4,  duracion: 45, activo: true },
+  { id: 'svc4', nombre: 'Pack 10 sesiones',    descripcion: 'Bono de 10 consultas de seguimiento',     precio: 320, numSesiones: 10, duracion: 45, activo: true },
+  { id: 'svc5', nombre: 'Plan online',         descripcion: 'Seguimiento nutricional online mensual',  precio: 35,  numSesiones: 1,  duracion: 30, activo: true },
+];
+
+// ============================================
+// SCHEMA MIGRATION
+// ============================================
+const STORE_VERSION = 6;
+
+// ── Default invoice design (exported for reuse) ──
+export const DEFAULT_INVOICE_DESIGN = {
+  preset: 'terra',
+  colors: {
+    accent:      '#C15F3C',  // barra superior, labels, totales
+    accentDark:  '#A84E30',  // texto total, IRPF
+    accentMid:   '#E8C4B4',  // líneas decorativas
+    accentLight: '#F5EDE8',  // fondo cabecera tabla, footer, card totales
+    primary:     '#1C1B18',  // texto principal
+    secondary:   '#4A4840',  // texto secundario
+    muted:       '#65635B',  // labels
+    cardBg:      '#FAFAF8',  // filas alternas tabla
+  },
+  fontFamily: 'worksans',    // 'worksans' | 'roboto' | 'helvetica'
+  logo: null,                // { data: 'data:image/...;base64,...', type: 'png'|'jpg', width, height } | null
+  showTagline: true,
+  taglineText: 'Nutrición Clínica',
 };
 
-// Main store
-export const useStore = create(
+function migrateStore(persistedState, version) {
+  if (version < 2) {
+    // v1 → v2: replace calendarId scalar with calendars array
+    const gc = persistedState.state?.config?.googleCalendar;
+    if (gc && 'calendarId' in gc) {
+      const oldCalendarId = gc.calendarId;
+      persistedState.state.config.googleCalendar = {
+        ...gc,
+        calendars: oldCalendarId
+          ? [{ id: oldCalendarId, name: 'Primary', syncMode: 'bidirectional' }]
+          : [],
+      };
+      delete persistedState.state.config.googleCalendar.calendarId;
+
+      // Backfill sourceCalendarId on any consultation that was already synced
+      if (Array.isArray(persistedState.state?.consultations)) {
+        persistedState.state.consultations = persistedState.state.consultations.map(c =>
+          c.googleEventId && !c.sourceCalendarId
+            ? { ...c, sourceCalendarId: oldCalendarId || 'primary' }
+            : c
+        );
+      }
+    }
+  }
+  if (version < 3) {
+    // v2 → v3: convert single-field invoices (concepto+importe) to items array
+    if (Array.isArray(persistedState.state?.invoices)) {
+      persistedState.state.invoices = persistedState.state.invoices.map(inv => {
+        if (inv.items) return inv; // already on new schema
+        const item = {
+          id: generateId(),
+          descripcion: inv.concepto || '',
+          cantidad: 1,
+          precioUnitario: parseFloat(inv.importe) || 0,
+          servicioId: inv.servicioId || null,
+          consultationId: null,
+        };
+        const baseImponible = Math.round((item.precioUnitario) * 100) / 100;
+        return {
+          ...inv,
+          items: [item],
+          ivaPct: 0,
+          irpfPct: 0,
+          baseImponible,
+          ivaImporte: 0,
+          irpfImporte: 0,
+          total: baseImponible,
+        };
+      });
+    }
+  }
+  if (version < 4) {
+    // v3 → v4: add invoiceDesign to config
+    if (!persistedState.state?.config?.invoiceDesign) {
+      persistedState.state.config.invoiceDesign = DEFAULT_INVOICE_DESIGN;
+    }
+  }
+  if (version < 5) {
+    // v4 → v5: add clientDocuments collection
+    if (!persistedState.state?.clientDocuments) {
+      persistedState.state.clientDocuments = [];
+    }
+  }
+  if (version < 6) {
+    // v5 → v6: rename smtpConfig → smtp, add missing config defaults
+    const cfg = persistedState.state?.config;
+    if (cfg) {
+      if (cfg.smtpConfig !== undefined && cfg.smtp === undefined) {
+        cfg.smtp = cfg.smtpConfig;
+      }
+      delete cfg.smtpConfig;
+    }
+  }
+  return persistedState;
+}
+
+// ============================================
+// STORE
+// ============================================
+const useStore = create(
   persist(
     (set, get) => ({
-      // Config
-      config: defaultConfig,
-      setConfig: (config) => set({ config }),
+      // ---- CONFIG ----
+      config: {
+        nombre: 'Raquel Polo García',
+        nif: '',
+        numColegiada: 'CV01944',
+        email: 'nutripoloraquel@gmail.com',
+        telefono: '+34 622 573 834',
+        web: 'https://www.nutripoloraquel.com',
+        direccion: '',
+        locations: DEFAULT_LOCATIONS,
+        consultationTypes: ['Primera visita', 'Seguimiento', 'Revisión', 'Urgencia'],
+        defaultConsultationDuration: 45,
+        appFont: 'Inter',
+        appFontHeading: 'Playfair Display',
+        appFontMono: 'JetBrains Mono',
+        appTheme: 'auto',
+        appLang: 'es',
+        invoiceDesign: DEFAULT_INVOICE_DESIGN,
+        smtpEnabled: false,
+        smtp: null,
+        tipoIva: 0,
+        emailProvider: 'gmail',
+        whatsappCountryCode: '34',
+        googleCalendar: {
+          connected: false,
+          clientId: '',
+          clientSecret: '',
+          accessToken: '',
+          refreshToken: '',
+          expiresAt: 0,
+          calendars: [],  // Array of { id, name, color, accessRole, syncMode: 'bidirectional'|'readonly'|'disabled' }
+          defaultPushCalendarId: null,
+          autoSync: false,
+          userEmail: '',
+        },
+        blockedHours: [],
+        // Each entry: { id, dayOfWeek: 0-6 (0=Lun), startHour: 8-20, endHour: 8-20, label?: string }
+      },
+      updateConfig: (updates) => set(s => ({ config: { ...s.config, ...updates } })),
 
-      // Clients
+      clearGoogleCalendarData: () => set(s => ({
+        config: {
+          ...s.config,
+          googleCalendar: {
+            connected: false,
+            clientId: '',
+            clientSecret: '',
+            accessToken: '',
+            refreshToken: '',
+            expiresAt: 0,
+            calendars: [],
+            defaultPushCalendarId: null,
+            autoSync: false,
+            userEmail: '',
+          },
+        },
+        consultations: s.consultations.map(c => {
+          if (!c.googleEventId) return c;
+          const { googleEventId, lastSyncedAt, googleSummary, sourceCalendarId, ...rest } = c;
+          return rest;
+        }),
+      })),
+
+      // ---- CLIENTS ----
       clients: [],
-      setClients: (clients) => set({ clients }),
-      addClient: (client) => set((state) => ({ clients: [...state.clients, client] })),
-      updateClient: (id, data) => set((state) => ({
-        clients: state.clients.map((c) => (c.id === id ? { ...c, ...data } : c))
-      })),
-      deleteClient: (id) => set((state) => {
-        const item = state.clients.find(c => c.id === id);
-        return {
-          clients: state.clients.filter((c) => c.id !== id),
-          _history: item ? [...state._history.slice(-19), { type: 'delete_client', item }] : state._history,
-          _future: [],
-        };
-      }),
+      selectedClientId: null,
+      setSelectedClientId: (id) => set({ selectedClientId: id }),
 
-      // Invoices i documents (facturas, presupuestos, rectificatives)
-      invoices: [],
-      invoiceCounters: {}, // Comptador persistent per sèrie (mai decreix): { "YY_COD": lastSeq, "P-YY_COD": lastSeq, "R-YY_COD": lastSeq }
-      setInvoices: (invoices) => set({ invoices }),
-      addInvoice: (invoice) => set((state) => {
-        // Actualitzar el comptador de sèrie al crear document nou
-        const parts = (invoice.numero || '').split('_');
-        let newCounters = state.invoiceCounters;
-        if (parts.length >= 3) {
-          const seq = parseInt(parts[parts.length - 1], 10);
-          const series = parts.slice(0, -1).join('_');
-          if (!isNaN(seq) && series) {
-            newCounters = { ...state.invoiceCounters, [series]: Math.max(state.invoiceCounters[series] || 0, seq) };
-          }
-        }
-        return { invoices: [...state.invoices, invoice], invoiceCounters: newCounters };
-      }),
-      updateInvoice: (id, data) => set((state) => ({
-        invoices: state.invoices.map((i) => (i.id === id ? { ...i, ...data } : i))
-      })),
-      deleteInvoice: (id) => set((state) => {
-        const item = state.invoices.find(i => i.id === id);
-        return {
-          invoices: state.invoices.filter((i) => i.id !== id),
-          _history: item ? [...state._history.slice(-19), { type: 'delete_invoice', item }] : state._history,
-          _future: [],
-        };
-      }),
-
-      // Pagaments parcials (#11): afegir o eliminar pagaments d'una factura
-      addPago: (invoiceId, pago) => set((state) => ({
-        invoices: state.invoices.map((inv) => {
-          if (inv.id !== invoiceId) return inv;
-          const pagos = [...(inv.pagos || []), { ...pago, id: generateId() }];
-          const totalPagado = pagos.reduce((sum, p) => sum + (Number(p.importe) || 0), 0);
-          const estado = totalPagado >= (inv.total || 0) ? 'pagada'
-            : totalPagado > 0 ? 'parcial'
-            : inv.estado;
-          return {
-            ...inv, pagos, estado,
-            fechaPago: estado === 'pagada' ? new Date().toISOString().split('T')[0] : inv.fechaPago,
-          };
-        })
-      })),
-      deletePago: (invoiceId, pagoId) => set((state) => ({
-        invoices: state.invoices.map((inv) => {
-          if (inv.id !== invoiceId) return inv;
-          const pagos = (inv.pagos || []).filter(p => p.id !== pagoId);
-          const totalPagado = pagos.reduce((sum, p) => sum + (Number(p.importe) || 0), 0);
-          const estado = totalPagado >= (inv.total || 0) ? 'pagada'
-            : totalPagado > 0 ? 'parcial'
-            : 'emitida';
-          return { ...inv, pagos, estado };
-        })
-      })),
-
-      // Rectificatives (#7): crea una factura rectificativa (negativa) referenciada a l'original
-      createRectificativa: (invoiceId) => {
-        const state = get();
-        const original = state.invoices.find(i => i.id === invoiceId);
-        if (!original) return null;
-
-        const today = new Date().toISOString().split('T')[0];
-        const rectNum = generateDocumentNumber('R', state.clients, state.invoices, original.clienteId, today, state.invoiceCounters);
-
-        const rectificativa = {
-          ...original,
+      addClient: (client) => {
+        const newClient = {
+          ...client,
           id: generateId(),
-          numero: rectNum,
-          tipoDocumento: 'rectificativa',
-          rectificadaId: invoiceId,
-          fecha: today,
-          fechaFin: '',
-          fechaFacturacion: '',
-          estado: 'borrador',
-          pagos: [],
-          esPlantilla: false,
-          periodicidad: null,
-          proximaFecha: null,
-          subtotal: -(original.subtotal || 0),
-          iva: -(original.iva || 0),
-          irpf: -(original.irpf || 0),
-          total: -(original.total || 0),
-          baseImponible: original.tipo === 'classic' ? -(original.baseImponible || 0) : original.baseImponible,
-          concepto: `Rectificativa de ${original.numero}: ${original.concepto}`,
+          fechaAlta: todayISO(),
+          estado: client.estado || 'activo',
+          alergias: client.alergias || [],
+          intolerancias: client.intolerancias || [],
+          patologias: client.patologias || [],
+          objetivos: client.objetivos || [],
+          restriccionesDieteticas: client.restriccionesDieteticas || [],
+          fechaUltimaConsulta: null,
         };
-
-        const parts = rectNum.split('_');
-        const series = parts.slice(0, -1).join('_');
-        const seq = parseInt(parts[parts.length - 1], 10);
-
-        set((s) => ({
-          invoices: [...s.invoices, rectificativa],
-          invoiceCounters: { ...s.invoiceCounters, [series]: Math.max(s.invoiceCounters[series] || 0, seq) },
+        set(s => ({
+          clients: [...s.clients, newClient],
+          _history: [{ type: 'delete_client', item: newClient }, ...s._history].slice(0, 20),
         }));
-        return rectificativa;
+        return newClient;
+      },
+      updateClient: (id, data) => set(s => ({
+        clients: s.clients.map(c => c.id === id ? { ...c, ...data } : c),
+      })),
+      deleteClient: (id) => {
+        const item = get().clients.find(c => c.id === id);
+        set(s => ({
+          clients: s.clients.filter(c => c.id !== id),
+          _history: [{ type: 'delete_client', item }, ...s._history].slice(0, 20),
+        }));
       },
 
-      // Plantilles recurrents (#8): genera una factura nova a partir d'una plantilla
-      generateFromTemplate: (templateId) => {
-        const state = get();
-        const template = state.invoices.find(i => i.id === templateId);
-        if (!template || !template.esPlantilla) return null;
+      // ---- MEASUREMENTS ----
+      measurements: [],
 
-        const today = new Date();
-        const todayStr = today.toISOString().split('T')[0];
-        const numero = generateInvoiceNumber(state.clients, state.invoices, template.clienteId, todayStr, state.invoiceCounters);
+      addMeasurement: (measurement) => {
+        const client = get().clients.find(c => c.id === measurement.clienteId);
+        const imc = (measurement.peso && client?.altura)
+          ? calcIMC(measurement.peso, client.altura)
+          : null;
+        const newM = {
+          ...measurement,
+          id: generateId(),
+          fecha: measurement.fecha || todayISO(),
+          imc,
+        };
+        set(s => ({ measurements: [...s.measurements, newM] }));
+        if (newM.clienteId) {
+          set(s => ({
+            clients: s.clients.map(c =>
+              c.id === newM.clienteId ? { ...c, fechaUltimaConsulta: newM.fecha } : c
+            ),
+          }));
+        }
+        return newM;
+      },
+      updateMeasurement: (id, data) => set(s => ({
+        measurements: s.measurements.map(m => m.id === id ? { ...m, ...data } : m),
+      })),
+      deleteMeasurement: (id) => set(s => ({
+        measurements: s.measurements.filter(m => m.id !== id),
+      })),
 
-        const newInvoice = {
-          ...template,
+      getClientMeasurements: (clienteId) =>
+        get().measurements
+          .filter(m => m.clienteId === clienteId)
+          .sort((a, b) => a.fecha.localeCompare(b.fecha)),
+
+      // ---- CONSULTATIONS ----
+      consultations: [],
+
+      addConsultation: (consultation) => {
+        // Detect sync operations the same way updateConsultation does — sync-pulled
+        // records must NOT get a fresh localUpdatedAt or they'll be pushed back to
+        // Google on the next sync cycle, creating a perpetual loop.
+        const isSyncOp = 'lastSyncedAt' in consultation || 'googleEventId' in consultation;
+        const newC = {
+          ...consultation,
+          id: consultation.id || generateId(),
+          estado: consultation.estado || 'programada',
+          notasPrivadas: consultation.notasPrivadas || '',
+          notasCliente: consultation.notasCliente || '',
+          ...(isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() }),
+        };
+        set(s => ({ consultations: [...s.consultations, newC] }));
+        if (newC.estado === 'completada' && newC.clienteId) {
+          set(s => ({
+            clients: s.clients.map(c =>
+              c.id === newC.clienteId ? { ...c, fechaUltimaConsulta: newC.fecha } : c
+            ),
+          }));
+        }
+        return newC;
+      },
+      updateConsultation: (id, data) => {
+        // Only bump localUpdatedAt for user edits. Sync operations pass lastSyncedAt
+        // or googleEventId so we can distinguish them and avoid falsely marking the
+        // record as locally newer than Google's copy on the next sync.
+        const isSyncOp = 'lastSyncedAt' in data || 'googleEventId' in data;
+        const extra = isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() };
+        set(s => ({ consultations: s.consultations.map(c => c.id === id ? { ...c, ...data, ...extra } : c) }));
+        const updated = get().consultations.find(c => c.id === id);
+        if (updated?.estado === 'completada' && updated?.clienteId) {
+          set(s => ({
+            clients: s.clients.map(c =>
+              c.id === updated.clienteId ? { ...c, fechaUltimaConsulta: updated.fecha } : c
+            ),
+          }));
+        }
+      },
+      resetAgenda: (onlyGoogleSynced = false) => set(s => ({
+        consultations: onlyGoogleSynced
+          ? s.consultations.filter(c => !c.googleEventId)
+          : [],
+        _history: [],
+        _future: [],
+      })),
+
+      removeConsultationsForCalendar: (calendarId) => set(s => ({
+        consultations: s.consultations.filter(c => c.sourceCalendarId !== calendarId),
+      })),
+
+      deleteConsultation: (id) => {
+        const item = get().consultations.find(c => c.id === id);
+        set(s => ({
+          consultations: s.consultations.filter(c => c.id !== id),
+          _history: [{ type: 'delete_consultation', item }, ...s._history].slice(0, 20),
+        }));
+      },
+
+      getTodayConsultations: () => {
+        const today = todayISO();
+        const { consultations, config } = get();
+        return filterVisibleConsultations(consultations, config.googleCalendar)
+          .filter(c => c.fecha === today)
+          .sort((a, b) => (a.hora || '').localeCompare(b.hora || ''));
+      },
+
+      getUpcomingConsultations: (days = 7) => {
+        const today = todayISO();
+        const limit = new Date();
+        limit.setDate(limit.getDate() + days);
+        const limitStr = limit.toISOString().slice(0, 10);
+        const { consultations, config } = get();
+        return filterVisibleConsultations(consultations, config.googleCalendar)
+          .filter(c => c.fecha >= today && c.fecha <= limitStr && c.estado === 'programada')
+          .sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.hora || '').localeCompare(b.hora || ''));
+      },
+
+      getPendingFollowUps: (days = 30) => {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        return get().clients.filter(c =>
+          c.estado === 'activo' &&
+          (!c.fechaUltimaConsulta || c.fechaUltimaConsulta < cutoffStr)
+        );
+      },
+
+      // ---- NUTRITION PLANS ----
+      nutritionPlans: [],
+
+      addNutritionPlan: (plan) => {
+        const newP = {
+          ...plan,
+          id: generateId(),
+          estado: plan.estado || 'borrador',
+          comidas: plan.comidas || [],
+          macros: plan.macros || { proteinas: 0, carbohidratos: 0, grasas: 0 },
+        };
+        set(s => ({ nutritionPlans: [...s.nutritionPlans, newP] }));
+        return newP;
+      },
+      updateNutritionPlan: (id, data) => set(s => ({
+        nutritionPlans: s.nutritionPlans.map(p => p.id === id ? { ...p, ...data } : p),
+      })),
+      deleteNutritionPlan: (id) => {
+        const item = get().nutritionPlans.find(p => p.id === id);
+        set(s => ({
+          nutritionPlans: s.nutritionPlans.filter(p => p.id !== id),
+          _history: [{ type: 'delete_plan', item }, ...s._history].slice(0, 20),
+        }));
+      },
+
+      getClientPlans: (clienteId) =>
+        get().nutritionPlans
+          .filter(p => p.clienteId === clienteId)
+          .sort((a, b) => (b.fechaInicio || '').localeCompare(a.fechaInicio || '')),
+
+      getExpiringPlans: (days = 7) => {
+        const today = todayISO();
+        const limit = new Date();
+        limit.setDate(limit.getDate() + days);
+        const limitStr = limit.toISOString().slice(0, 10);
+        return get().nutritionPlans.filter(p =>
+          p.estado === 'activo' && p.fechaFin && p.fechaFin >= today && p.fechaFin <= limitStr
+        );
+      },
+
+      // ---- CLIENT DOCUMENTS ----
+      clientDocuments: [],
+
+      addClientDocument: (doc) => {
+        const newDoc = {
+          ...doc,
+          id: generateId(),
+          fechaSubida: todayISO(),
+        };
+        set(s => ({ clientDocuments: [...s.clientDocuments, newDoc] }));
+        return newDoc;
+      },
+      updateClientDocument: (id, data) => set(s => ({
+        clientDocuments: s.clientDocuments.map(d => d.id === id ? { ...d, ...data } : d),
+      })),
+      deleteClientDocument: (id) => {
+        const item = get().clientDocuments.find(d => d.id === id);
+        set(s => ({
+          clientDocuments: s.clientDocuments.filter(d => d.id !== id),
+          _history: [{ type: 'delete_document', item }, ...s._history].slice(0, 20),
+        }));
+      },
+      getClientDocuments: (clienteId) =>
+        get().clientDocuments
+          .filter(d => d.clienteId === clienteId)
+          .sort((a, b) => (b.fechaSubida || '').localeCompare(a.fechaSubida || '')),
+
+      // ---- SERVICES ----
+      services: DEFAULT_SERVICES,
+
+      addService: (service) => {
+        const newS = { ...service, id: generateId(), activo: true };
+        set(s => ({ services: [...s.services, newS] }));
+        return newS;
+      },
+      updateService: (id, data) => set(s => ({
+        services: s.services.map(sv => sv.id === id ? { ...sv, ...data } : sv),
+      })),
+      deleteService: (id) => set(s => ({ services: s.services.filter(sv => sv.id !== id) })),
+
+      // ---- INVOICES ----
+      invoices: [],
+      invoiceCounter: 0,
+
+      generateInvoiceNumber: () => {
+        const counter = (get().invoiceCounter || 0) + 1;
+        const year = new Date().getFullYear();
+        return `NP-${year}-${String(counter).padStart(3, '0')}`;
+      },
+
+      addInvoice: (invoice) => {
+        const numero = invoice.numero || get().generateInvoiceNumber();
+        const items = invoice.items || [];
+        const ivaPct = invoice.ivaPct ?? 0;
+        const irpfPct = invoice.irpfPct ?? 0;
+        const totals = computeInvoiceTotals(items, ivaPct, irpfPct);
+        const newI = {
+          ...invoice,
           id: generateId(),
           numero,
-          tipoDocumento: 'factura',
-          esPlantilla: false,
-          periodicidad: null,
-          proximaFecha: null,
-          rectificadaId: null,
-          fecha: todayStr,
-          fechaFin: '',
-          fechaFacturacion: '',
-          estado: 'borrador',
-          pagos: [],
+          estado: invoice.estado || 'pendiente',
+          items,
+          ivaPct,
+          irpfPct,
+          ...totals,
+          // backward-compat fields
+          concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
+          importe: totals.total,
         };
-
-        // Calcular la pròxima data de generació per a la plantilla
-        let proxima = new Date(today);
-        if (template.periodicidad === 'mensual') proxima.setMonth(proxima.getMonth() + 1);
-        else if (template.periodicidad === 'trimestral') proxima.setMonth(proxima.getMonth() + 3);
-        else if (template.periodicidad === 'semestral') proxima.setMonth(proxima.getMonth() + 6);
-        else if (template.periodicidad === 'anual') proxima.setFullYear(proxima.getFullYear() + 1);
-
-        const parts = numero.split('_');
-        const series = parts.slice(0, -1).join('_');
-        const seq = parseInt(parts[parts.length - 1], 10);
-
-        set((s) => ({
-          invoices: [
-            ...s.invoices.map(i => i.id === templateId
-              ? { ...i, proximaFecha: proxima.toISOString().split('T')[0] }
-              : i
-            ),
-            newInvoice,
-          ],
-          invoiceCounters: { ...s.invoiceCounters, [series]: Math.max(s.invoiceCounters[series] || 0, seq) },
+        const match = numero.match(/(\d+)$/);
+        const usedCounter = match ? parseInt(match[1], 10) : get().invoiceCounter + 1;
+        const newCounter = Math.max(get().invoiceCounter + 1, usedCounter);
+        set(s => ({ invoices: [...s.invoices, newI], invoiceCounter: newCounter }));
+        return newI;
+      },
+      updateInvoice: (id, data) => {
+        const existing = get().invoices.find(i => i.id === id);
+        if (!existing) return;
+        const merged = { ...existing, ...data };
+        const items = merged.items || [];
+        const ivaPct = merged.ivaPct ?? 0;
+        const irpfPct = merged.irpfPct ?? 0;
+        const totals = computeInvoiceTotals(items, ivaPct, irpfPct);
+        const updated = {
+          ...merged,
+          ...totals,
+          concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
+          importe: totals.total,
+        };
+        const stateUpdate = { invoices: get().invoices.map(i => i.id === id ? updated : i) };
+        if (data.numero && data.numero !== existing.numero) {
+          const match = data.numero.match(/(\d+)$/);
+          if (match) {
+            const usedCounter = parseInt(match[1], 10);
+            if (usedCounter > get().invoiceCounter) stateUpdate.invoiceCounter = usedCounter;
+          }
+        }
+        set(s => ({ ...stateUpdate }));
+      },
+      deleteInvoice: (id) => {
+        const item = get().invoices.find(i => i.id === id);
+        set(s => ({
+          invoices: s.invoices.filter(i => i.id !== id),
+          _history: [{ type: 'delete_invoice', item }, ...s._history].slice(0, 20),
         }));
-        return newInvoice;
       },
 
-      // Convertir pressupost a factura (#9)
-      convertPresupuestoToFactura: (presupuestoId) => {
-        const state = get();
-        const presupuesto = state.invoices.find(i => i.id === presupuestoId);
-        if (!presupuesto || presupuesto.tipoDocumento !== 'presupuesto') return null;
-
-        const today = new Date().toISOString().split('T')[0];
-        const numero = generateInvoiceNumber(state.clients, state.invoices, presupuesto.clienteId, today, state.invoiceCounters);
-
-        const parts = numero.split('_');
-        const series = parts.slice(0, -1).join('_');
-        const seq = parseInt(parts[parts.length - 1], 10);
-
-        set((s) => ({
-          invoices: s.invoices.map(i => i.id === presupuestoId ? {
-            ...i,
-            tipoDocumento: 'factura',
-            numero,
-            fecha: today,
-            estado: 'borrador',
-            pagos: [],
-            rectificadaId: null,
-          } : i),
-          invoiceCounters: { ...s.invoiceCounters, [series]: Math.max(s.invoiceCounters[series] || 0, seq) },
-        }));
-        return numero;
+      getMonthRevenue: (year, month) => {
+        const prefix = `${year}-${String(month).padStart(2, '0')}`;
+        return get().invoices
+          .filter(i => i.fecha?.startsWith(prefix) && i.estado === 'pagada')
+          .reduce((sum, i) => sum + (i.total || i.importe || 0), 0);
       },
 
-      // Expenses
-      expenses: [],
-      setExpenses: (expenses) => set({ expenses }),
-      addExpense: (expense) => set((state) => ({ expenses: [...state.expenses, expense] })),
-      updateExpense: (id, data) => set((state) => ({
-        expenses: state.expenses.map((e) => (e.id === id ? { ...e, ...data } : e))
-      })),
-      deleteExpense: (id) => set((state) => {
-        const item = state.expenses.find(e => e.id === id);
-        return {
-          expenses: state.expenses.filter((e) => e.id !== id),
-          _history: item ? [...state._history.slice(-19), { type: 'delete_expense', item }] : state._history,
-          _future: [],
-        };
-      }),
-      deleteExpenses: (ids) => set((state) => {
-        const idSet = new Set(ids);
-        const items = state.expenses.filter(e => idSet.has(e.id));
-        return {
-          expenses: state.expenses.filter((e) => !idSet.has(e.id)),
-          _history: items.length > 0 ? [...state._history.slice(-19), { type: 'delete_expenses', items }] : state._history,
-          _future: [],
-        };
-      }),
+      getUnbilledConsultations: (clienteId) => {
+        const { consultations, invoices } = get();
+        const billedIds = new Set(
+          invoices.flatMap(inv => (inv.items || []).map(item => item.consultationId).filter(Boolean))
+        );
+        return consultations.filter(c =>
+          c.clienteId === clienteId &&
+          c.estado === 'completada' &&
+          !billedIds.has(c.id)
+        );
+      },
 
-      // UI State
+      // ---- UI STATE ----
       currentView: 'dashboard',
-      setCurrentView: (view) => set({ currentView: view }),
-
-      // Sidebar col·lapsable (#20)
       sidebarCollapsed: false,
+      appTheme: 'auto',
+      clientSearch: '',
+      clientFilters: { estado: 'all', objetivo: 'all' },
+      consultationFilters: { dateRange: 'week', locationId: 'all', tipo: 'all', estado: 'all' },
+      planFilters: { estado: 'all', clienteId: 'all' },
+      invoiceFilters: { estado: 'all', year: 'all' },
+
+      setCurrentView: (view) => set({ currentView: view }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
-
-      // Columnes visibles a la taula de factures (#18)
-      invoiceVisibleColumns: {
-        cod: true, work: true, cliente: true,
-        importe: false, iva: false, irpf: false,
-        total: true, pagado: true, pendiente: true,
-        status: true, fecha: true,
-      },
-      setInvoiceVisibleColumns: (cols) => set({ invoiceVisibleColumns: cols }),
-
-      // Tema de l'app (#19): 'dark' | 'light' | 'auto'
-      appTheme: 'dark',
       setAppTheme: (theme) => set({ appTheme: theme }),
+      setClientSearch: (v) => set({ clientSearch: v }),
+      setClientFilters: (f) => set(s => ({ clientFilters: { ...s.clientFilters, ...f } })),
+      setConsultationFilters: (f) => set(s => ({ consultationFilters: { ...s.consultationFilters, ...f } })),
+      setPlanFilters: (f) => set(s => ({ planFilters: { ...s.planFilters, ...f } })),
+      setInvoiceFilters: (f) => set(s => ({ invoiceFilters: { ...s.invoiceFilters, ...f } })),
 
-      // Undo/Redo (#16): stack d'operacions reversibles (no persistit)
+      // ---- UNDO/REDO ----
       _history: [],
       _future: [],
-      undo: () => set((state) => {
-        if (state._history.length === 0) return {};
-        const last = state._history[state._history.length - 1];
-        const newHistory = state._history.slice(0, -1);
-        const newFuture = [...state._future, last];
-        let updates = { _history: newHistory, _future: newFuture };
-        switch (last.type) {
-          case 'delete_invoice':
-            updates.invoices = [...state.invoices, last.item];
-            break;
-          case 'delete_client':
-            updates.clients = [...state.clients, last.item];
-            break;
-          case 'delete_expense': {
-            updates.expenses = [...state.expenses, last.item];
-            break;
-          }
-          case 'delete_expenses': {
-            const existingIds = new Set(state.expenses.map(e => e.id));
-            updates.expenses = [...state.expenses, ...last.items.filter(i => !existingIds.has(i.id))];
-            break;
-          }
-        }
-        return updates;
-      }),
-      redo: () => set((state) => {
-        if (state._future.length === 0) return {};
-        const next = state._future[state._future.length - 1];
-        const newFuture = state._future.slice(0, -1);
-        const newHistory = [...state._history, next];
-        let updates = { _history: newHistory, _future: newFuture };
-        switch (next.type) {
-          case 'delete_invoice':
-            updates.invoices = state.invoices.filter(i => i.id !== next.item.id);
-            break;
-          case 'delete_client':
-            updates.clients = state.clients.filter(c => c.id !== next.item.id);
-            break;
-          case 'delete_expense':
-            updates.expenses = state.expenses.filter(e => e.id !== next.item.id);
-            break;
-          case 'delete_expenses': {
-            const ids = new Set(next.items.map(i => i.id));
-            updates.expenses = state.expenses.filter(e => !ids.has(e.id));
-            break;
-          }
-        }
-        return updates;
-      }),
 
-      // Filters & Search Memory
-      invoiceSearch: '',
-      setInvoiceSearch: (invoiceSearch) => set({ invoiceSearch }),
-      invoiceFilters: {
-        status: 'all',
-        client: 'all',
-        year: new Date().getFullYear().toString(),
-        month: 'all'
+      undo: () => {
+        const history = get()._history;
+        if (!history.length) return;
+        const [last, ...rest] = history;
+        set(s => ({ _future: [last, ...s._future].slice(0, 20), _history: rest }));
+        if (last.type === 'delete_client')       set(s => ({ clients:         [last.item, ...s.clients] }));
+        if (last.type === 'delete_consultation') set(s => ({ consultations:  [last.item, ...s.consultations] }));
+        if (last.type === 'delete_plan')         set(s => ({ nutritionPlans: [last.item, ...s.nutritionPlans] }));
+        if (last.type === 'delete_invoice')      set(s => ({ invoices:       [last.item, ...s.invoices] }));
+        if (last.type === 'delete_document')     set(s => ({ clientDocuments:[last.item, ...s.clientDocuments] }));
       },
-      setInvoiceFilters: (invoiceFilters) => set({ invoiceFilters }),
-
-      invoiceSortConfig: { key: 'fecha', direction: 'desc' },
-      setInvoiceSortConfig: (invoiceSortConfig) => set({ invoiceSortConfig }),
-
-      invoiceDocType: 'facturas', // 'facturas' | 'presupuestos'
-      setInvoiceDocType: (invoiceDocType) => set({ invoiceDocType }),
-
-      expenseSortConfig: { key: 'fecha', direction: 'desc' },
-      setExpenseSortConfig: (expenseSortConfig) => set({ expenseSortConfig }),
-
-      expenseSearch: '',
-      setExpenseSearch: (expenseSearch) => set({ expenseSearch }),
-      expenseFilters: {
-        year: new Date().getFullYear().toString(),
-        period: 'all',
-        category: 'all',
-        groupBy: 'none'
+      redo: () => {
+        const future = get()._future;
+        if (!future.length) return;
+        const [next, ...rest] = future;
+        set(s => ({ _history: [next, ...s._history].slice(0, 20), _future: rest }));
+        if (next.type === 'delete_client')       set(s => ({ clients:         s.clients.filter(c => c.id !== next.item.id) }));
+        if (next.type === 'delete_consultation') set(s => ({ consultations:  s.consultations.filter(c => c.id !== next.item.id) }));
+        if (next.type === 'delete_plan')         set(s => ({ nutritionPlans: s.nutritionPlans.filter(p => p.id !== next.item.id) }));
+        if (next.type === 'delete_invoice')      set(s => ({ invoices:       s.invoices.filter(i => i.id !== next.item.id) }));
+        if (next.type === 'delete_document')     set(s => ({ clientDocuments:s.clientDocuments.filter(d => d.id !== next.item.id) }));
       },
-      setExpenseFilters: (expenseFilters) => set({ expenseFilters }),
 
-      dashboardFilters: {
-        year: new Date().getFullYear(),
-        quarter: 'all'
-      },
-      setDashboardFilters: (dashboardFilters) => set({ dashboardFilters }),
-
-      dashboardConfig: {
-        showStats: true,
-        showMainChart: true,
-        showAlerts: true,
-        showDistribution: true,
-        showClients: true,
-        showRecent: true
-      },
-      setDashboardConfig: (updater) => set((state) => {
-        const defaultDashboardConfig = {
-          showStats: true,
-          showMainChart: true,
-          showAlerts: true,
-          showDistribution: true,
-          showClients: true,
-          showRecent: true,
-        };
-        const next = typeof updater === 'function'
-          ? updater(state.dashboardConfig)
-          : updater;
-        return { dashboardConfig: { ...defaultDashboardConfig, ...next } };
-      }),
-
-      // Backup
-      lastBackupDate: null,
-      setLastBackupDate: (date) => set({ lastBackupDate: date }),
-
-      // Integritat de dades (no persistit, es recalcula al boot)
+      // ---- DATA INTEGRITY ----
       integrityWarnings: [],
-      setIntegrityWarnings: (warnings) => set({ integrityWarnings: warnings }),
-
-      // Loading state
       isLoading: false,
-      setIsLoading: (loading) => set({ isLoading: loading }),
+      smtpPassword: '',
+      setSmtpPassword: (p) => set({ smtpPassword: p }),
+
+      validateDataIntegrity: () => {
+        const { clients, consultations, measurements, nutritionPlans, invoices, services, clientDocuments } = get();
+        const clientIds = new Set(clients.map(c => c.id));
+        const serviceIds = new Set(services.map(s => s.id));
+        const warnings = [];
+
+        const orphanedConsultations = consultations.filter(c => c.clienteId && !clientIds.has(c.clienteId));
+        if (orphanedConsultations.length)
+          warnings.push({ type: 'orphaned_consultations', count: orphanedConsultations.length, message: `${orphanedConsultations.length} consultas referencian clientes eliminados` });
+
+        const orphanedMeasurements = measurements.filter(m => !clientIds.has(m.clienteId));
+        if (orphanedMeasurements.length)
+          warnings.push({ type: 'orphaned_measurements', count: orphanedMeasurements.length, message: `${orphanedMeasurements.length} mediciones referencian clientes eliminados` });
+
+        const orphanedPlans = nutritionPlans.filter(p => !clientIds.has(p.clienteId));
+        if (orphanedPlans.length)
+          warnings.push({ type: 'orphaned_plans', count: orphanedPlans.length, message: `${orphanedPlans.length} planes referencian clientes eliminados` });
+
+        const orphanedInvoices = invoices.filter(i =>
+          (i.items || []).some(item => item.servicioId && !serviceIds.has(item.servicioId))
+        );
+        if (orphanedInvoices.length)
+          warnings.push({ type: 'orphaned_invoices', count: orphanedInvoices.length, message: `${orphanedInvoices.length} facturas referencian servicios eliminados` });
+
+        const orphanedDocuments = (clientDocuments || []).filter(d => d.clienteId && !clientIds.has(d.clienteId));
+        if (orphanedDocuments.length)
+          warnings.push({ type: 'orphaned_documents', count: orphanedDocuments.length, message: `${orphanedDocuments.length} documentos referencian clientes eliminados` });
+
+        set({ integrityWarnings: warnings });
+        return warnings;
+      },
+
+      // ---- BACKUP ----
+      lastBackupDate: null,
+
+      runAutoBackup: async () => {
+        const today = todayISO();
+        if (get().lastBackupDate === today) return;
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates } = get();
+        const backup = {
+          version: STORE_VERSION,
+          date: new Date().toISOString(),
+          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates },
+        };
+        try {
+          const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
+          const manifest = manifestRaw ? JSON.parse(manifestRaw) : [];
+          await invoke('save_data', { key: `backup-${today}`, value: JSON.stringify(backup) });
+          const newManifest = [...manifest.filter(d => d !== today), today].slice(-7);
+          await invoke('save_data', { key: 'backup-manifest', value: JSON.stringify(newManifest) });
+          for (const old of manifest.slice(0, Math.max(0, manifest.length - 6))) {
+            await invoke('delete_data', { key: `backup-${old}` }).catch(() => {});
+          }
+          set({ lastBackupDate: today });
+        } catch (e) { if (import.meta.env.DEV) console.warn('Backup failed:', e); }
+      },
+
+      getAutoBackupInfo: async () => {
+        try {
+          const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
+          const manifest = manifestRaw ? JSON.parse(manifestRaw) : [];
+          return { count: manifest.length, lastDate: manifest.length > 0 ? manifest[manifest.length - 1] : null, dates: manifest };
+        } catch { return { count: 0, lastDate: null, dates: [] }; }
+      },
+
+      restoreFromAutoBackup: async (date) => {
+        const raw = await invoke('load_data', { key: `backup-${date}` });
+        const parsed = JSON.parse(raw);
+        const d = parsed.data || parsed;
+        set({
+          clients:        d.clients        || [],
+          measurements:   d.measurements   || [],
+          consultations:  d.consultations  || [],
+          nutritionPlans: d.nutritionPlans || [],
+          services:       d.services       || DEFAULT_SERVICES,
+          invoices:       d.invoices       || [],
+          invoiceCounter: d.invoiceCounter || 0,
+          clientDocuments:d.clientDocuments || [],
+          emailTemplates: d.emailTemplates || null,
+          config: d.config ? { ...get().config, ...d.config } : get().config,
+        });
+      },
+
+      exportDataToZip: async (onProgress) => {
+        const JSZip = (await import('jszip')).default;
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates } = get();
+        const payload = {
+          version: STORE_VERSION,
+          exportDate: new Date().toISOString(),
+          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates },
+        };
+
+        const zip = new JSZip();
+        zip.file('data.json', JSON.stringify(payload, null, 2));
+
+        // Add document files
+        const docs = (clientDocuments || []).filter(d => d.clienteId && d.storedFileName);
+        let skipped = 0;
+        for (let i = 0; i < docs.length; i++) {
+          onProgress?.({ current: i + 1, total: docs.length });
+          try {
+            const { appDataDir } = await import('@tauri-apps/api/path');
+            const base = await appDataDir();
+            const filePath = `${base}documents\\${docs[i].clienteId}\\${docs[i].storedFileName}`;
+            const b64 = await invoke('read_file_as_base64', { path: filePath });
+            const binary = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+            zip.file(`documents/${docs[i].clienteId}/${docs[i].storedFileName}`, binary);
+          } catch {
+            skipped++;
+          }
+        }
+
+        const zipBytes = await zip.generateAsync({ type: 'uint8array' });
+
+        try {
+          const { save } = await import('@tauri-apps/api/dialog');
+          const { writeBinaryFile } = await import('@tauri-apps/api/fs');
+          const path = await save({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip'] }], defaultPath: `nutripolo-backup-${todayISO()}.zip` });
+          if (path) {
+            await writeBinaryFile(path, zipBytes);
+          }
+        } catch {
+          const blob = new Blob([zipBytes], { type: 'application/zip' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `nutripolo-backup-${todayISO()}.zip`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+
+        return { skipped };
+      },
+
+      importDataFromZip: async () => {
+        const { open } = await import('@tauri-apps/api/dialog');
+        const path = await open({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip', 'json'] }] });
+        if (!path) return null;
+
+        // JSON fallback for old backups
+        if (path.endsWith('.json')) {
+          const { readTextFile } = await import('@tauri-apps/api/fs');
+          const raw = await readTextFile(path);
+          const parsed = JSON.parse(raw);
+          const d = parsed.data || parsed;
+          set({
+            clients:        d.clients        || [],
+            measurements:   d.measurements   || [],
+            consultations:  d.consultations  || [],
+            nutritionPlans: d.nutritionPlans || [],
+            services:       d.services       || DEFAULT_SERVICES,
+            invoices:       d.invoices       || [],
+            invoiceCounter: d.invoiceCounter || 0,
+            clientDocuments:d.clientDocuments || [],
+            emailTemplates: d.emailTemplates || null,
+            config: d.config ? { ...get().config, ...d.config } : get().config,
+          });
+          return { documentsRestored: 0 };
+        }
+
+        // ZIP import
+        const JSZip = (await import('jszip')).default;
+        const { readBinaryFile, writeBinaryFile, createDir } = await import('@tauri-apps/api/fs');
+        const { appDataDir } = await import('@tauri-apps/api/path');
+
+        const zipBytes = await readBinaryFile(path);
+        const zip = await JSZip.loadAsync(zipBytes);
+
+        // Restore data.json
+        const dataFile = zip.file('data.json');
+        if (!dataFile) throw new Error('Invalid backup: data.json not found');
+        const dataRaw = await dataFile.async('string');
+        const parsed = JSON.parse(dataRaw);
+        const d = parsed.data || parsed;
+
+        // Restore document files
+        const base = await appDataDir();
+        let documentsRestored = 0;
+        const docFiles = Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir);
+        for (const filePath of docFiles) {
+          try {
+            const parts = filePath.split('/');
+            if (parts.length < 3) continue;
+            const clienteId = parts[1];
+            const storedFileName = parts.slice(2).join('/');
+            const dirPath = `${base}documents\\${clienteId}`;
+            await createDir(dirPath, { recursive: true });
+            const content = await zip.files[filePath].async('uint8array');
+            await writeBinaryFile(`${dirPath}\\${storedFileName}`, content);
+            documentsRestored++;
+          } catch (e) {
+            if (import.meta.env.DEV) console.warn('Failed to restore document:', filePath, e);
+          }
+        }
+
+        // Apply data to store
+        set({
+          clients:        d.clients        || [],
+          measurements:   d.measurements   || [],
+          consultations:  d.consultations  || [],
+          nutritionPlans: d.nutritionPlans || [],
+          services:       d.services       || DEFAULT_SERVICES,
+          invoices:       d.invoices       || [],
+          invoiceCounter: d.invoiceCounter || 0,
+          clientDocuments:d.clientDocuments || [],
+          emailTemplates: d.emailTemplates || null,
+          config: d.config ? { ...get().config, ...d.config } : get().config,
+        });
+
+        return { documentsRestored };
+      },
+
+      // Legacy — kept for backwards compatibility
+      exportDataToJSON: async () => {
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates } = get();
+        const data = JSON.stringify({
+          version: STORE_VERSION,
+          exportDate: new Date().toISOString(),
+          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates },
+        }, null, 2);
+        try {
+          const { save } = await import('@tauri-apps/api/dialog');
+          const { writeBinaryFile } = await import('@tauri-apps/api/fs');
+          const path = await save({ filters: [{ name: 'JSON', extensions: ['json'] }], defaultPath: `nutripolo-backup-${todayISO()}.json` });
+          if (path) {
+            const encoder = new TextEncoder();
+            await writeBinaryFile(path, encoder.encode(data));
+          }
+        } catch {
+          const blob = new Blob([data], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `nutripolo-backup-${todayISO()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      },
+
+      importDataFromJSON: async (mode = 'replace') => {
+        try {
+          const { open } = await import('@tauri-apps/api/dialog');
+          const { readTextFile } = await import('@tauri-apps/api/fs');
+          const path = await open({ filters: [{ name: 'JSON', extensions: ['json'] }] });
+          if (!path) return;
+          const raw = await readTextFile(path);
+          const parsed = JSON.parse(raw);
+          const d = parsed.data || parsed;
+          if (mode === 'replace') {
+            set({
+              clients:        d.clients        || [],
+              measurements:   d.measurements   || [],
+              consultations:  d.consultations  || [],
+              nutritionPlans: d.nutritionPlans || [],
+              services:       d.services       || DEFAULT_SERVICES,
+              invoices:       d.invoices       || [],
+              invoiceCounter: d.invoiceCounter || 0,
+              clientDocuments:d.clientDocuments || [],
+              emailTemplates: d.emailTemplates || null,
+              config: d.config ? { ...get().config, ...d.config } : get().config,
+            });
+          } else {
+            set(s => ({
+              clients:        [...s.clients,        ...(d.clients        || []).filter(c => !s.clients.find(x => x.id === c.id))],
+              measurements:   [...s.measurements,   ...(d.measurements   || []).filter(m => !s.measurements.find(x => x.id === m.id))],
+              consultations:  [...s.consultations,  ...(d.consultations  || []).filter(c => !s.consultations.find(x => x.id === c.id))],
+              nutritionPlans: [...s.nutritionPlans, ...(d.nutritionPlans || []).filter(p => !s.nutritionPlans.find(x => x.id === p.id))],
+              invoices:       [...s.invoices,       ...(d.invoices       || []).filter(i => !s.invoices.find(x => x.id === i.id))],
+              clientDocuments:[...s.clientDocuments, ...(d.clientDocuments|| []).filter(d2=> !s.clientDocuments.find(x => x.id === d2.id))],
+            }));
+          }
+        } catch (e) { throw e; }
+      },
+
+      emailTemplates: null,
     }),
     {
-      name: 'contabilidad-storage',
-      storage,
-      version: 3,
+      name: 'nutripolo-storage',
+      storage: createJSONStorage(() => tauriStorage),
+      version: STORE_VERSION,
       migrate: migrateStore,
-      partialize: (state) => ({
-        config: state.config,
-        clients: state.clients,
-        invoices: state.invoices,
-        invoiceCounters: state.invoiceCounters,
-        expenses: state.expenses,
-        invoiceSearch: state.invoiceSearch,
-        invoiceFilters: state.invoiceFilters,
-        invoiceSortConfig: state.invoiceSortConfig,
-        invoiceDocType: state.invoiceDocType,
-        expenseSortConfig: state.expenseSortConfig,
-        expenseSearch: state.expenseSearch,
-        expenseFilters: state.expenseFilters,
-        dashboardFilters: state.dashboardFilters,
-        dashboardConfig: state.dashboardConfig,
-        lastBackupDate: state.lastBackupDate,
-        sidebarCollapsed: state.sidebarCollapsed,
-        invoiceVisibleColumns: state.invoiceVisibleColumns,
-        appTheme: state.appTheme,
+      partialize: (s) => ({
+        config: s.config,
+        clients: s.clients,
+        measurements: s.measurements,
+        consultations: s.consultations,
+        nutritionPlans: s.nutritionPlans,
+        services: s.services,
+        invoices: s.invoices,
+        invoiceCounter: s.invoiceCounter,
+        clientDocuments: s.clientDocuments,
+        emailTemplates: s.emailTemplates,
+        lastBackupDate: s.lastBackupDate,
+        sidebarCollapsed: s.sidebarCollapsed,
+        appTheme: s.appTheme,
+        clientFilters: s.clientFilters,
+        consultationFilters: s.consultationFilters,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          state.isLoading = false;
+          // Sanitize reader-only calendars — never allow bidirectional on reader calendars
+          const gc = state.config?.googleCalendar;
+          if (gc?.calendars) {
+            let dirty = false;
+            const sanitized = gc.calendars.map(c => {
+              if (c.accessRole === 'reader' && c.syncMode === 'bidirectional') {
+                dirty = true;
+                return { ...c, syncMode: 'disabled' };
+              }
+              return c;
+            });
+            if (dirty) gc.calendars = sanitized;
+            // Clear default if it points to a reader calendar
+            if (gc.defaultPushCalendarId) {
+              const def = gc.calendars.find(c => c.id === gc.defaultPushCalendarId);
+              if (def?.accessRole === 'reader') gc.defaultPushCalendarId = null;
+            }
+          }
+        }
+      },
     }
   )
 );
 
-// Utility functions
-export const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2);
-
-export const formatCurrency = (num) =>
-  new Intl.NumberFormat('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: true }).format(Number(num) || 0) + '€';
-
-export const formatDate = (date) => new Date(date).toLocaleDateString('es-ES');
-
-export const formatDateShort = (date) => {
-  const d = new Date(date);
-  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getFullYear()).slice(-2)}`;
-};
-
-export const generateClientCode = (name) => {
-  const words = name.toUpperCase().replace(/[^A-Z\s]/g, '').split(/\s+/).filter((w) => w.length > 2);
-  if (words.length === 0) return 'XXX';
-  if (words.length === 1) return words[0].slice(0, 3);
-  return words.slice(0, 3).map((w) => w[0]).join('');
-};
-
-export const generateInvoiceNumber = (clients, invoices, clientId, date, counters = {}) => {
-  const year = new Date(date).getFullYear().toString().slice(-2);
-  const client = clients.find((c) => c.id === clientId);
-
-  let code = 'XXX';
-  if (client) {
-    if (client.codigo && client.codigo.length === 3) {
-      code = client.codigo;
-    } else if (client.nombre) {
-      code = generateClientCode(client.nombre);
-    }
-  }
-
-  const series = `${year}_${code}`;
-  const persistentMax = counters[series] || 0;
-
-  const existingMax = invoices.reduce((max, i) => {
-    if (!i.numero) return max;
-    const parts = i.numero.split('_');
-    if (parts.length < 3) return max;
-    const invSeries = parts.slice(0, -1).join('_');
-    if (invSeries !== series) return max;
-    const seq = parseInt(parts[parts.length - 1], 10);
-    return isNaN(seq) ? max : Math.max(max, seq);
-  }, 0);
-
-  const nextSeq = Math.max(persistentMax, existingMax) + 1;
-  return `${series}_${String(nextSeq).padStart(3, '0')}`;
-};
-
-export const calcularFactura = (tipo, data, ivaPct = 21, irpfPct = 15) => {
-  const subtotal = tipo === 'classic' ? (data.baseImponible || 0) : (data.jornadas || 0) * (data.tarifaDia || 0);
-  const iva = subtotal * (ivaPct / 100);
-  const irpf = subtotal * (irpfPct / 100);
-  const total = subtotal + iva - irpf;
-  return { subtotal, iva, irpf, total };
-};
-
-export const getQuarter = (date) => Math.ceil((new Date(date).getMonth() + 1) / 3);
-
-export const distributeInvoiceByMonth = (invoice, field = 'subtotal') => {
-  const amount = invoice[field] || 0;
-  const start = new Date(invoice.fecha);
-  const distribution = {};
-
-  if (!invoice.fechaFin || invoice.fechaFin === invoice.fecha) {
-    const key = `${start.getFullYear()}-${start.getMonth()}`;
-    distribution[key] = amount;
-    return distribution;
-  }
-
-  const end = new Date(invoice.fechaFin);
-
-  if (end < start) {
-    const key = `${start.getFullYear()}-${start.getMonth()}`;
-    distribution[key] = amount;
-    return distribution;
-  }
-
-  const totalDays = Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1;
-  if (totalDays <= 0) {
-    const key = `${start.getFullYear()}-${start.getMonth()}`;
-    distribution[key] = amount;
-    return distribution;
-  }
-
-  let cursor = new Date(start);
-
-  while (cursor <= end) {
-    const year = cursor.getFullYear();
-    const month = cursor.getMonth();
-    const key = `${year}-${month}`;
-
-    const monthStart = (cursor.getFullYear() === start.getFullYear() && cursor.getMonth() === start.getMonth())
-      ? start.getDate()
-      : 1;
-
-    const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
-    const monthEnd = (year === end.getFullYear() && month === end.getMonth())
-      ? end.getDate()
-      : lastDayOfMonth;
-
-    const daysInThisMonth = monthEnd - monthStart + 1;
-    distribution[key] = (daysInThisMonth / totalDays) * amount;
-
-    cursor = new Date(year, month + 1, 1);
-  }
-
-  return distribution;
-};
-
-export const defaultCategories = [
-  'Material de oficina',
-  'Software y suscripciones',
-  'Equipos informáticos',
-  'Telecomunicaciones',
-  'Transporte',
-  'Formación',
-  'Seguros',
-  'Gestoría y asesoría',
-  'Marketing y publicidad',
-  'Suministros',
-  'Servicios profesionales',
-  'Otros'
-];
-
-// ============================================
-// VALIDACIONS NIF/CIF/IBAN
-// ============================================
-
-export const validateNIF = (nif) => {
-  if (!nif) return false;
-  const clean = nif.toUpperCase().replace(/[\s-]/g, '');
-
-  const nifRegex = /^[0-9]{8}[A-Z]$/;
-  if (nifRegex.test(clean)) {
-    const letters = 'TRWAGMYFPDXBNJZSQVHLCKE';
-    const number = parseInt(clean.substring(0, 8), 10);
-    const expectedLetter = letters[number % 23];
-    return clean[8] === expectedLetter;
-  }
-
-  const nieRegex = /^[XYZ][0-9]{7}[A-Z]$/;
-  if (nieRegex.test(clean)) {
-    const letters = 'TRWAGMYFPDXBNJZSQVHLCKE';
-    let nieNumber = clean.substring(1, 8);
-    if (clean[0] === 'X') nieNumber = '0' + nieNumber;
-    else if (clean[0] === 'Y') nieNumber = '1' + nieNumber;
-    else if (clean[0] === 'Z') nieNumber = '2' + nieNumber;
-    const number = parseInt(nieNumber, 10);
-    const expectedLetter = letters[number % 23];
-    return clean[8] === expectedLetter;
-  }
-
-  return false;
-};
-
-export const validateCIF = (cif) => {
-  if (!cif) return false;
-  const clean = cif.toUpperCase().replace(/[\s-]/g, '');
-
-  const cifRegex = /^[ABCDEFGHJNPQRSUVW][0-9]{7}[A-Z0-9]$/;
-  if (!cifRegex.test(clean)) return false;
-
-  const letter = clean[0];
-  const digits = clean.substring(1, 8);
-  const control = clean[8];
-
-  let sumEven = 0;
-  let sumOdd = 0;
-
-  for (let i = 0; i < 7; i++) {
-    const digit = parseInt(digits[i], 10);
-    if (i % 2 === 0) {
-      const doubled = digit * 2;
-      sumOdd += doubled > 9 ? doubled - 9 : doubled;
-    } else {
-      sumEven += digit;
-    }
-  }
-
-  const totalSum = sumEven + sumOdd;
-  const controlDigit = (10 - (totalSum % 10)) % 10;
-  const controlLetter = 'JABCDEFGHI'[controlDigit];
-
-  const lettersRequiringLetter = 'PQRSW';
-  const lettersRequiringNumber = 'ABEH';
-
-  if (lettersRequiringLetter.includes(letter)) {
-    return control === controlLetter;
-  } else if (lettersRequiringNumber.includes(letter)) {
-    return control === controlDigit.toString();
-  }
-
-  return control === controlDigit.toString() || control === controlLetter;
-};
-
-export const validateNIFOrCIF = (value) => {
-  if (!value) return false;
-  return validateNIF(value) || validateCIF(value);
-};
-
-export const validateIBAN = (iban) => {
-  if (!iban) return false;
-  const clean = iban.toUpperCase().replace(/[\s-]/g, '');
-
-  const ibanRegex = /^ES\d{22}$/;
-  if (!ibanRegex.test(clean)) return false;
-
-  const rearranged = clean.substring(4) + clean.substring(0, 4);
-  const numericIBAN = rearranged.replace(/[A-Z]/g, (char) =>
-    (char.charCodeAt(0) - 55).toString()
-  );
-
-  let remainder = numericIBAN;
-  while (remainder.length > 2) {
-    const block = remainder.substring(0, 9);
-    remainder = (parseInt(block, 10) % 97).toString() + remainder.substring(9);
-  }
-
-  return parseInt(remainder, 10) % 97 === 1;
-};
-
-export const formatIBAN = (iban) => {
-  if (!iban) return '';
-  const clean = iban.toUpperCase().replace(/[\s-]/g, '');
-  return clean.replace(/(.{4})/g, '$1 ').trim();
-};
-
-// ============================================
-// AUTOBACKUP DIARI AMB ROTACIÓ (#2)
-// ============================================
-
-const BACKUP_MANIFEST_KEY = 'backup-manifest';
-const MAX_BACKUPS = 7;
-
-/**
- * Executa l'autobackup si no s'ha fet avui.
- * Rota automàticament mantenint els últims MAX_BACKUPS dies.
- */
-export const runAutoBackup = async () => {
-  const state = useStore.getState();
-  const today = new Date().toISOString().split('T')[0];
-
-  // Ja s'ha fet backup avui
-  if (state.lastBackupDate === today) return { skipped: true };
-
-  const backupKey = `backup-${today}`;
-  const backup = {
-    version: '1.0',
-    date: new Date().toISOString(),
-    data: {
-      config: state.config,
-      clients: state.clients,
-      invoices: state.invoices,
-      expenses: state.expenses,
-      invoiceCounters: state.invoiceCounters || {},
-    },
-  };
-
-  try {
-    // Carregar manifest de backups
-    let manifest = [];
-    try {
-      let raw;
-      if (window.__TAURI__) {
-        raw = await invoke('load_data', { key: BACKUP_MANIFEST_KEY });
-      } else {
-        raw = localStorage.getItem(BACKUP_MANIFEST_KEY);
-      }
-      if (raw) manifest = JSON.parse(raw);
-    } catch { /* manifest buit si no existeix */ }
-
-    // Guardar el backup d'avui
-    const backupStr = JSON.stringify(backup);
-    if (window.__TAURI__) {
-      await invoke('save_data', { key: backupKey, value: backupStr });
-    } else {
-      localStorage.setItem(backupKey, backupStr);
-    }
-
-    // Afegir al manifest (evitar duplicats)
-    if (!manifest.includes(today)) manifest.push(today);
-
-    // Rotar: eliminar els backups més antics si supera MAX_BACKUPS
-    while (manifest.length > MAX_BACKUPS) {
-      const oldest = manifest.shift();
-      try {
-        if (window.__TAURI__) {
-          await invoke('delete_data', { key: `backup-${oldest}` });
-        } else {
-          localStorage.removeItem(`backup-${oldest}`);
-        }
-      } catch { /* ignorar errors d'eliminació */ }
-    }
-
-    // Guardar manifest actualitzat
-    const manifestStr = JSON.stringify(manifest);
-    if (window.__TAURI__) {
-      await invoke('save_data', { key: BACKUP_MANIFEST_KEY, value: manifestStr });
-    } else {
-      localStorage.setItem(BACKUP_MANIFEST_KEY, manifestStr);
-    }
-
-    // Actualitzar data de l'últim backup al store
-    state.setLastBackupDate(today);
-
-    return { success: true, key: backupKey, date: backup.date };
-  } catch (error) {
-    console.error('Error en autobackup:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-/**
- * Restaura dades des d'un backup manual
- */
-export const restoreBackup = async (backupKey) => {
-  try {
-    let data;
-    if (window.__TAURI__) {
-      data = await invoke('load_data', { key: backupKey });
-    } else {
-      data = localStorage.getItem(backupKey);
-    }
-
-    if (!data) return { success: false, error: 'Backup no trobat' };
-
-    const backup = JSON.parse(data);
-    const state = useStore.getState();
-
-    if (backup.data) {
-      if (backup.data.config) state.setConfig(backup.data.config);
-      if (backup.data.clients) state.setClients(backup.data.clients);
-      if (backup.data.invoices) state.setInvoices(backup.data.invoices);
-      if (backup.data.expenses) state.setExpenses(backup.data.expenses);
-    }
-
-    return { success: true, date: backup.date };
-  } catch (error) {
-    console.error('Error restoring backup:', error);
-    return { success: false, error: error.message };
-  }
-};
-
-// ============================================
-// VALIDACIÓ D'INTEGRITAT DE DADES (#22)
-// ============================================
-
-/**
- * Comprova la integritat de les dades al boot.
- * Retorna llista de problemes trobats.
- */
-export const validateDataIntegrity = () => {
-  const state = useStore.getState();
-  const warnings = [];
-
-  const clientIds = new Set((state.clients || []).map(c => c.id));
-
-  // Factures que referencien clients inexistents
-  const orphanedInvoices = (state.invoices || []).filter(
-    inv => inv.clienteId && !clientIds.has(inv.clienteId)
-  );
-
-  if (orphanedInvoices.length > 0) {
-    warnings.push({
-      type: 'orphaned_invoices',
-      count: orphanedInvoices.length,
-      message: `${orphanedInvoices.length} factura(s) referencia(n) clientes que ya no existen`,
-      ids: orphanedInvoices.map(i => i.id),
-    });
-  }
-
-  // Factures amb imports incoherents (total negatiu sense ser rectificativa)
-  const inconsistentInvoices = (state.invoices || []).filter(
-    inv => inv.total < 0 && !inv.numero?.startsWith('R-')
-  );
-
-  if (inconsistentInvoices.length > 0) {
-    warnings.push({
-      type: 'negative_invoices',
-      count: inconsistentInvoices.length,
-      message: `${inconsistentInvoices.length} factura(s) tienen importe total negativo`,
-      ids: inconsistentInvoices.map(i => i.id),
-    });
-  }
-
-  return warnings;
-};
-
-// ============================================
-// EXPORT / IMPORT DE DADES (#13)
-// ============================================
-
-/**
- * Exporta dades a JSON usant el diàleg natiu de Tauri
- */
-export const exportDataToJSON = async () => {
-  const state = useStore.getState();
-  const exportData = {
-    version: '1.0',
-    exportDate: new Date().toISOString(),
-    data: {
-      config: state.config,
-      clients: state.clients,
-      invoices: state.invoices,
-      invoiceCounters: state.invoiceCounters || {},
-      expenses: state.expenses,
-    },
-  };
-
-  const jsonStr = JSON.stringify(exportData, null, 2);
-  const filename = `contabilidad-backup-${new Date().toISOString().split('T')[0]}.json`;
-
-  if (window.__TAURI__) {
-    // Usar diàleg natiu de Tauri per triar la ubicació
-    const savePath = await tauriSaveDialog({
-      defaultPath: filename,
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-    });
-
-    if (savePath) {
-      const encoder = new TextEncoder();
-      await writeBinaryFile(savePath, encoder.encode(jsonStr));
-      return { success: true, path: savePath };
-    }
-    return { success: false, cancelled: true };
-  } else {
-    // Fallback per navegador
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    return { success: true };
-  }
-};
-
-/**
- * Aplica les dades importades al store
- */
-const applyImportedData = (data, mode) => {
-  const state = useStore.getState();
-  const importData = data.data || data;
-
-  if (mode === 'replace') {
-    if (importData.config) state.setConfig(importData.config);
-    if (importData.clients) state.setClients(importData.clients);
-    if (importData.invoices) state.setInvoices(importData.invoices);
-    if (importData.expenses) state.setExpenses(importData.expenses);
-    if (importData.invoiceCounters) {
-      // Actualitzar comptadors manualment
-      useStore.setState({ invoiceCounters: importData.invoiceCounters });
-    }
-  } else if (mode === 'merge') {
-    // Afegir nous registres sense duplicar per id
-    const existingClientIds = new Set((state.clients || []).map(c => c.id));
-    const existingInvoiceIds = new Set((state.invoices || []).map(i => i.id));
-    const existingExpenseIds = new Set((state.expenses || []).map(e => e.id));
-
-    if (importData.clients) {
-      const newClients = importData.clients.filter(c => !existingClientIds.has(c.id));
-      state.setClients([...(state.clients || []), ...newClients]);
-    }
-    if (importData.invoices) {
-      const newInvoices = importData.invoices.filter(i => !existingInvoiceIds.has(i.id));
-      state.setInvoices([...(state.invoices || []), ...newInvoices]);
-    }
-    if (importData.expenses) {
-      const newExpenses = importData.expenses.filter(e => !existingExpenseIds.has(e.id));
-      state.setExpenses([...(state.expenses || []), ...newExpenses]);
-    }
-  }
-};
-
-/**
- * Importa dades des d'un fitxer JSON usant el diàleg natiu de Tauri
- */
-export const importDataFromJSON = async (mode = 'replace') => {
-  if (window.__TAURI__) {
-    const selected = await tauriOpenDialog({
-      filters: [{ name: 'JSON', extensions: ['json'] }],
-      multiple: false,
-    });
-
-    if (!selected) return { success: false, cancelled: true };
-
-    const text = await readTextFile(selected);
-    const data = JSON.parse(text);
-    applyImportedData(data, mode);
-    return { success: true };
-  } else {
-    // Fallback per navegador
-    return new Promise((resolve, reject) => {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.json';
-      input.onchange = async (e) => {
-        const file = e.target.files[0];
-        if (!file) { resolve({ success: false, cancelled: true }); return; }
-        try {
-          const text = await file.text();
-          const data = JSON.parse(text);
-          applyImportedData(data, mode);
-          resolve({ success: true });
-        } catch (err) {
-          reject(err);
-        }
-      };
-      input.click();
-    });
-  }
-};
-
-// ============================================
-// GENERACIÓ DE NÚMEROS PER A DOCUMENTS (Pressupostos P-, Rectificatives R-)
-// ============================================
-
-export const generateDocumentNumber = (prefix, clients, allDocs, clientId, date, counters = {}) => {
-  const year = new Date(date).getFullYear().toString().slice(-2);
-  const client = clients.find((c) => c.id === clientId);
-
-  let code = 'XXX';
-  if (client?.codigo?.length === 3) code = client.codigo;
-  else if (client?.nombre) code = generateClientCode(client.nombre);
-
-  // Sèrie: "P-25_JPG" o "R-25_JPG"
-  const series = `${prefix}-${year}_${code}`;
-  const persistentMax = counters[series] || 0;
-
-  const existingMax = allDocs.reduce((max, i) => {
-    if (!i.numero) return max;
-    const parts = i.numero.split('_');
-    if (parts.length < 3) return max;
-    const invSeries = parts.slice(0, -1).join('_');
-    if (invSeries !== series) return max;
-    const seq = parseInt(parts[parts.length - 1], 10);
-    return isNaN(seq) ? max : Math.max(max, seq);
-  }, 0);
-
-  const nextSeq = Math.max(persistentMax, existingMax) + 1;
-  return `${series}_${String(nextSeq).padStart(3, '0')}`;
-};
-
-// Genera número per a pressupost
-export const generatePresupuestoNumber = (clients, allDocs, clientId, date, counters = {}) =>
-  generateDocumentNumber('P', clients, allDocs, clientId, date, counters);
-
-// ============================================
-// EXPORT CSV DE DOCUMENTS (#12)
-// ============================================
-
-/**
- * Genera contingut CSV de factures emeses per a un trimestre/any.
- * Columnes estàndard per a gestors (A3, Sage, etc.)
- */
-export const exportDocumentsCSV = (invoices, clients, options = {}) => {
-  const { year, quarter, tipoDocumento = 'factura' } = options;
-
-  let docs = invoices.filter(i => {
-    const tipo = i.tipoDocumento || 'factura';
-    if (tipoDocumento === 'factura') return tipo === 'factura' || tipo === 'rectificativa';
-    return tipo === tipoDocumento;
-  });
-
-  if (year) docs = docs.filter(i => new Date(i.fecha).getFullYear() === parseInt(year));
-  if (quarter) {
-    const qStart = (parseInt(quarter) - 1) * 3;
-    const qEnd = qStart + 3;
-    docs = docs.filter(i => {
-      const m = new Date(i.fecha).getMonth();
-      return m >= qStart && m < qEnd;
-    });
-  }
-
-  // Excloure borranys i anulades (excepte rectificatives que sempre s'inclouen)
-  docs = docs.filter(i => i.estado !== 'borrador' && i.estado !== 'anulada');
-
-  // Ordenar per data
-  docs = docs.sort((a, b) => a.fecha.localeCompare(b.fecha));
-
-  const escapeCSV = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const headers = ['Fecha', 'Número', 'Tipo', 'NIF/CIF Cliente', 'Cliente', 'Concepto',
-    'Base Imponible', '% IVA', 'Cuota IVA', '% IRPF', 'Cuota IRPF', 'Total'];
-
-  const rows = docs.map(inv => {
-    const client = clients.find(c => c.id === inv.clienteId);
-    const tipo = inv.tipoDocumento === 'rectificativa' ? 'Rectificativa' : 'Factura';
-    return [
-      inv.fecha,
-      inv.numero,
-      tipo,
-      client?.cifNif || '',
-      client?.nombre || '',
-      inv.concepto,
-      (inv.subtotal || 0).toFixed(2),
-      (inv.ivaPorcentaje || 0).toFixed(0),
-      (inv.iva || 0).toFixed(2),
-      (inv.irpfPorcentaje || 0).toFixed(0),
-      (inv.irpf || 0).toFixed(2),
-      (inv.total || 0).toFixed(2),
-    ].map(escapeCSV).join(',');
-  });
-
-  return [headers.map(escapeCSV).join(','), ...rows].join('\r\n');
-};
-
-/**
- * Desa contingut CSV al disc (Tauri) o descarrega al navegador
- */
-export const downloadCSV = async (csvContent, filename) => {
-  if (window.__TAURI__) {
-    const savePath = await tauriSaveDialog({
-      defaultPath: filename,
-      filters: [{ name: 'CSV', extensions: ['csv'] }],
-    });
-    if (savePath) {
-      const encoder = new TextEncoder();
-      await writeBinaryFile(savePath, encoder.encode('\uFEFF' + csvContent)); // BOM per Excel
-      return { success: true, path: savePath };
-    }
-    return { success: false, cancelled: true };
-  } else {
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    return { success: true };
-  }
-};
-
-// ============================================
-// PLANTILLES RECURRENTS (#8)
-// ============================================
-
-/**
- * Retorna les plantilles recurrents que estan pendents de generació (data ≤ avui)
- */
-export const getRecurringDue = (invoices) => {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  return invoices.filter(i => {
-    if (!i.esPlantilla || !i.periodicidad) return false;
-    if (!i.proximaFecha) return true; // Sense data → sempre pendent
-    const proxima = new Date(i.proximaFecha);
-    proxima.setHours(0, 0, 0, 0);
-    return proxima <= today;
-  });
-};
-
-// ============================================
-// PAGAMENTS PARCIALS (#11)
-// ============================================
-
-export const calcularPagado = (invoice) => {
-  // Si hi ha pagos individuals registrats, usar la seva suma
-  if ((invoice.pagos || []).length > 0) {
-    return (invoice.pagos || []).reduce((sum, p) => sum + (Number(p.importe) || 0), 0);
-  }
-  // Retrocompatibilitat: si l'estat és 'pagada' sense pagos registrats, el total és pagat
-  if (invoice.estado === 'pagada') return invoice.total || 0;
-  return 0;
-};
-
-export const calcularPendiente = (invoice) =>
-  Math.max(0, (invoice.total || 0) - calcularPagado(invoice));
-
-// ============================================
-// DATES LÍMIT D'IMPOSTOS
-// ============================================
-
-export const getTaxDeadlines = (year = new Date().getFullYear()) => {
-  const today = new Date();
-  const currentQuarter = getQuarter(today);
-
-  const deadlines = {
-    1: { date: new Date(year, 3, 20), model: '303/130 T1', label: '20 abril' },
-    2: { date: new Date(year, 6, 20), model: '303/130 T2', label: '20 julio' },
-    3: { date: new Date(year, 9, 20), model: '303/130 T3', label: '20 octubre' },
-    4: { date: new Date(year + 1, 0, 30), model: '303/130 T4', label: '30 enero' }
-  };
-
-  let nextDeadline = null;
-  for (let q = currentQuarter; q <= 4; q++) {
-    if (deadlines[q].date > today) {
-      nextDeadline = { quarter: q, ...deadlines[q] };
-      break;
-    }
-  }
-
-  if (!nextDeadline) {
-    nextDeadline = { quarter: 1, ...getTaxDeadlines(year + 1)[1] };
-  }
-
-  const daysUntil = Math.ceil((nextDeadline.date - today) / (1000 * 60 * 60 * 24));
-
-  return {
-    all: deadlines,
-    next: {
-      ...nextDeadline,
-      daysUntil,
-      urgent: daysUntil <= 7,
-      warning: daysUntil <= 15
-    }
-  };
-};
+export default useStore;

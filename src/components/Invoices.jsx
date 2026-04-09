@@ -1,831 +1,229 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import ReactDOM from 'react-dom';
-import {
-    Search, Plus, Filter, Download, FileText, Copy,
-    Trash2, Edit2, Eye, Check, Calendar,
-    ArrowUpDown, Printer, ExternalLink, Send,
-    RefreshCw, AlertTriangle, CreditCard, X, FileSpreadsheet,
-    FileCheck, RotateCcw, SlidersHorizontal
-} from 'lucide-react';
-import { Button, Input, Select, Card, Modal, StatusBadge, EmptyState, useToast, useConfirm } from './UI';
-import {
-    useStore, formatCurrency, formatDate, formatDateShort, generateId,
-    generateInvoiceNumber, generateClientCode,
-    exportDocumentsCSV, downloadCSV, getRecurringDue,
-    calcularPagado, calcularPendiente
-} from '../stores/store';
+import React, { useState, useMemo } from 'react';
+import { Plus, Trash2, Edit2, Receipt, Search, FileDown } from 'lucide-react';
+import { Button, EmptyState, useToast, useConfirm } from './UI';
+import useStore, { formatCurrency, formatDate } from '../stores/store';
+import { useT } from '../i18n';
+import { InvoiceModal } from './InvoiceModal';
+import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
+import { save } from '@tauri-apps/api/dialog';
+import { writeBinaryFile } from '@tauri-apps/api/fs';
+import { invoke } from '@tauri-apps/api/tauri';
 
-// Definició de totes les columnes disponibles (#18)
-const ALL_COLUMNS = [
-  { key: 'cod',      label: 'COD',      alwaysVisible: false },
-  { key: 'work',     label: 'Concepto', alwaysVisible: false },
-  { key: 'cliente',  label: 'Cliente',  alwaysVisible: false },
-  { key: 'importe',  label: 'Importe',  alwaysVisible: false },
-  { key: 'iva',      label: 'IVA',      alwaysVisible: false },
-  { key: 'irpf',     label: 'IRPF',     alwaysVisible: false },
-  { key: 'total',    label: 'Total',    alwaysVisible: false },
-  { key: 'pagado',   label: 'Pagado',   alwaysVisible: false },
-  { key: 'pendiente',label: 'Pendiente',alwaysVisible: false },
-  { key: 'status',   label: 'Estado',   alwaysVisible: false },
-  { key: 'fecha',    label: 'Fecha',    alwaysVisible: false },
-  { key: 'acciones', label: 'Acciones', alwaysVisible: true  },
-];
+const STATUS_COLORS = {
+  pendiente: 'bg-warning-light text-warning',
+  pagada:    'bg-success-light text-success',
+  anulada:   'bg-danger-light text-danger',
+};
 
-// Dropdown per triar columnes visibles (#18)
-// Usa ReactDOM.createPortal per escapar qualsevol stacking context (backdrop-filter, etc.)
-const ColumnPicker = ({ visibleColumns, onChange }) => {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, right: 0 });
-  const btnRef = useRef(null);
-  const dropRef = useRef(null);
+export const Invoices = () => {
+  const invoices = useStore(s => s.invoices);
+  const clients = useStore(s => s.clients);
+  const locations = useStore(s => s.config?.locations) || [];
+  const deleteInvoice = useStore(s => s.deleteInvoice);
+  const t = useT();
+  const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
+  const [showModal, setShowModal] = useState(false);
+  const [editInvoice, setEditInvoice] = useState(null);
+  const [search, setSearch] = useState('');
+  const [filterYear, setFilterYear] = useState('all');
+  const [filterEstado, setFilterEstado] = useState('all');
 
-  const handleOpen = () => {
-    if (btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
-    }
-    setOpen(o => !o);
+  const years = useMemo(() => {
+    const ys = [...new Set(invoices.map(i => i.fecha?.slice(0, 4)).filter(Boolean))].sort().reverse();
+    return ys;
+  }, [invoices]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return invoices.filter(inv => {
+      if (filterYear !== 'all' && inv.fecha?.slice(0, 4) !== filterYear) return false;
+      if (filterEstado !== 'all' && inv.estado !== filterEstado) return false;
+      if (q) {
+        const client = clients.find(c => c.id === inv.clienteId);
+        const clientName = client?.nombre?.toLowerCase() || '';
+        if (!inv.numero?.toLowerCase().includes(q) && !clientName.includes(q) && !inv.concepto?.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    }).sort((a, b) => (b.numero || '').localeCompare(a.numero || ''));
+  }, [invoices, clients, search, filterYear, filterEstado]);
+
+  const total = filtered.reduce((s, i) => s + (i.total || i.importe || 0), 0);
+  const totalPagado = filtered.filter(i => i.estado === 'pagada').reduce((s, i) => s + (i.total || i.importe || 0), 0);
+
+  const handleDelete = async (inv) => {
+    const ok = await confirm(`¿Eliminar factura ${inv.numero}?`);
+    if (!ok) return;
+    deleteInvoice(inv.id);
+    toast.success('Factura eliminada');
   };
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e) => {
-      if (dropRef.current && !dropRef.current.contains(e.target) && !btnRef.current?.contains(e.target)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
+  const handleDownloadPDF = async (inv) => {
+    try {
+      const client = clients.find(c => c.id === inv.clienteId);
+      const config = useStore.getState().config;
+      const pdfBytes = await generateInvoicePDF(inv, client, config);
 
-  const dropdown = open ? ReactDOM.createPortal(
-    <div
-      ref={dropRef}
-      style={{ position: 'fixed', top: pos.top, right: pos.right, zIndex: 9999 }}
-      className="w-44 bg-white border border-sand-300 rounded-soft shadow-2xl py-1"
-    >
-      <p className="px-3 py-1.5 text-[10px] font-semibold text-sand-500 uppercase">Columnas visibles</p>
-      {ALL_COLUMNS.filter(c => !c.alwaysVisible).map(col => (
-        <label key={col.key} className="flex items-center gap-2.5 px-3 py-2 hover:bg-sand-100 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={visibleColumns[col.key] !== false}
-            onChange={e => onChange({ ...visibleColumns, [col.key]: e.target.checked })}
-            className="rounded"
-          />
-          <span className="text-sm text-sand-700">{col.label}</span>
-        </label>
-      ))}
-    </div>,
-    document.body
-  ) : null;
+      const filePath = await save({
+        defaultPath: `${inv.numero}.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      });
+
+      if (filePath) {
+        await writeBinaryFile(filePath, pdfBytes);
+        try { await invoke('open_file', { path: filePath }); } catch (_) { /* optional */ }
+        toast.success('PDF guardado');
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) console.error('PDF download failed:', err);
+      toast.error?.('No se pudo generar el PDF');
+    }
+  };
 
   return (
-    <>
-      <button
-        ref={btnRef}
-        onClick={handleOpen}
-        className={`flex items-center gap-1.5 px-3 py-2 rounded-button text-sm font-medium transition-colors border ${
-          open ? 'bg-sand-200 text-sand-800 border-sand-400' : 'bg-sand-100 text-sand-600 border-sand-300 hover:text-sand-800 hover:border-sand-400'
-        }`}
-        title="Mostrar/ocultar columnas"
-      >
-        <SlidersHorizontal size={14} />
-        <span className="hidden sm:inline">Cols</span>
-      </button>
-      {dropdown}
-    </>
+    <div className="space-y-5 animate-fadeIn">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-sage-900">{t.invoices_title}</h1>
+        <Button variant="primary" icon={Plus} onClick={() => { setEditInvoice(null); setShowModal(true); }}>
+          {t.new_invoice}
+        </Button>
+      </div>
+
+      {/* Summary */}
+      {filtered.length > 0 && (
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white border border-sage-200 rounded-soft p-3 text-center shadow-card">
+            <p className="text-xs text-sage-400">{t.invoices_total}</p>
+            <p className="text-lg font-bold text-sage-800">{formatCurrency(total)}</p>
+          </div>
+          <div className="bg-white border border-sage-200 rounded-soft p-3 text-center shadow-card">
+            <p className="text-xs text-sage-400">{t.invoices_paid}</p>
+            <p className="text-lg font-bold text-success">{formatCurrency(totalPagado)}</p>
+          </div>
+          <div className="bg-white border border-sage-200 rounded-soft p-3 text-center shadow-card">
+            <p className="text-xs text-sage-400">{t.invoices_pending}</p>
+            <p className="text-lg font-bold text-warning">{formatCurrency(total - totalPagado)}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2">
+        <div className="relative flex-1 min-w-48">
+          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder={t.search_placeholder}
+            className="w-full pl-8 pr-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white focus:outline-none focus:border-wellness-400"
+          />
+        </div>
+        <select
+          value={filterYear}
+          onChange={e => setFilterYear(e.target.value)}
+          className="px-3 py-1.5 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+        >
+          <option value="all">Todos los años</option>
+          {years.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <select
+          value={filterEstado}
+          onChange={e => setFilterEstado(e.target.value)}
+          className="px-3 py-1.5 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+        >
+          <option value="all">Todos los estados</option>
+          <option value="pendiente">Pendiente</option>
+          <option value="pagada">Pagada</option>
+          <option value="anulada">Anulada</option>
+        </select>
+      </div>
+
+      <p className="text-xs text-sage-500">{filtered.length} factura{filtered.length !== 1 ? 's' : ''}</p>
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={Receipt}
+          title={t.no_invoices}
+          action={{ label: t.new_invoice, onClick: () => setShowModal(true) }}
+        />
+      ) : (
+        <div className="bg-white border border-sage-200 rounded-soft shadow-card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-sage-200 bg-sage-50">
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Número</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Cliente</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Fecha</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Concepto</th>
+                <th className="text-right px-4 py-2.5 text-xs font-medium text-sage-500">Importe</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-sage-500">Estado</th>
+                <th className="px-4 py-2.5"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-sage-100">
+              {filtered.map(inv => {
+                const client = clients.find(c => c.id === inv.clienteId);
+                const loc = inv.locationId ? locations.find(l => l.id === inv.locationId) : null;
+                return (
+                  <tr key={inv.id} className="hover:bg-sage-50 transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-sage-600">{inv.numero}</td>
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-sage-900">{client?.nombre || '—'}</span>
+                      {loc && <span className="block text-[10px] text-sage-400">{loc.name}</span>}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-sage-500">{formatDate(inv.fecha)}</td>
+                    <td className="px-4 py-3 text-xs text-sage-600 max-w-xs truncate">
+                      {inv.items?.[0]?.descripcion || inv.concepto || '—'}
+                      {inv.items?.length > 1 && (
+                        <span className="ml-1.5 text-[10px] bg-sage-100 text-sage-500 px-1.5 py-0.5 rounded-badge">+{inv.items.length - 1}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono font-semibold text-sage-800">{formatCurrency(inv.total || inv.importe)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <span className={`text-xs px-2 py-0.5 rounded-badge font-medium ${STATUS_COLORS[inv.estado] || 'bg-sage-100 text-sage-500'}`}>
+                        {inv.estado}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleDownloadPDF(inv)}
+                          title="Descargar PDF"
+                          className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
+                        >
+                          <FileDown size={13} />
+                        </button>
+                        <button
+                          onClick={() => { setEditInvoice(inv); setShowModal(true); }}
+                          className="p-1.5 rounded-button text-sage-400 hover:text-sage-700 hover:bg-sage-100 transition-colors"
+                        >
+                          <Edit2 size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(inv)}
+                          className="p-1.5 rounded-button text-sage-400 hover:text-danger hover:bg-danger-light transition-colors"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {showModal && (
+        <InvoiceModal
+          invoice={editInvoice}
+          onClose={() => { setShowModal(false); setEditInvoice(null); }}
+        />
+      )}
+      {ConfirmDialog}
+    </div>
   );
 };
-import { useNotionStore } from '../stores/notionStore';
-import { InvoiceModal } from './InvoiceModal';
-import { InvoicePreviewModern } from './InvoicePreview';
-import { SendInvoiceModal } from './SendInvoiceModal';
-import { save } from '@tauri-apps/api/dialog';
-import { open as openUrl } from '@tauri-apps/api/shell';
-import { generateInvoicePDF, savePDF } from '../services/pdfGenerator';
 
-// ============================================
-// MODAL DE PAGAMENT PARCIAL (#11)
-// ============================================
-const PartialPaymentModal = ({ open, onClose, invoice, onAdd, onDelete }) => {
-    const [form, setForm] = useState({ fecha: new Date().toISOString().split('T')[0], importe: '', metodo: 'transferencia' });
-    const toast = useToast();
-
-    const pagado = calcularPagado(invoice || {});
-    const pendiente = calcularPendiente(invoice || {});
-
-    const handleAdd = () => {
-        const importe = parseFloat(form.importe);
-        if (!importe || importe <= 0) { toast.warning('Introduce un importe válido'); return; }
-        if (importe > pendiente + 0.01) { toast.warning('El importe supera lo pendiente'); return; }
-        onAdd({ fecha: form.fecha, importe, metodo: form.metodo });
-        setForm(f => ({ ...f, importe: '' }));
-    };
-
-    if (!invoice) return null;
-    return (
-        <Modal open={open} onClose={onClose} title="Gestionar Pagos" size="md">
-            <div className="space-y-4">
-                <div className="grid grid-cols-3 gap-3 p-4 bg-sand-100 rounded-soft text-center">
-                    <div><p className="text-xs text-sand-600">Total factura</p><p className="text-sand-900 font-bold">{formatCurrency(invoice.total)}</p></div>
-                    <div><p className="text-xs text-sand-600">Pagado</p><p className="text-success font-bold">{formatCurrency(pagado)}</p></div>
-                    <div><p className="text-xs text-sand-600">Pendiente</p><p className="text-danger font-bold">{formatCurrency(pendiente)}</p></div>
-                </div>
-
-                {/* Historial de pagaments */}
-                {(invoice.pagos || []).length > 0 && (
-                    <div className="space-y-2">
-                        <p className="text-xs font-semibold text-sand-600 uppercase">Pagos registrados</p>
-                        {(invoice.pagos || []).map(p => (
-                            <div key={p.id} className="flex items-center justify-between p-3 bg-sand-50 rounded-button">
-                                <div className="flex items-center gap-3">
-                                    <CreditCard size={14} className="text-success" />
-                                    <span className="text-sm text-sand-900 font-mono">{formatCurrency(p.importe)}</span>
-                                    <span className="text-xs text-sand-600">{formatDateShort(p.fecha)}</span>
-                                    <span className="text-xs text-sand-500 capitalize">{p.metodo}</span>
-                                </div>
-                                <button onClick={() => onDelete(p.id)} className="text-danger hover:text-danger p-1">
-                                    <X size={14} />
-                                </button>
-                            </div>
-                        ))}
-                    </div>
-                )}
-
-                {/* Afegir pagament */}
-                {pendiente > 0.01 && (
-                    <div className="space-y-3 border-t border-sand-300 pt-4">
-                        <p className="text-xs font-semibold text-sand-600 uppercase">Añadir pago</p>
-                        <div className="grid grid-cols-3 gap-3">
-                            <Input label="Fecha" type="date" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} />
-                            <Input label="Importe (€)" type="number" step="0.01" value={form.importe}
-                                onChange={e => setForm(f => ({ ...f, importe: e.target.value }))}
-                                placeholder={pendiente.toFixed(2)} />
-                            <Select label="Método" value={form.metodo} onChange={e => setForm(f => ({ ...f, metodo: e.target.value }))}
-                                options={[
-                                    { value: 'transferencia', label: 'Transferencia' },
-                                    { value: 'bizum', label: 'Bizum' },
-                                    { value: 'efectivo', label: 'Efectivo' },
-                                    { value: 'tarjeta', label: 'Tarjeta' },
-                                    { value: 'otro', label: 'Otro' },
-                                ]} />
-                        </div>
-                        <div className="flex gap-2">
-                            <Button onClick={handleAdd} className="flex-1">Registrar Pago</Button>
-                            <Button variant="ghost" onClick={() => setForm(f => ({ ...f, importe: pendiente.toFixed(2) }))}>
-                                Pago Total
-                            </Button>
-                        </div>
-                    </div>
-                )}
-            </div>
-        </Modal>
-    );
-};
-
-// ============================================
-// COMPONENT PRINCIPAL
-// ============================================
-export const Invoices = () => {
-    const {
-        invoices, clients, addInvoice, updateInvoice, deleteInvoice, config,
-        invoiceSearch: search, setInvoiceSearch: setSearch,
-        invoiceFilters: filters, setInvoiceFilters: setFilters,
-        invoiceSortConfig: sortConfig, setInvoiceSortConfig: setSortConfig,
-        invoiceDocType: docType, setInvoiceDocType: setDocType,
-        addPago, deletePago, createRectificativa, generateFromTemplate, convertPresupuestoToFactura,
-        invoiceCounters,
-        invoiceVisibleColumns, setInvoiceVisibleColumns,
-    } = useStore();
-
-    // Normalitzar: camps no definits es consideren visibles
-    const cols = {
-      cod: true, work: true, cliente: true, importe: false, iva: false, irpf: false,
-      total: true, pagado: true, pendiente: true, status: true, fecha: true,
-      ...invoiceVisibleColumns,
-    };
-    const { autoSync, isConfigured, syncSingleInvoice, deleteFromNotion } = useNotionStore();
-    const toast = useToast();
-    const { confirm, ConfirmDialog } = useConfirm();
-
-    const [generating, setGenerating] = useState(false);
-    const [isExportingCSV, setIsExportingCSV] = useState(false);
-
-    // Modal State
-    const [showModal, setShowModal] = useState(false);
-    const [showPreview, setShowPreview] = useState(false);
-    const [editingInvoice, setEditingInvoice] = useState(null);
-    const [previewInvoice, setPreviewInvoice] = useState(null);
-    const [sendInvoice, setSendInvoice] = useState(null);
-    const [pagoInvoice, setPagoInvoice] = useState(null);
-
-    // Facturas recurrents pendents (#8)
-    const recurringDue = useMemo(() => getRecurringDue(invoices), [invoices]);
-
-    // Available Filter Options
-    const years = useMemo(() => {
-        const years = new Set(invoices.map(i => new Date(i.fecha).getFullYear()));
-        return Array.from(years).sort((a, b) => b - a);
-    }, [invoices]);
-
-    const months = [
-        { value: '0', label: 'Enero' }, { value: '1', label: 'Febrero' },
-        { value: '2', label: 'Marzo' }, { value: '3', label: 'Abril' },
-        { value: '4', label: 'Mayo' }, { value: '5', label: 'Junio' },
-        { value: '6', label: 'Julio' }, { value: '7', label: 'Agosto' },
-        { value: '8', label: 'Septiembre' }, { value: '9', label: 'Octubre' },
-        { value: '10', label: 'Noviembre' }, { value: '11', label: 'Diciembre' }
-    ];
-
-    // Filtrar per tipus de document (facturas vs presupuestos)
-    const filteredInvoices = useMemo(() => {
-        const uniqueMap = new Map();
-        invoices.forEach(inv => uniqueMap.set(inv.id, inv));
-        const uniqueSource = Array.from(uniqueMap.values());
-
-        return uniqueSource
-            .filter(i => {
-                const tipo = i.tipoDocumento || 'factura';
-                if (docType === 'facturas') return tipo === 'factura' || tipo === 'rectificativa';
-                if (docType === 'presupuestos') return tipo === 'presupuesto';
-                return true;
-            })
-            .filter(i => {
-                const searchLower = search.toLowerCase();
-                const client = clients.find(c => c.id === i.clienteId);
-                const matchesSearch =
-                    (i.numero || '').toLowerCase().includes(searchLower) ||
-                    (i.concepto || '').toLowerCase().includes(searchLower) ||
-                    (client?.nombre || '').toLowerCase().includes(searchLower);
-                const matchesStatus = filters.status === 'all' || i.estado === filters.status;
-                const matchesClient = filters.client === 'all' || i.clienteId === filters.client;
-                const date = new Date(i.fecha);
-                const matchesYear = filters.year === 'all' || date.getFullYear().toString() === filters.year;
-                const matchesMonth = filters.month === 'all' || date.getMonth().toString() === filters.month;
-                return matchesSearch && matchesStatus && matchesClient && matchesYear && matchesMonth;
-            })
-            .sort((a, b) => {
-                let aValue = a[sortConfig.key];
-                let bValue = b[sortConfig.key];
-                if (sortConfig.key === 'clienteId') {
-                    const cA = clients.find(c => c.id === a.clienteId);
-                    const cB = clients.find(c => c.id === b.clienteId);
-                    aValue = cA ? cA.nombre : '';
-                    bValue = cB ? cB.nombre : '';
-                }
-                if (aValue === bValue) return 0;
-                if (aValue == null) return 1;
-                if (bValue == null) return -1;
-                let cmp = 0;
-                if (typeof aValue === 'string' && typeof bValue === 'string')
-                    cmp = aValue.localeCompare(bValue, 'es', { numeric: true, sensitivity: 'base' });
-                else if (typeof aValue === 'number' && typeof bValue === 'number')
-                    cmp = aValue - bValue;
-                else cmp = aValue < bValue ? -1 : 1;
-                return sortConfig.direction === 'asc' ? cmp : -cmp;
-            });
-    }, [invoices, clients, search, filters, sortConfig, docType]);
-
-    const sortedClients = useMemo(() => {
-        const lastDates = new Map();
-        invoices.forEach(inv => {
-            const current = lastDates.get(inv.clienteId) || 0;
-            const invDate = new Date(inv.fecha).getTime();
-            if (invDate > current) lastDates.set(inv.clienteId, invDate);
-        });
-        return [...clients].sort((a, b) => {
-            const dA = lastDates.get(a.id) || 0;
-            const dB = lastDates.get(b.id) || 0;
-            if (dA !== dB) return dB - dA;
-            return a.nombre.localeCompare(b.nombre);
-        });
-    }, [clients, invoices]);
-
-    // Filters helpers
-    const DEFAULT_FILTERS = { status: 'all', client: 'all', year: new Date().getFullYear().toString(), month: 'all' };
-    const hasActiveFilters = search !== '' || filters.status !== 'all' || filters.client !== 'all'
-        || filters.year !== new Date().getFullYear().toString() || filters.month !== 'all';
-    const handleResetFilters = () => { setSearch(''); setFilters(DEFAULT_FILTERS); };
-
-    // Actions
-    const handleSort = (key) => setSortConfig({
-        key, direction: sortConfig.key === key && sortConfig.direction === 'desc' ? 'asc' : 'desc'
-    });
-
-    const handleOpenNew = () => {
-        setEditingInvoice(null);
-        setShowModal(true);
-    };
-
-    const handleOpenEdit = (inv) => {
-        setEditingInvoice(inv);
-        setShowModal(true);
-    };
-
-    const handleOpenPreview = (inv) => { setPreviewInvoice(inv); setShowPreview(true); };
-
-    const handleSaveInvoice = async (data) => {
-        let savedInvoice;
-        if (editingInvoice) {
-            updateInvoice(editingInvoice.id, data);
-            savedInvoice = { ...editingInvoice, ...data };
-        } else {
-            savedInvoice = { ...data, id: generateId() };
-            addInvoice(savedInvoice);
-        }
-        setShowModal(false);
-        if (autoSync && isConfigured && (savedInvoice.tipoDocumento || 'factura') === 'factura') {
-            const client = clients.find(c => c.id === savedInvoice.clienteId);
-            await syncSingleInvoice(savedInvoice, client);
-        }
-    };
-
-    const handleDuplicate = (inv) => {
-        const today = new Date().toISOString().split('T')[0];
-        const newInv = {
-            ...inv,
-            id: generateId(),
-            estado: 'borrador',
-            fecha: today,
-            pagos: [],
-            esPlantilla: false,
-            proximaFecha: null,
-            rectificadaId: null,
-            numero: generateInvoiceNumber(clients, invoices, inv.clienteId, today, invoiceCounters),
-        };
-        addInvoice(newInv);
-        toast.success('Documento duplicado como borrador');
-    };
-
-    const handleDelete = async (id) => {
-        const confirmed = await confirm({
-            title: 'Eliminar documento',
-            message: '¿Estás seguro? Esta acción no se puede deshacer.',
-            danger: true,
-        });
-        if (confirmed) {
-            deleteInvoice(id);
-            if (autoSync && isConfigured) await deleteFromNotion(id);
-            toast.success('Documento eliminado');
-        }
-    };
-
-    const handleMarkPaid = async (inv) => {
-        const data = { estado: 'pagada', fechaPago: new Date().toISOString().split('T')[0] };
-        updateInvoice(inv.id, data);
-        if (autoSync && isConfigured) {
-            const client = clients.find(c => c.id === inv.clienteId);
-            await syncSingleInvoice({ ...inv, ...data }, client);
-        }
-    };
-
-    // Rectificativa (#7)
-    const handleCreateRectificativa = (invoiceId) => {
-        const rect = createRectificativa(invoiceId);
-        if (rect) {
-            toast.success(`Rectificativa ${rect.numero} creada como borrador`);
-            setEditingInvoice(rect);
-            setShowModal(true);
-        }
-    };
-
-    // Convertir pressupost a factura (#9)
-    const handleConvertToFactura = (presupuestoId) => {
-        const newNum = convertPresupuestoToFactura(presupuestoId);
-        if (newNum) {
-            toast.success(`Convertido a factura ${newNum}`);
-            setDocType('facturas');
-        }
-    };
-
-    // Generar des de plantilla recurrent (#8)
-    const handleGenerateFromTemplate = (templateId) => {
-        const newInv = generateFromTemplate(templateId);
-        if (newInv) {
-            toast.success(`Factura ${newInv.numero} generada como borrador`);
-            setEditingInvoice(newInv);
-            setShowModal(true);
-        }
-    };
-
-    // Pagaments parcials (#11)
-    const handleAddPago = (invoiceId, pago) => {
-        addPago(invoiceId, pago);
-        // Refrescar la factura al modal de pagaments
-        const updated = useStore.getState().invoices.find(i => i.id === invoiceId);
-        if (updated) setPagoInvoice(updated);
-        toast.success('Pago registrado');
-    };
-
-    const handleDeletePago = (invoiceId, pagoId) => {
-        deletePago(invoiceId, pagoId);
-        const updated = useStore.getState().invoices.find(i => i.id === invoiceId);
-        if (updated) setPagoInvoice(updated);
-    };
-
-    // Export CSV (#12)
-    const handleExportCSV = async () => {
-        setIsExportingCSV(true);
-        try {
-            const year = filters.year !== 'all' ? filters.year : null;
-            const csv = exportDocumentsCSV(invoices, clients, {
-                year,
-                tipoDocumento: docType === 'presupuestos' ? 'presupuesto' : 'factura',
-            });
-            const yearLabel = year || 'todos';
-            const filename = `facturas-${yearLabel}.csv`;
-            const result = await downloadCSV(csv, filename);
-            if (result.success) toast.success('CSV exportado correctamente');
-            else if (!result.cancelled) toast.error('Error al exportar CSV');
-        } catch (e) {
-            toast.error('Error: ' + e.message);
-        }
-        setIsExportingCSV(false);
-    };
-
-    const generatePDF = async (inv) => {
-        setGenerating(true);
-        try {
-            const client = clients.find(c => c.id === inv.clienteId);
-            const filePath = await save({
-                defaultPath: `${inv.numero}.pdf`,
-                filters: [{ name: 'PDF', extensions: ['pdf'] }]
-            });
-            if (filePath) {
-                const pdfBytes = await generateInvoicePDF(inv, client, config);
-                await savePDF(pdfBytes, filePath);
-                toast.success('PDF generado correctamente');
-            }
-        } catch (e) {
-            toast.error('Error al generar el PDF: ' + (e?.message || e));
-        }
-        setGenerating(false);
-    };
-
-    const SortIcon = ({ column }) => {
-        if (sortConfig.key !== column) return <ArrowUpDown size={12} className="text-sand-400 opacity-0 group-hover:opacity-50" />;
-        return <ArrowUpDown size={12} className={`text-terra-400 ${sortConfig.direction === 'asc' ? 'rotate-180' : ''}`} />;
-    };
-
-    const isFacturas = docType === 'facturas';
-
-    return (
-        <div className="space-y-4 h-full flex flex-col">
-            {/* Alerta de plantilles recurrents pendents (#8) */}
-            {isFacturas && recurringDue.length > 0 && (
-                <div className="bg-terra-50 border border-terra-300 rounded-soft px-4 py-3 flex items-center gap-3">
-                    <RefreshCw size={16} className="text-terra-400 shrink-0" />
-                    <span className="text-terra-200 text-sm flex-1">
-                        {recurringDue.length} plantilla{recurringDue.length > 1 ? 's' : ''} recurrente{recurringDue.length > 1 ? 's' : ''} pendiente{recurringDue.length > 1 ? 's' : ''} de generar:
-                        {' '}<span className="font-medium">{recurringDue.map(i => i.concepto || i.numero).join(', ')}</span>
-                    </span>
-                    <div className="flex gap-1">
-                        {recurringDue.slice(0, 3).map(inv => (
-                            <Button key={inv.id} size="sm" onClick={() => handleGenerateFromTemplate(inv.id)}
-                                className="text-xs bg-terra-400 hover:bg-terra-500">
-                                Generar
-                            </Button>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Header & Controls */}
-            <div className="flex flex-col gap-4 bg-white p-4 rounded-soft border border-sand-300 backdrop-blur-[2px]">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="font-serif text-2xl font-bold text-sand-900">Facturación</h1>
-                        <p className="text-sand-600 text-sm mt-0.5">{filteredInvoices.length} documentos encontrados</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {/* Tab switcher: Facturas / Presupuestos */}
-                        <div className="flex gap-1 p-1 bg-sand-100 rounded-soft">
-                            <button onClick={() => setDocType('facturas')}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-button text-sm font-medium transition-all ${isFacturas ? 'bg-terra-400 text-white' : 'text-sand-600 hover:text-sand-800'}`}>
-                                <FileText size={14} />Facturas
-                            </button>
-                            <button onClick={() => setDocType('presupuestos')}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-button text-sm font-medium transition-all ${!isFacturas ? 'bg-purple-600 text-white' : 'text-sand-600 hover:text-sand-800'}`}>
-                                <FileCheck size={14} />Presupuestos
-                            </button>
-                        </div>
-                        <ColumnPicker visibleColumns={cols} onChange={setInvoiceVisibleColumns} />
-                        <Button icon={FileSpreadsheet} variant="secondary" onClick={handleExportCSV} disabled={isExportingCSV}
-                            title="Exportar CSV para el gestor">
-                            {isExportingCSV ? '...' : 'CSV'}
-                        </Button>
-                        <Button icon={Plus} onClick={handleOpenNew}>Nueva</Button>
-                    </div>
-                </div>
-
-                <div className="flex flex-col lg:flex-row gap-3">
-                    <Input icon={Search} placeholder="Buscar por nº, cliente o concepto..."
-                        value={search} onChange={e => setSearch(e.target.value)} className="flex-1"
-                        onKeyDown={e => e.key === 'Escape' && (setSearch(''), e.target.blur())} />
-
-                    <div className="flex gap-2 text-sm overflow-x-auto pb-1">
-                        <select value={filters.status}
-                            onChange={e => setFilters({ ...filters, status: e.target.value })}
-                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
-                            <option value="all">Todos los estados</option>
-                            <option value="borrador">Borrador</option>
-                            <option value="emitida">Pendiente</option>
-                            <option value="parcial">Parcial</option>
-                            <option value="pagada">Pagada</option>
-                            <option value="anulada">Anulada</option>
-                        </select>
-                        <select value={filters.client}
-                            onChange={e => setFilters({ ...filters, client: e.target.value })}
-                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 max-w-[180px] appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
-                            <option value="all">Todos los clientes</option>
-                            {sortedClients.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-                        </select>
-                        <select value={filters.year}
-                            onChange={e => setFilters({ ...filters, year: e.target.value })}
-                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
-                            <option value="all">Años</option>
-                            {years.map(y => <option key={y} value={y}>{y}</option>)}
-                        </select>
-                        <select value={filters.month}
-                            onChange={e => setFilters({ ...filters, month: e.target.value })}
-                            className="shrink-0 bg-white border border-sand-300 text-sand-800 rounded-button px-4 py-2 outline-none focus:border-terra-400 appearance-none font-medium hover:border-sand-400 transition-all shadow-inner">
-                            <option value="all">Mes</option>
-                            {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                        </select>
-                        {hasActiveFilters && (
-                            <button onClick={handleResetFilters} title="Limpiar todos los filtros"
-                                className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-button text-sm font-medium text-terra-500 bg-terra-50 border border-terra-200 hover:bg-terra-100 hover:border-terra-300 transition-all">
-                                <X size={13} />
-                                <span className="hidden sm:inline">Limpiar</span>
-                            </button>
-                        )}
-                    </div>
-                </div>
-            </div>
-
-            {/* Table */}
-            <div className="flex-1 bg-sand-50 border border-sand-300 rounded-soft overflow-hidden flex flex-col">
-                <div className="overflow-auto flex-1 custom-scrollbar">
-                    <table className="w-full text-left border-collapse whitespace-nowrap">
-                        <thead className="bg-white border-b border-sand-300 sticky top-0 z-10">
-                            <tr>
-                                {cols.cod && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('numero')}>
-                                    <div className="flex items-center gap-1">COD <SortIcon column="numero" /></div>
-                                </th>}
-                                {cols.work && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('concepto')}>
-                                    <div className="flex items-center gap-1">CONCEPTO <SortIcon column="concepto" /></div>
-                                </th>}
-                                {cols.cliente && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('clienteId')}>
-                                    <div className="flex items-center gap-1">CLIENTE <SortIcon column="clienteId" /></div>
-                                </th>}
-                                {cols.importe && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">IMPORTE</th>}
-                                {cols.iva && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">IVA</th>}
-                                {cols.irpf && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">IRPF</th>}
-                                {cols.total && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right cursor-pointer group hover:text-sand-700" onClick={() => handleSort('total')}>
-                                    <div className="flex items-center justify-end gap-1">TOTAL <SortIcon column="total" /></div>
-                                </th>}
-                                {cols.pagado && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">PAGADO</th>}
-                                {cols.pendiente && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-right">PENDIENTE</th>}
-                                {cols.status && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase text-center">STATUS</th>}
-                                {cols.fecha && <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase cursor-pointer group hover:text-sand-700" onClick={() => handleSort('fecha')}>
-                                    <div className="flex items-center gap-1">FECHA <SortIcon column="fecha" /></div>
-                                </th>}
-                                <th className="py-3 px-4 text-xs font-semibold text-sand-500 uppercase sticky right-0 bg-white shadow-sticky-col">
-                                    ACCIONES
-                                </th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-sand-200">
-                            {filteredInvoices.map(inv => {
-                                const client = clients.find(c => c.id === inv.clienteId);
-                                const isPaid = inv.estado === 'pagada';
-                                const pagado = calcularPagado(inv);
-                                const pendiente = calcularPendiente(inv);
-                                const isRectificativa = inv.tipoDocumento === 'rectificativa';
-                                const isPresupuesto = inv.tipoDocumento === 'presupuesto';
-                                const isLocked = !isPresupuesto && !isRectificativa &&
-                                    (inv.estado === 'emitida' || inv.estado === 'pagada' || inv.estado === 'parcial');
-                                const isTemplate = inv.esPlantilla;
-
-                                return (
-                                    <tr key={inv.id} className={`hover:bg-sand-50 transition-colors group ${isRectificativa ? 'opacity-80' : ''}`}>
-                                        {/* COD */}
-                                        {cols.cod && <td className="py-2 px-4 text-sm font-mono text-sand-700 border-r border-sand-200">
-                                            <div className="flex items-center gap-1.5">
-                                                {isRectificativa && <RotateCcw size={11} className="text-orange-400 shrink-0" title="Rectificativa" />}
-                                                {isTemplate && <RefreshCw size={11} className="text-terra-400 shrink-0" title="Plantilla recurrente" />}
-                                                {inv.numero}
-                                            </div>
-                                        </td>}
-
-                                        {/* WORK */}
-                                        {cols.work && <td className="py-2 px-4 text-sm text-sand-700 max-w-[200px] truncate" title={inv.concepto}>
-                                            {inv.concepto}
-                                            {isRectificativa && inv.rectificadaId && (
-                                                <span className="ml-1 text-xs text-orange-400/70">rectif.</span>
-                                            )}
-                                        </td>}
-
-                                        {/* CLIENTE */}
-                                        {cols.cliente && <td className="py-2 px-4 text-sm">
-                                            <span className="bg-sand-100 text-sand-700 px-2 py-0.5 rounded text-xs border border-sand-300">
-                                                {client?.nombre || 'Sin Cliente'}
-                                            </span>
-                                        </td>}
-
-                                        {/* IMPORTE */}
-                                        {cols.importe && <td className={`py-2 px-4 text-sm text-right font-mono ${isRectificativa ? 'text-orange-400' : 'text-sand-600'}`}>
-                                            {formatCurrency(inv.subtotal)}
-                                        </td>}
-
-                                        {/* IVA */}
-                                        {cols.iva && <td className="py-2 px-4 text-sm text-right text-sand-600 font-mono">
-                                            {formatCurrency(inv.iva)}
-                                        </td>}
-
-                                        {/* IRPF */}
-                                        {cols.irpf && <td className="py-2 px-4 text-sm text-right text-sand-600 font-mono">
-                                            {formatCurrency(inv.irpf)}
-                                        </td>}
-
-                                        {/* TOTAL */}
-                                        {cols.total && <td className={`py-2 px-4 text-sm text-right font-mono font-bold bg-sand-50 ${isRectificativa ? 'text-orange-700' : 'text-sand-900'}`}>
-                                            {formatCurrency(inv.total)}
-                                        </td>}
-
-                                        {/* PAGADO */}
-                                        {cols.pagado && <td className="py-2 px-4 text-sm text-right font-mono">
-                                            <span className={pagado > 0 ? 'text-success' : 'text-sand-400'}>
-                                                {formatCurrency(pagado)}
-                                            </span>
-                                        </td>}
-
-                                        {/* PENDIENTE */}
-                                        {cols.pendiente && <td className="py-2 px-4 text-sm text-right font-mono">
-                                            <span className={pendiente > 0 && inv.estado !== 'anulada' && inv.estado !== 'borrador' ? 'text-danger' : 'text-sand-400'}>
-                                                {formatCurrency(inv.estado !== 'anulada' ? pendiente : 0)}
-                                            </span>
-                                        </td>}
-
-                                        {/* STATUS */}
-                                        {cols.status && <td className="py-2 px-4 text-center">
-                                            <StatusBadge status={isPresupuesto ? 'presupuesto' : isRectificativa ? 'rectificativa' : inv.estado} />
-                                        </td>}
-
-                                        {/* FECHA */}
-                                        {cols.fecha && <td className="py-2 px-4 text-sm font-mono">
-                                            <div className="text-sand-700">{formatDateShort(inv.fecha)}</div>
-                                            {inv.fechaFacturacion && (
-                                                <div className="text-xs text-sand-500">{formatDateShort(inv.fechaFacturacion)}</div>
-                                            )}
-                                            {isTemplate && inv.proximaFecha && (
-                                                <div className="text-xs text-terra-400">→ {formatDateShort(inv.proximaFecha)}</div>
-                                            )}
-                                        </td>}
-
-                                        {/* ACCIONES */}
-                                        <td className="py-2 px-4 sticky right-0 bg-white group-hover:bg-sand-50 transition-colors shadow-sticky-col border-l border-sand-300">
-                                            <div className="flex items-center justify-center gap-1">
-                                                <Button variant="ghost" size="sm" icon={Eye} onClick={() => handleOpenPreview(inv)} title="Ver" className="h-8 w-8 p-0" />
-                                                <Button variant="ghost" size="sm" icon={Download} onClick={() => generatePDF(inv)} disabled={generating} title="PDF" className="h-8 w-8 p-0" />
-                                                <Button variant="ghost" size="sm" icon={Send} onClick={() => setSendInvoice(inv)} title="Enviar email"
-                                                    className="h-8 w-8 p-0 text-terra-400 hover:text-terra-300 hover:bg-terra-50" />
-
-                                                {/* Pagament parcial — per a emitides i parcials */}
-                                                {(inv.estado === 'emitida' || inv.estado === 'parcial') && (
-                                                    <Button variant="ghost" size="sm" icon={CreditCard}
-                                                        onClick={() => setPagoInvoice(inv)}
-                                                        title="Gestionar pagos"
-                                                        className="h-8 w-8 p-0 text-success hover:text-success hover:bg-success-light/50" />
-                                                )}
-
-                                                {inv.dropboxLink && (
-                                                    <Button variant="ghost" size="sm" icon={ExternalLink} onClick={() => openUrl(inv.dropboxLink)} title="Dropbox"
-                                                        className="h-8 w-8 p-0 text-terra-400 hover:text-terra-300" />
-                                                )}
-
-                                                {/* Marcar pagada — per a emitides sense pagos parcials */}
-                                                {inv.estado === 'emitida' && (inv.pagos || []).length === 0 && (
-                                                    <Button variant="ghost" size="sm" icon={Check} onClick={() => handleMarkPaid(inv)} title="Marcar Pagada"
-                                                        className="h-8 w-8 p-0 text-success hover:text-success" />
-                                                )}
-
-                                                {/* Convertir pressupost a factura */}
-                                                {isPresupuesto && (
-                                                    <Button variant="ghost" size="sm" icon={FileText}
-                                                        onClick={() => handleConvertToFactura(inv.id)}
-                                                        title="Convertir a Factura"
-                                                        className="h-8 w-8 p-0 text-purple-400 hover:text-purple-700 hover:bg-purple-500/10" />
-                                                )}
-
-                                                {/* Generar des de plantilla */}
-                                                {isTemplate && (
-                                                    <Button variant="ghost" size="sm" icon={RefreshCw}
-                                                        onClick={() => handleGenerateFromTemplate(inv.id)}
-                                                        title="Generar factura ahora"
-                                                        className="h-8 w-8 p-0 text-terra-400 hover:text-terra-300 hover:bg-terra-50" />
-                                                )}
-
-                                                <div className="w-px h-4 bg-sand-200 mx-1" />
-
-                                                <Button variant="ghost" size="sm" icon={Copy} onClick={() => handleDuplicate(inv)} title="Duplicar" className="h-8 w-8 p-0" />
-                                                <Button variant="ghost" size="sm" icon={Edit2} onClick={() => handleOpenEdit(inv)}
-                                                    title={isLocked ? 'Ver (bloqueada)' : 'Editar'}
-                                                    className={`h-8 w-8 p-0 ${isLocked ? 'text-sand-500' : ''}`} />
-
-                                                {/* Crear rectificativa per a factures emitides/pagades */}
-                                                {isLocked && (
-                                                    <Button variant="ghost" size="sm" icon={RotateCcw}
-                                                        onClick={() => handleCreateRectificativa(inv.id)}
-                                                        title="Crear Rectificativa"
-                                                        className="h-8 w-8 p-0 text-orange-400 hover:text-orange-700 hover:bg-orange-500/10" />
-                                                )}
-
-                                                <Button variant="ghost" size="sm" icon={Trash2} onClick={() => handleDelete(inv.id)} title="Eliminar"
-                                                    className="h-8 w-8 p-0 text-danger hover:text-danger hover:bg-danger-light/50" />
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-
-                            {filteredInvoices.length === 0 && (
-                                <tr>
-                                    <td colSpan={Object.values(cols).filter(Boolean).length + 1} className="py-12">
-                                        <EmptyState icon={Filter}
-                                            title={hasActiveFilters ? 'Sin resultados para esta búsqueda' : 'No hay documentos todavía'}
-                                            description={hasActiveFilters ? 'Prueba a cambiar los filtros o limpia la búsqueda.' : 'Crea tu primera factura o presupuesto.'}
-                                            action={hasActiveFilters ? (
-                                                <button onClick={handleResetFilters}
-                                                    className="flex items-center gap-1.5 px-4 py-2 rounded-button text-sm font-medium text-terra-500 bg-terra-50 border border-terra-200 hover:bg-terra-100 transition-colors mx-auto">
-                                                    <X size={13} /> Limpiar filtros
-                                                </button>
-                                            ) : null} />
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-
-                {/* Footer */}
-                <div className="bg-white border-t border-sand-300 p-3 flex gap-6 text-sm font-mono overflow-x-auto">
-                    <div className="text-sand-600">Total: <span className="text-sand-900">{filteredInvoices.length}</span></div>
-                    <div className="text-sand-600">Importe: <span className="text-sand-900">{formatCurrency(filteredInvoices.reduce((s, i) => s + (i.total || 0), 0))}</span></div>
-                    <div className="text-sand-600">Pendiente: <span className="text-danger">{formatCurrency(filteredInvoices.filter(i => i.estado === 'emitida' || i.estado === 'parcial').reduce((s, i) => s + calcularPendiente(i), 0))}</span></div>
-                </div>
-            </div>
-
-            {/* Modals */}
-            <InvoiceModal
-                open={showModal}
-                onClose={() => setShowModal(false)}
-                onSave={handleSaveInvoice}
-                invoice={editingInvoice}
-                onCreateRectificativa={handleCreateRectificativa}
-            />
-
-            <PartialPaymentModal
-                open={!!pagoInvoice}
-                onClose={() => setPagoInvoice(null)}
-                invoice={pagoInvoice}
-                onAdd={(pago) => handleAddPago(pagoInvoice.id, pago)}
-                onDelete={(pagoId) => handleDeletePago(pagoInvoice.id, pagoId)}
-            />
-
-            <SendInvoiceModal
-                open={!!sendInvoice}
-                onClose={() => setSendInvoice(null)}
-                invoice={sendInvoice}
-                client={sendInvoice ? clients.find(c => c.id === sendInvoice.clienteId) : null}
-            />
-
-            <Modal open={showPreview} onClose={() => setShowPreview(false)} title="Vista Previa" size="full">
-                {previewInvoice && (
-                    <div className="flex flex-col items-center">
-                        <div className="mb-4 flex gap-2">
-                            <Button icon={Download} onClick={() => generatePDF(previewInvoice)} disabled={generating}>
-                                {generating ? 'Generando...' : 'Descargar PDF'}
-                            </Button>
-                            <Button icon={Send} onClick={() => { setShowPreview(false); setSendInvoice(previewInvoice); }}
-                                className="bg-terra-400 hover:bg-terra-500">
-                                Enviar por Email
-                            </Button>
-                            <Button variant="secondary" icon={Printer} onClick={() => window.print()}>Imprimir</Button>
-                        </div>
-                        <div className="overflow-auto max-h-[70vh] border border-sand-300 rounded-button">
-                            <InvoicePreviewModern
-                                invoice={previewInvoice}
-                                client={clients.find(c => c.id === previewInvoice.clienteId)}
-                                config={config}
-                            />
-                        </div>
-                    </div>
-                )}
-            </Modal>
-
-            {ConfirmDialog}
-        </div>
-    );
-};
+export default Invoices;

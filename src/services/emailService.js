@@ -1,68 +1,53 @@
 /**
- * emailService.js
- * ===============
- * Servei d'enviament de factures per correu electrònic.
- *
- * Estratègia:
- *   1. Genera el PDF a una carpeta temporal
- *   2. Obre el client de correu natiu via `mailto:` (shell.open)
- *      → El client de correu obri amb To, Subject i Body pre-emplenat
- *   3. L'usuari adjunta el PDF des de la ubicació temporal (o el guardà on vulgui)
- *
- * Per a sistemes amb xdg-open / macOS Mail / Outlook, el mailto: estàndard
- * no permet adjuntar fitxers per seguretat, per tant:
- *   - Guardem el PDF en una ubicació accessible
- *   - Mostrem la ruta clarament per adjuntar-la manualment
- *   - O (si l'usuari ho configura) usem SMTP directe via Rust
+ * emailService.js — NutriPolo
+ * ============================
+ * Servicio de envío de emails para la práctica de nutrición.
+ * Soporta: entrega de plan nutricional, recordatorio de cita, factura.
+ * SMTP directo vía backend Rust (lettre) o apertura de cliente de correo web.
  */
 
 import { invoke } from '@tauri-apps/api/tauri';
 import { open as openUrl } from '@tauri-apps/api/shell';
 
-// ============================================
-// VARIABLES DE PLANTILLA
-// ============================================
+// ── Template variable resolver ─────────────────────────────────────────────
 
 /**
- * Substitueix les variables {{nom}} en una plantilla de text.
- *
  * Variables disponibles:
- *   {{clientNom}}       → Nom del client
- *   {{clientEmail}}     → Email del client
- *   {{facturaNum}}      → Número de factura
- *   {{facturaData}}     → Data de la factura
- *   {{facturaTotal}}    → Total de la factura
- *   {{facturaConcepte}} → Concepte de la factura
- *   {{freelanceNom}}    → Nom del freelance (config)
- *   {{freelanceEmail}}  → Email del freelance (config)
- *   {{freelanceTel}}    → Telèfon del freelance (config)
+ *   {{clientNom}}     {{citaData}}    {{planNom}}       {{nutriNom}}
+ *   {{clientEmail}}   {{citaHora}}    {{planFechaInicio}}{{nutriEmail}}
+ *   {{citaUbicacio}}  {{citaTipus}}   {{planFechaFin}}   {{nutriTel}}
+ *   {{facturaNum}}    {{facturaTotal}}                   {{nutriWeb}}
  */
-export const resolveTemplate = (template, { invoice, client, config }) => {
+export const resolveTemplate = (template, { client, consultation, plan, invoice, document, config, locationName } = {}) => {
   if (!template) return '';
 
-  const formatDate = (d) => {
-    if (!d) return '---';
-    const dt = new Date(d);
-    return `${String(dt.getDate()).padStart(2, '0')}/${String(dt.getMonth() + 1).padStart(2, '0')}/${dt.getFullYear()}`;
+  const fmt = (d) => {
+    if (!d) return '—';
+    const dt = new Date(d + 'T00:00:00');
+    return `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')}/${dt.getFullYear()}`;
   };
-
-  const formatCurrency = (n) => {
-    if (n == null) return '---';
-    return new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR' }).format(n);
-  };
+  const fmtCurrency = (n) => n != null
+    ? new Intl.NumberFormat('es-ES', { style:'currency', currency:'EUR' }).format(n)
+    : '—';
 
   const vars = {
-    '{{clientNom}}':        client?.nombre        || '---',
-    '{{clientEmail}}':      client?.email         || '---',
-    '{{facturaNum}}':       invoice?.numero       || '---',
-    '{{facturaData}}':      formatDate(invoice?.fecha),
-    '{{facturaTotal}}':     formatCurrency(invoice?.total),
-    '{{facturaConcepte}}':  invoice?.concepto     || '---',
-    '{{freelanceNom}}':     config?.nombre        || '---',
-    '{{freelanceEmail}}':   config?.email         || '---',
-    '{{freelanceTel}}':     config?.telefono      || '---',
-    '{{freelanceWeb}}':     config?.web           || '---',
-    '{{freelanceIban}}':    config?.iban          || '---',
+    '{{clientNom}}':       client?.nombre        || '—',
+    '{{clientEmail}}':     client?.email         || '—',
+    '{{citaData}}':        fmt(consultation?.fecha),
+    '{{citaHora}}':        consultation?.hora    || '—',
+    '{{citaUbicacio}}':    locationName?.(consultation?.locationId) || consultation?.locationId || '—',
+    '{{citaTipus}}':       consultation?.tipo    || '—',
+    '{{planNom}}':         plan?.nombre          || '—',
+    '{{planFechaInicio}}': fmt(plan?.fechaInicio),
+    '{{planFechaFin}}':    fmt(plan?.fechaFin),
+    '{{facturaNum}}':      invoice?.numero       || '—',
+    '{{facturaTotal}}':    fmtCurrency(invoice?.total ?? invoice?.importe),
+    '{{facturaConcepte}}': invoice?.items?.map(i => i.descripcion).filter(Boolean).join(', ') || invoice?.concepto || '—',
+    '{{docNom}}':          document?.nombre      || document?.fileName || '—',
+    '{{nutriNom}}':        config?.nombre        || '—',
+    '{{nutriEmail}}':      config?.email         || '—',
+    '{{nutriTel}}':        config?.telefono      || '—',
+    '{{nutriWeb}}':        config?.web           || '—',
   };
 
   let result = template;
@@ -72,160 +57,320 @@ export const resolveTemplate = (template, { invoice, client, config }) => {
   return result;
 };
 
-// ============================================
-// PLANTILLES PER DEFECTE
-// ============================================
+// ── Default templates ──────────────────────────────────────────────────────
 
-export const DEFAULT_EMAIL_TEMPLATES = {
+export const DEFAULT_PLAN_TEMPLATES = {
   es: {
-    subject: 'Factura {{facturaNum}} – {{freelanceNom}}',
-    body: `Estimado/a {{clientNom}},
+    subject: 'Tu plan nutricional – {{planNom}}',
+    body: `Hola {{clientNom}},
 
-Adjunto encontrará la factura {{facturaNum}} de fecha {{facturaData}} por un importe de {{facturaTotal}}.
+Te envío adjunto tu plan nutricional personalizado: {{planNom}}.
+
+Este plan está diseñado para el período {{planFechaInicio}} – {{planFechaFin}}. Léelo con calma y apunta cualquier duda para comentarla en nuestra próxima consulta.
+
+Si tienes alguna pregunta antes de esa fecha, no dudes en escribirme.
+
+Un abrazo,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}
+{{nutriWeb}}`,
+  },
+  ca: {
+    subject: 'El teu pla nutricional – {{planNom}}',
+    body: `Hola {{clientNom}},
+
+T'envio adjunt el teu pla nutricional personalitzat: {{planNom}}.
+
+Aquest pla és per al període {{planFechaInicio}} – {{planFechaFin}}. Llegeix-lo amb calma i apunta qualsevol dubte per comentar-lo a la propera consulta.
+
+Si tens alguna pregunta abans, no dubtis en escriure'm.
+
+Una abraçada,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}
+{{nutriWeb}}`,
+  },
+  en: {
+    subject: 'Your nutrition plan – {{planNom}}',
+    body: `Hi {{clientNom}},
+
+Please find attached your personalised nutrition plan: {{planNom}}.
+
+This plan covers the period {{planFechaInicio}} – {{planFechaFin}}. Take your time reading it and note down any questions for our next appointment.
+
+Feel free to reach out if you have any questions before then.
+
+Best wishes,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}
+{{nutriWeb}}`,
+  },
+};
+
+export const DEFAULT_APPOINTMENT_TEMPLATES = {
+  es: {
+    subject: 'Recordatorio de cita – {{citaData}}',
+    body: `Hola {{clientNom}},
+
+Te recuerdo que tienes una cita programada:
+
+📅 Fecha: {{citaData}}
+🕐 Hora: {{citaHora}}
+📍 Lugar: {{citaUbicacio}}
+🗂 Tipo: {{citaTipus}}
+
+Si necesitas cambiar o cancelar la cita, escríbeme con antelación.
+
+¡Hasta pronto!
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}`,
+  },
+  ca: {
+    subject: 'Recordatori de cita – {{citaData}}',
+    body: `Hola {{clientNom}},
+
+Et recordo que tens una cita programada:
+
+📅 Data: {{citaData}}
+🕐 Hora: {{citaHora}}
+📍 Lloc: {{citaUbicacio}}
+🗂 Tipus: {{citaTipus}}
+
+Si necessites canviar o cancel·lar la cita, escriu-me amb antelació.
+
+Fins aviat!
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}`,
+  },
+  en: {
+    subject: 'Appointment reminder – {{citaData}}',
+    body: `Hi {{clientNom}},
+
+Just a reminder that you have an appointment scheduled:
+
+📅 Date: {{citaData}}
+🕐 Time: {{citaHora}}
+📍 Location: {{citaUbicacio}}
+🗂 Type: {{citaTipus}}
+
+Please let me know in advance if you need to reschedule or cancel.
+
+See you soon!
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}`,
+  },
+};
+
+export const DEFAULT_INVOICE_TEMPLATES = {
+  es: {
+    subject: 'Factura {{facturaNum}} – {{nutriNom}}',
+    body: `Hola {{clientNom}},
+
+Adjunto encontrarás la factura {{facturaNum}} por importe de {{facturaTotal}}.
 
 Concepto: {{facturaConcepte}}
 
-Para cualquier consulta no dude en contactarme.
+Gracias por tu confianza. Cualquier duda, no dudes en contactarme.
 
-Un saludo,
-{{freelanceNom}}
-{{freelanceEmail}} | {{freelanceTel}}
-{{freelanceWeb}}`,
+Un abrazo,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}`,
   },
   ca: {
-    subject: 'Factura {{facturaNum}} – {{freelanceNom}}',
-    body: `Benvolgut/da {{clientNom}},
+    subject: 'Factura {{facturaNum}} – {{nutriNom}}',
+    body: `Hola {{clientNom}},
 
-Adjunt trobareu la factura {{facturaNum}} de data {{facturaData}} per un import de {{facturaTotal}}.
+Adjunt trobaràs la factura {{facturaNum}} per import de {{facturaTotal}}.
 
 Concepte: {{facturaConcepte}}
 
-Per a qualsevol consulta no dubteu en contactar-me.
+Gràcies per la teva confiança. Qualsevol dubte, no dubtis en contactar-me.
 
-Una salutació,
-{{freelanceNom}}
-{{freelanceEmail}} | {{freelanceTel}}
-{{freelanceWeb}}`,
+Una abraçada,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}`,
   },
   en: {
-    subject: 'Invoice {{facturaNum}} – {{freelanceNom}}',
-    body: `Dear {{clientNom}},
+    subject: 'Invoice {{facturaNum}} – {{nutriNom}}',
+    body: `Hi {{clientNom}},
 
-Please find attached invoice {{facturaNum}} dated {{facturaData}} for a total of {{facturaTotal}}.
+Please find attached invoice {{facturaNum}} for {{facturaTotal}}.
 
 Description: {{facturaConcepte}}
 
-Please don't hesitate to contact me if you have any questions.
+Thank you for trusting me. Please don't hesitate to reach out with any questions.
 
-Best regards,
-{{freelanceNom}}
-{{freelanceEmail}} | {{freelanceTel}}
-{{freelanceWeb}}`,
+Best,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}`,
   },
 };
 
-// ============================================
-// GENERACIÓ PDF TEMPORAL
-// ============================================
+export const DEFAULT_DOCUMENT_TEMPLATES = {
+  es: {
+    subject: 'Documento adjunto – {{docNom}}',
+    body: `Hola {{clientNom}},
 
-/**
- * Genera el PDF de la factura a una carpeta temporal de l'app.
- * Retorna la ruta del fitxer generat.
- */
-export const generateInvoicePdfTemp = async ({ invoice, client, config }) => {
-  try {
-    const outputPath = await invoke('generate_invoice_pdf_temp', {
-      invoice,
-      client,
-      config,
-    });
-    return outputPath;
-  } catch (e) {
-    console.error('[EmailService] Error generant PDF temp:', e);
-    throw new Error(`No s'ha pogut generar el PDF: ${e}`);
-  }
+Te envío adjunto el siguiente documento: {{docNom}}.
+
+Si tienes alguna pregunta, no dudes en escribirme.
+
+Un abrazo,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}
+{{nutriWeb}}`,
+  },
+  ca: {
+    subject: 'Document adjunt – {{docNom}}',
+    body: `Hola {{clientNom}},
+
+T'envio adjunt el següent document: {{docNom}}.
+
+Si tens cap dubte, no dubtis en escriure'm.
+
+Una abraçada,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}
+{{nutriWeb}}`,
+  },
+  en: {
+    subject: 'Attached document – {{docNom}}',
+    body: `Hi {{clientNom}},
+
+Please find attached the following document: {{docNom}}.
+
+If you have any questions, don't hesitate to reach out.
+
+Best,
+{{nutriNom}}
+{{nutriEmail}} | {{nutriTel}}
+{{nutriWeb}}`,
+  },
 };
 
-// ============================================
-// OBERTURA DEL CLIENT DE CORREU
-// ============================================
-
-/**
- * Construeix un URI `mailto:` i l'obre amb el client de correu natiu.
- *
- * @param {Object} params
- * @param {string} params.to      - Destinatari
- * @param {string} params.subject - Assumpte (ja resolt)
- * @param {string} params.body    - Cos (ja resolt)
- */
-export const openMailClient = async ({ to, subject, body }) => {
-  const encode = (s) => encodeURIComponent(s || '');
-  const uri = `mailto:${encode(to)}?subject=${encode(subject)}&body=${encode(body)}`;
-
-  try {
-    await openUrl(uri);
-    return true;
-  } catch (e) {
-    console.error('[EmailService] Error obrint client de correu:', e);
-    // Fallback: obrir en finestra del navegador
-    window.open(uri, '_blank');
-    return false;
-  }
-};
-
-// ============================================
-// FLUX COMPLET
-// ============================================
-
-/**
- * Flux complet: genera PDF + obre client de correu.
- *
- * @returns {{ pdfPath: string|null, opened: boolean }}
- */
-export const sendInvoiceEmail = async ({
-  invoice,
-  client,
-  config,
-  subject,
-  body,
-  toEmail,
-  generatePdf = true,
-}) => {
-  let pdfPath = null;
-
-  if (generatePdf) {
-    try {
-      pdfPath = await generateInvoicePdfTemp({ invoice, client, config });
-    } catch (e) {
-      console.warn('[EmailService] PDF no generat, continuant sense ell:', e.message);
-    }
-  }
-
-  const opened = await openMailClient({
-    to:      toEmail || client?.email || '',
-    subject: subject,
-    body:    pdfPath
-      ? `${body}\n\n📎 PDF guardat a: ${pdfPath}`
-      : body,
-  });
-
-  return { pdfPath, opened };
-};
-
-// ============================================
-// VARIABLES HELPER PER UI
-// ============================================
+// ── Available variables list (for UI helper) ───────────────────────────────
 
 export const AVAILABLE_VARIABLES = [
-  { token: '{{clientNom}}',       desc: 'Nom del client'        },
-  { token: '{{clientEmail}}',     desc: 'Email del client'      },
-  { token: '{{facturaNum}}',      desc: 'Número de factura'     },
-  { token: '{{facturaData}}',     desc: 'Data de la factura'    },
-  { token: '{{facturaTotal}}',    desc: 'Total de la factura'   },
-  { token: '{{facturaConcepte}}', desc: 'Concepte'              },
-  { token: '{{freelanceNom}}',    desc: 'El teu nom'            },
-  { token: '{{freelanceEmail}}',  desc: 'El teu email'          },
-  { token: '{{freelanceTel}}',    desc: 'El teu telèfon'        },
-  { token: '{{freelanceWeb}}',    desc: 'La teua web'           },
-  { token: '{{freelanceIban}}',   desc: 'El teu IBAN'           },
+  { key: '{{clientNom}}',      label: 'Nombre del cliente' },
+  { key: '{{clientEmail}}',    label: 'Email del cliente' },
+  { key: '{{citaData}}',       label: 'Fecha de la cita' },
+  { key: '{{citaHora}}',       label: 'Hora de la cita' },
+  { key: '{{citaUbicacio}}',   label: 'Ubicación de la cita' },
+  { key: '{{citaTipus}}',      label: 'Tipo de consulta' },
+  { key: '{{planNom}}',        label: 'Nombre del plan' },
+  { key: '{{planFechaInicio}}',label: 'Fecha inicio del plan' },
+  { key: '{{planFechaFin}}',   label: 'Fecha fin del plan' },
+  { key: '{{facturaNum}}',     label: 'Número de factura' },
+  { key: '{{facturaTotal}}',   label: 'Importe de la factura' },
+  { key: '{{docNom}}',         label: 'Nombre del documento' },
+  { key: '{{nutriNom}}',       label: 'Tu nombre' },
+  { key: '{{nutriEmail}}',     label: 'Tu email' },
+  { key: '{{nutriTel}}',       label: 'Tu teléfono' },
+  { key: '{{nutriWeb}}',       label: 'Tu web' },
 ];
+
+// ── Email providers (webmail openers) ─────────────────────────────────────
+
+const EMAIL_PROVIDERS = {
+  gmail: {
+    label: 'Gmail',
+    buildUrl: ({ to, subject, body }) => {
+      const e = encodeURIComponent;
+      return `https://mail.google.com/mail/?view=cm&to=${e(to)}&su=${e(subject)}&body=${e(body)}`;
+    },
+  },
+  outlook: {
+    label: 'Outlook',
+    buildUrl: ({ to, subject, body }) => {
+      const e = encodeURIComponent;
+      return `https://outlook.live.com/mail/0/deeplink/compose?to=${e(to)}&subject=${e(subject)}&body=${e(body)}`;
+    },
+  },
+  mailto: {
+    label: 'Cliente nativo',
+    buildUrl: ({ to, subject, body }) => {
+      const e = encodeURIComponent;
+      return `mailto:${to}?subject=${e(subject)}&body=${e(body)}`;
+    },
+  },
+};
+export { EMAIL_PROVIDERS };
+
+// ── Open webmail client ────────────────────────────────────────────────────
+
+export const openMailClient = async ({ to, subject, body, provider = 'gmail' }) => {
+  const prov = EMAIL_PROVIDERS[provider] || EMAIL_PROVIDERS.gmail;
+  const url = prov.buildUrl({ to, subject, body });
+  try {
+    await openUrl(url);
+    return { success: true };
+  } catch {
+    window.open(url, '_blank');
+    return { success: true };
+  }
+};
+
+// ── SMTP helpers ───────────────────────────────────────────────────────────
+
+const uint8ArrayToBase64 = (bytes) => {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+};
+
+export const sendEmailSMTP = async ({ to, toName, subject, body, pdfBytes, pdfFilename, smtpConfig }) => {
+  const pdfBase64 = pdfBytes ? uint8ArrayToBase64(pdfBytes) : null;
+  try {
+    const result = await invoke('send_email_smtp', {
+      toEmail: to,
+      toName: toName || null,
+      subject,
+      bodyText: body,
+      pdfBase64,
+      pdfFilename: pdfFilename || 'documento.pdf',
+      smtpConfig,
+    });
+    return result;
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+};
+
+export const testSmtpConnection = async (smtpConfig) => {
+  try {
+    const result = await invoke('test_smtp_connection', { smtpConfig });
+    return result;
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+};
+
+// ── High-level send functions ──────────────────────────────────────────────
+
+/**
+ * Send a nutrition plan (optionally with PDF attachment).
+ */
+export const sendPlanEmail = async ({ client, plan, config, subject, body, pdfBytes, useSmtp, smtpConfig }) => {
+  if (useSmtp && smtpConfig) {
+    const safeName = (plan?.nombre || 'plan').replace(/[^a-zA-Z0-9_-]/g, '_');
+    return sendEmailSMTP({
+      to: client?.email || '',
+      toName: client?.nombre,
+      subject, body, pdfBytes,
+      pdfFilename: `${safeName}.pdf`,
+      smtpConfig,
+    });
+  }
+  return openMailClient({ to: client?.email || '', subject, body, provider: config?.emailProvider || 'gmail' });
+};
+
+/**
+ * Send an appointment reminder.
+ */
+export const sendAppointmentReminder = async ({ client, consultation, config, subject, body, useSmtp, smtpConfig }) => {
+  if (useSmtp && smtpConfig) {
+    return sendEmailSMTP({ to: client?.email || '', toName: client?.nombre, subject, body, smtpConfig });
+  }
+  return openMailClient({ to: client?.email || '', subject, body, provider: config?.emailProvider || 'gmail' });
+};
