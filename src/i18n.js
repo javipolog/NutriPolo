@@ -423,6 +423,18 @@ export const TRANSLATIONS = {
     blocked_hours_warning:   'Esta hora está marcada como no disponible',
     day_mon: 'Lunes', day_tue: 'Martes', day_wed: 'Miércoles', day_thu: 'Jueves',
     day_fri: 'Viernes', day_sat: 'Sábado', day_sun: 'Domingo',
+
+    // Google Calendar
+    gcal_bidirectional:      'Bidireccional',
+    gcal_readonly:           'Solo lectura',
+    gcal_disabled:           'Desactivado',
+    gcal_push_calendar:      'Calendario de destino',
+    gcal_push_hint:          'las consultas nuevas se enviarán aquí',
+    gcal_sync_pushed:        'enviados',
+    gcal_sync_pulled:        'recibidos',
+    gcal_sync_updated:       'actualizados',
+    gcal_sync_error:         'Error al sincronizar con Google Calendar',
+    gcal_sync_retry:         'Reintentar',
   },
 
   ca: {
@@ -775,6 +787,18 @@ export const TRANSLATIONS = {
     blocked_hours_label:     'Etiqueta',
     blocked_hours_closed:    'Tancat',
     blocked_hours_warning:   'Aquesta hora està marcada com a no disponible',
+
+    // Google Calendar
+    gcal_bidirectional:      'Bidireccional',
+    gcal_readonly:           'Només lectura',
+    gcal_disabled:           'Desactivat',
+    gcal_push_calendar:      'Calendari de destí',
+    gcal_push_hint:          'les consultes noves s\'enviaran aquí',
+    gcal_sync_pushed:        'enviats',
+    gcal_sync_pulled:        'rebuts',
+    gcal_sync_updated:       'actualitzats',
+    gcal_sync_error:         'Error en sincronitzar amb Google Calendar',
+    gcal_sync_retry:         'Reintentar',
     day_mon: 'Dilluns', day_tue: 'Dimarts', day_wed: 'Dimecres', day_thu: 'Dijous',
     day_fri: 'Divendres', day_sat: 'Dissabte', day_sun: 'Diumenge',
   },
@@ -968,6 +992,18 @@ export const TRANSLATIONS = {
     blocked_hours_label:     'Label',
     blocked_hours_closed:    'Closed',
     blocked_hours_warning:   'This hour is marked as unavailable',
+
+    // Google Calendar
+    gcal_bidirectional:      'Bidirectional',
+    gcal_readonly:           'Read only',
+    gcal_disabled:           'Disabled',
+    gcal_push_calendar:      'Push calendar',
+    gcal_push_hint:          'new consultations will be sent here',
+    gcal_sync_pushed:        'pushed',
+    gcal_sync_pulled:        'pulled',
+    gcal_sync_updated:       'updated',
+    gcal_sync_error:         'Error syncing with Google Calendar',
+    gcal_sync_retry:         'Retry',
     day_mon: 'Monday', day_tue: 'Tuesday', day_wed: 'Wednesday', day_thu: 'Thursday',
     day_fri: 'Friday', day_sat: 'Saturday', day_sun: 'Sunday',
   },

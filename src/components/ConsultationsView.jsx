@@ -5,6 +5,7 @@ import useStore, { formatDate, filterVisibleConsultations } from '../stores/stor
 import { useT } from '../i18n';
 import { ConsultationModal } from './ConsultationModal';
 import { openWhatsAppReminder } from '../services/whatsappService';
+import { googleCalendar } from '../services/googleCalendarService';
 
 const STATUS_COLORS = {
   programada: 'bg-wellness-50 text-wellness-600',
@@ -68,6 +69,12 @@ export const ConsultationsView = () => {
   const handleDelete = async (c) => {
     const ok = await confirm(`¿Eliminar la consulta del ${formatDate(c.fecha)}?`);
     if (!ok) return;
+    // Delete from Google Calendar first (fire-and-forget)
+    if (c.googleEventId) {
+      googleCalendar.deleteConsultationFromGoogle(useStore.getState(), c).catch(err => {
+        if (import.meta.env.DEV) console.error('[GCal Delete]', err);
+      });
+    }
     deleteConsultation(c.id);
     toast.success('Consulta eliminada');
   };

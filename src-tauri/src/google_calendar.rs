@@ -30,6 +30,7 @@ pub struct CalendarEvent {
     pub status: Option<String>,  // confirmed, cancelled
     pub updated: Option<String>, // ISO 8601 timestamp
     pub nutripolo_id: Option<String>, // stored in extendedProperties.private
+    pub timezone: Option<String>, // IANA timezone (e.g. "Europe/Madrid")
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -104,6 +105,10 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         .as_str()
         .map(|s| s.to_string());
 
+    let timezone = event["start"]["timeZone"]
+        .as_str()
+        .map(|s| s.to_string());
+
     CalendarEvent {
         id,
         summary,
@@ -114,16 +119,18 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         status,
         updated,
         nutripolo_id,
+        timezone,
     }
 }
 
 /// Build the JSON body sent to Google when creating or updating an event.
 /// timeZone is included alongside dateTime so Google handles DST transitions correctly.
 fn build_event_body(event: &CalendarEvent) -> serde_json::Value {
+    let tz = event.timezone.as_deref().unwrap_or("Europe/Madrid");
     let mut body = serde_json::json!({
         "summary": event.summary,
-        "start": { "dateTime": event.start_datetime, "timeZone": "Europe/Madrid" },
-        "end":   { "dateTime": event.end_datetime,   "timeZone": "Europe/Madrid" },
+        "start": { "dateTime": event.start_datetime, "timeZone": tz },
+        "end":   { "dateTime": event.end_datetime,   "timeZone": tz },
     });
 
     if let Some(ref desc) = event.description {

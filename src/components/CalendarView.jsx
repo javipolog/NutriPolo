@@ -336,9 +336,12 @@ export const CalendarView = () => {
     setSyncError(null);
     try {
       const stats = await googleCalendar.syncAll(useStore.getState());
-      const parts = [`${stats.pulled} recibidos`, `${stats.updated} actualizados`];
+      const parts = [];
+      if (stats.pushed) parts.push(`${stats.pushed} enviados`);
+      if (stats.pulled) parts.push(`${stats.pulled} recibidos`);
+      if (stats.updated) parts.push(`${stats.updated} actualizados`);
       if (stats.errors > 0) parts.push(`${stats.errors} errores`);
-      toast.success(`Sincronizado — ${parts.join(', ')}`);
+      toast.success(`Sincronizado${parts.length ? ' — ' + parts.join(', ') : ''}`);
       setLastSyncTime(new Date());
     } catch (e) {
       setSyncError(e?.message || String(e));

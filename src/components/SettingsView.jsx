@@ -413,12 +413,16 @@ const GoogleCalendarSection = () => {
         syncMode: 'disabled',
       }));
 
-      // Auto-detect NutriPolo calendar and enable it as readonly
+      // Auto-detect NutriPolo calendar: set as bidirectional push target if writable
       const nutripoloIdx = newCalendars.findIndex(
         c => c.name && c.name.toLowerCase().includes('nutripolo')
       );
+      let defaultPushCalendarId = null;
       if (nutripoloIdx !== -1) {
-        newCalendars[nutripoloIdx].syncMode = 'readonly';
+        const npCal = newCalendars[nutripoloIdx];
+        const canWrite = npCal.accessRole !== 'reader';
+        npCal.syncMode = canWrite ? 'bidirectional' : 'readonly';
+        if (canWrite) defaultPushCalendarId = npCal.id;
       }
 
       setGcal({
@@ -429,11 +433,13 @@ const GoogleCalendarSection = () => {
         refreshToken,
         expiresAt,
         calendars: newCalendars,
+        defaultPushCalendarId,
         userEmail,
       });
 
       if (nutripoloIdx !== -1) {
-        toast.success(`Conectado — "${newCalendars[nutripoloIdx].name}" activado en solo lectura`);
+        const mode = defaultPushCalendarId ? 'bidireccional' : 'solo lectura';
+        toast.success(`Conectado — "${newCalendars[nutripoloIdx].name}" activado en ${mode}`);
       } else {
         toast.success('Google Calendar conectado — selecciona un calendario');
       }
@@ -459,7 +465,11 @@ const GoogleCalendarSection = () => {
     try {
       const { default: useStore } = await import('../stores/store');
       const stats = await googleCalendar.syncAll(useStore.getState());
-      toast.success(`Sincronizado — ${stats.pushed} enviados, ${stats.pulled} recibidos, ${stats.updated} actualizados`);
+      const parts = [];
+      if (stats.pushed) parts.push(`${stats.pushed} enviados`);
+      if (stats.pulled) parts.push(`${stats.pulled} recibidos`);
+      if (stats.updated) parts.push(`${stats.updated} actualizados`);
+      toast.success(`Sincronizado${parts.length ? ' — ' + parts.join(', ') : ''}`);
     } catch (e) {
       toast.error('Error al sincronizar: ' + (e?.message || String(e)));
     } finally {
@@ -496,7 +506,19 @@ const GoogleCalendarSection = () => {
     const updated = exists
       ? current.map(sc => sc.id === cal.id ? { ...sc, syncMode: newMode } : sc)
       : [...current, { id: cal.id, name: cal.summary, color: cal.background_color, accessRole: cal.access_role, syncMode: newMode }];
-    setGcal({ calendars: updated });
+
+    const patch = { calendars: updated };
+
+    // Auto-set push calendar when choosing bidirectional
+    if (newMode === 'bidirectional') {
+      patch.defaultPushCalendarId = cal.id;
+    } else if (gcal.defaultPushCalendarId === cal.id) {
+      // Cleared the push calendar — pick another bidirectional one if available
+      const other = updated.find(sc => sc.syncMode === 'bidirectional' && sc.id !== cal.id);
+      patch.defaultPushCalendarId = other?.id || null;
+    }
+
+    setGcal(patch);
 
     // When disabling a holiday calendar, delete its synced events (they are noise, not real consultations)
     if (newMode === 'disabled' && isHolidayCalendar(cal)) {
@@ -541,11 +563,15 @@ const GoogleCalendarSection = () => {
                     {isReader && (
                       <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-badge whitespace-nowrap">solo lectura</span>
                     )}
+                    {gcal.defaultPushCalendarId === cal.id && (
+                      <span className="text-[10px] px-1.5 py-0.5 bg-wellness-100 text-wellness-600 rounded-badge whitespace-nowrap">destino</span>
+                    )}
                     <select
-                      value={syncMode === 'bidirectional' ? 'readonly' : syncMode}
+                      value={syncMode}
                       onChange={e => handleCalendarSyncMode(cal, e.target.value)}
                       className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
                     >
+                      {!isReader && <option value="bidirectional">↔ Bidireccional</option>}
                       <option value="readonly">← Solo lectura</option>
                       <option value="disabled">✗ Desactivado</option>
                     </select>
@@ -555,6 +581,22 @@ const GoogleCalendarSection = () => {
             </div>
           )}
         </div>
+
+        {/* Push calendar indicator */}
+        {gcal.defaultPushCalendarId && (() => {
+          const pushCal = (gcal.calendars || []).find(c => c.id === gcal.defaultPushCalendarId);
+          return pushCal ? (
+            <div className="flex items-center gap-2 px-3 py-2 bg-wellness-50 border border-wellness-200 rounded-soft text-xs text-wellness-700">
+              <span className="font-medium">Calendario de destino:</span>
+              <span
+                className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ backgroundColor: pushCal.color || '#4285f4' }}
+              />
+              <span>{pushCal.name}</span>
+              <span className="text-wellness-400">— las consultas nuevas se enviarán aquí</span>
+            </div>
+          ) : null;
+        })()}
 
         {/* Auto-sync toggle */}
         <div className="flex items-center justify-between">

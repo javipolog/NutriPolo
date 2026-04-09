@@ -3,12 +3,14 @@ import { Button, Modal, Input, Textarea, useToast } from './UI';
 import useStore, { todayISO } from '../stores/store';
 import { useT } from '../i18n';
 import { AlertTriangle } from 'lucide-react';
+import { googleCalendar } from '../services/googleCalendarService';
 
 export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, defaultHora, onClose }) => {
   const clients = useStore(s => s.clients);
   const addConsultation = useStore(s => s.addConsultation);
   const updateConsultation = useStore(s => s.updateConsultation);
   const addMeasurement = useStore(s => s.addMeasurement);
+  const config = useStore(s => s.config);
   const t = useT();
   const toast = useToast();
   const isEdit = !!consultation;
@@ -38,6 +40,18 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     return e;
   };
 
+  const pushToGoogle = (consultationId) => {
+    const store = useStore.getState();
+    const gcal = store.config?.googleCalendar;
+    if (!gcal?.connected || !gcal.defaultPushCalendarId) return;
+    const saved = store.consultations.find(c => c.id === consultationId);
+    if (!saved) return;
+    googleCalendar.pushConsultation(store, saved).catch(err => {
+      if (import.meta.env.DEV) console.error('[GCal Push]', err);
+      toast.error('Error al sincronizar con Google Calendar');
+    });
+  };
+
   const handleSave = () => {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
@@ -45,6 +59,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     if (isEdit) {
       updateConsultation(consultation.id, form);
       toast.success('Consulta actualizada');
+      pushToGoogle(consultation.id);
       onClose();
     } else {
       const newC = addConsultation(form);
@@ -59,6 +74,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
         });
       }
       toast.success('Consulta creada');
+      pushToGoogle(newC.id);
       onClose();
     }
   };
