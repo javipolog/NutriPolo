@@ -8,7 +8,7 @@ import { useT } from './i18n';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
