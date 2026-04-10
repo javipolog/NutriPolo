@@ -549,11 +549,46 @@ export const googleCalendar = {
         const knownTs  = existing.remoteUpdated ? new Date(existing.remoteUpdated).getTime() : 0;
         const needsUpdate = remoteTs > knownTs || (ev.status === 'cancelled' && existing.estado !== 'cancelada');
         if (needsUpdate) {
+          // If the user has already manually approved a match, never override their
+          // decision — only update clinical fields (fecha, hora, estado, summary).
+          const isUserDecision = existing.matchedBy === 'user' || existing.matchStatus === 'manual' || existing.matchStatus === 'exact';
           const partial = this.eventToConsultation(ev, clients, calId);
-          useStore.getState().updateConsultation(existing.id, {
-            ...partial,
-            remoteUpdated: ev.updated || null,
-          });
+          if (isUserDecision) {
+            // Protect clienteId / matchStatus — only sync mutable clinical fields
+            useStore.getState().updateConsultation(existing.id, {
+              fecha: partial.fecha,
+              hora: partial.hora,
+              duracion: partial.duracion,
+              estado: partial.estado,
+              googleSummary: partial.googleSummary,
+              remoteUpdated: ev.updated || null,
+              lastSyncedAt: new Date().toISOString(),
+            });
+          } else if (existing.matchStatus === 'auto-pending-review' && ev.summary !== existing.googleSummary) {
+            // Summary changed on a still-pending-confirm consultation — re-run fuzzy match
+            const newRawName = extractPatientName(ev.summary || '');
+            const newNormName = _normalize(newRawName);
+            const latestStore = useStore.getState();
+            const { auto: newAuto, candidates: newCandidates } = findBestMatches(
+              newRawName, latestStore.clients, { autoThreshold, suggestThreshold }
+            );
+            useStore.getState().updateConsultation(existing.id, {
+              ...partial,
+              clienteId: null, // still unconfirmed
+              suggestedClienteId: newAuto?.clienteId || null,
+              matchScore: newAuto?.score ?? (newCandidates[0]?.score ?? null),
+              remoteUpdated: ev.updated || null,
+              lastSyncedAt: new Date().toISOString(),
+            });
+          } else {
+            useStore.getState().updateConsultation(existing.id, {
+              ...partial,
+              // Preserve user-linked clienteId — eventToConsultation only
+              // exact-matches, so it would nuke the link on any receptionist edit.
+              clienteId: partial.clienteId || existing.clienteId,
+              remoteUpdated: ev.updated || null,
+            });
+          }
           stats.updated++;
         }
         continue;
@@ -563,16 +598,19 @@ export const googleCalendar = {
       if (ev.status === 'cancelled') continue;
 
       // ── Patient name extraction + matching ──────────────────────────────────
-      const rawName       = extractPatientName(ev.summary || '');
+      const rawName        = extractPatientName(ev.summary || '');
       const normalizedName = _normalize(rawName);
 
       // eventToConsultation already tries exact-match via its internal normalize
       const partial = this.eventToConsultation(ev, clients, calId);
       let { clienteId } = partial;
-      let suggestedFromId;
-      let fuzzyAutoLinked = false;
+      let matchStatus, suggestedClienteId = null, matchScore = null, suggestedFromId;
+      const matchedAt = new Date().toISOString();
 
-      if (!clienteId && normalizedName) {
+      if (clienteId) {
+        // Exact match found by eventToConsultation
+        matchStatus = 'exact';
+      } else if (normalizedName) {
         // Exact match by normalizedName didn't fire in eventToConsultation;
         // try the richer extractPatientName variant through fuzzy engine
         const latestStore = useStore.getState();
@@ -582,12 +620,14 @@ export const googleCalendar = {
           { autoThreshold, suggestThreshold },
         );
 
-        if (auto) {
-          // High-confidence fuzzy match — link silently
-          clienteId = auto.clienteId;
-          fuzzyAutoLinked = true;
-        } else if (!dismissedNames.has(normalizedName)) {
-          // Create or increment a suggestion card in the inbox
+        if (dismissedNames.has(normalizedName)) {
+          // User dismissed this name — import as dismissed record (no inbox card)
+          matchStatus = 'dismissed';
+        } else if (auto) {
+          // High-confidence fuzzy match — pre-select but require 1-click confirmation
+          matchStatus = 'auto-pending-review';
+          suggestedClienteId = auto.clienteId;
+          matchScore = auto.score;
           const sg = latestStore.addPatientSuggestion({
             sourceCalendarId: calId,
             rawSummary: ev.summary || '',
@@ -595,18 +635,60 @@ export const googleCalendar = {
             firstSeenFecha: partial.fecha || null,
             firstSeenHora:  partial.hora  || null,
             candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
+            suggestedClienteId: auto.clienteId,
+            topScore: auto.score,
+            status: 'pending-confirm',
+          });
+          suggestedFromId = sg?.id;
+        } else if (candidates.length > 0) {
+          // Ambiguous — create review suggestion
+          matchStatus = 'suggested';
+          matchScore = candidates[0].score;
+          const sg = latestStore.addPatientSuggestion({
+            sourceCalendarId: calId,
+            rawSummary: ev.summary || '',
+            normalizedName,
+            firstSeenFecha: partial.fecha || null,
+            firstSeenHora:  partial.hora  || null,
+            candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
+            topScore: candidates[0].score,
+          });
+          suggestedFromId = sg?.id;
+        } else {
+          // No candidates — new unknown patient
+          matchStatus = 'unknown';
+          const sg = latestStore.addPatientSuggestion({
+            sourceCalendarId: calId,
+            rawSummary: ev.summary || '',
+            normalizedName,
+            firstSeenFecha: partial.fecha || null,
+            firstSeenHora:  partial.hora  || null,
+            candidates: [],
           });
           suggestedFromId = sg?.id;
         }
+      } else {
+        // No extractable name — import without matching
+        matchStatus = 'unknown';
       }
 
-      useStore.getState().addConsultation({
+      const newC = useStore.getState().addConsultation({
         ...partial,
-        clienteId,
+        // For non-exact matches: clienteId stays null until user confirms
+        clienteId: matchStatus === 'exact' ? clienteId : null,
         remoteUpdated: ev.updated || null,
-        ...(suggestedFromId   ? { suggestedFromId }        : {}),
-        ...(fuzzyAutoLinked   ? { fuzzyAutoLinked: true }  : {}),
+        matchStatus,
+        matchedBy: 'system',
+        matchedAt,
+        ...(suggestedClienteId != null ? { suggestedClienteId } : {}),
+        ...(matchScore != null         ? { matchScore }          : {}),
+        ...(suggestedFromId            ? { suggestedFromId }     : {}),
       });
+
+      // Attach the new consultation ID to the suggestion for back-fill tracking
+      if (suggestedFromId && newC?.id) {
+        useStore.getState().attachConsultationToSuggestion(suggestedFromId, newC.id);
+      }
       stats.pulled++;
     }
 
@@ -830,6 +912,7 @@ export const googleCalendar = {
                 const partial = this.eventToConsultation(remote, clients, calId);
                 updateConsultation(c.id, {
                   ...partial,
+                  clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
                   lastSyncedAt: new Date().toISOString(),
                   remoteUpdated: remote.updated || new Date().toISOString(),
                   syncConflict: true,
@@ -889,6 +972,7 @@ export const googleCalendar = {
         const partial = this.eventToConsultation(remote, clients, calId);
         updateConsultation(c.id, {
           ...partial,
+          clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
           lastSyncedAt: new Date().toISOString(),
           remoteUpdated: remote.updated || new Date().toISOString(),
           syncPending: false,

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
 import { Button, useToast, useConfirm } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
@@ -55,6 +55,25 @@ function calStyle(c, calColorMap) {
     borderLeftColor: color,
     color: '#1a1a1a',
   };
+}
+
+/**
+ * Return visual metadata for a consultation based on its matchStatus.
+ * Returns null for fully-linked consultations (normal rendering).
+ */
+function consultationMatchVisual(c) {
+  switch (c.matchStatus) {
+    case 'auto-pending-review':
+      return { cls: 'bg-info-light border-l-info text-info', Icon: CheckCircle2, tooltip: 'Coincidencia automática — confirmar en inbox' };
+    case 'suggested':
+      return { cls: 'bg-orange-50 border-l-orange-400 text-orange-700', Icon: AlertCircle, tooltip: 'Candidatos disponibles — revisar en inbox' };
+    case 'unknown':
+      return { cls: 'bg-red-50 border-l-danger text-danger', Icon: UserPlus, tooltip: 'Paciente desconocido — crear ficha' };
+    case 'dismissed':
+      return { cls: 'bg-sage-100 border-l-sage-400 text-sage-500 opacity-60', Icon: XIcon, tooltip: 'Descartado' };
+    default:
+      return null;
+  }
 }
 
 // ── Hour slots for weekly view ─────────────────────────────────────────────
@@ -150,28 +169,28 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
                       const client = clients.find(x => x.id === c.clienteId);
                       const locColor = locationColors[c.locationId] || 'border-l-sage-400';
                       const cStyle = calStyle(c, calColorMap);
-                      // Unlinked: came from external-clinic with unknown patient
-                      const unlinked = !c.clienteId && c.suggestedFromId;
+                      const matchVisual = consultationMatchVisual(c);
+                      const MatchIcon = matchVisual?.Icon;
                       return (
                         <div
                           key={c.id}
                           onClick={e => { e.stopPropagation(); onEditConsultation(c); }}
                           className={`text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 cursor-pointer truncate hover:opacity-80 ${
-                            unlinked
-                              ? 'bg-orange-50 border-l-orange-400 text-orange-700'
+                            matchVisual
+                              ? matchVisual.cls
                               : cStyle
                                 ? 'border'
                                 : `${STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'} ${locColor}`
                           }`}
-                          style={(!unlinked && cStyle) || undefined}
-                          title={unlinked
-                            ? `Sin identificar — ${c.googleSummary || '?'}`
+                          style={(!matchVisual && cStyle) || undefined}
+                          title={matchVisual
+                            ? matchVisual.tooltip
                             : `${client?.nombre || c.googleSummary || '?'} — ${c.tipo || ''}`
                           }
                         >
                           <span className="font-medium">{c.hora}</span>{' '}
-                          {unlinked
-                            ? <><AlertCircle size={8} className="inline mb-0.5 mr-0.5" />{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
+                          {matchVisual
+                            ? <>{MatchIcon && <MatchIcon size={8} className="inline mb-0.5 mr-0.5" />}{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
                             : (client?.nombre?.split(' ')[0] || c.googleSummary || '?')
                           }
                         </div>
@@ -278,24 +297,25 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                   const c = item;
                   const client = clients.find(x => x.id === c.clienteId);
                   const cStyle = calStyle(c, calColorMap);
-                  const unlinked = !c.clienteId && c.suggestedFromId;
+                  const matchVisual = consultationMatchVisual(c);
+                  const MatchIcon = matchVisual?.Icon;
                   return (
                     <div
                       key={c.id}
                       onClick={e => { e.stopPropagation(); onEditConsultation(c); }}
                       className={`text-[10px] px-1 rounded truncate cursor-pointer hover:opacity-80 ${
-                        unlinked
-                          ? 'bg-orange-50 border border-orange-200 text-orange-700'
+                        matchVisual
+                          ? matchVisual.cls + ' border border-l-2'
                           : cStyle
                             ? 'border border-l-2'
                             : STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'
                       }`}
-                      style={(!unlinked && cStyle) || undefined}
-                      title={unlinked ? `Sin identificar — ${c.googleSummary || '?'}` : undefined}
+                      style={(!matchVisual && cStyle) || undefined}
+                      title={matchVisual ? matchVisual.tooltip : undefined}
                     >
                       {c.hora && <span className="font-medium mr-0.5">{c.hora}</span>}
-                      {unlinked
-                        ? <><AlertCircle size={8} className="inline mb-0.5 mr-0.5" />{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
+                      {matchVisual
+                        ? <>{MatchIcon && <MatchIcon size={8} className="inline mb-0.5 mr-0.5" />}{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
                         : (client?.nombre?.split(' ')[0] || c.googleSummary || '?')
                       }
                     </div>
@@ -400,7 +420,11 @@ export const CalendarView = () => {
     () => filterVisiblePersonalEvents(allPersonalEvents, config.googleCalendar).filter(e => !e.cancelled),
     [allPersonalEvents, config.googleCalendar]
   );
-  const pendingPatientCount = useMemo(
+  const pendingConfirmCount = useMemo(
+    () => (patientSuggestions || []).filter(sg => sg.status === 'pending-confirm').length,
+    [patientSuggestions]
+  );
+  const pendingReviewCount = useMemo(
     () => (patientSuggestions || []).filter(sg => sg.status === 'pending').length,
     [patientSuggestions]
   );
@@ -696,13 +720,28 @@ export const CalendarView = () => {
         </div>
       ))}
 
-      {/* New-patients banner — shown when external-clinic sync detected unlinked patients */}
-      {pendingPatientCount > 0 && (
+      {/* Banners — auto-match confirmations and unknown patients */}
+      {pendingConfirmCount > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-info-light border border-info/30 rounded-soft text-sm">
+          <CheckCircle2 size={16} className="text-info shrink-0" />
+          <span className="flex-1 text-info-dark">
+            <strong>{pendingConfirmCount}</strong>{' '}
+            {pendingConfirmCount === 1 ? 'coincidencia automática' : 'coincidencias automáticas'} por confirmar
+          </span>
+          <button
+            onClick={() => setCurrentView('inbox')}
+            className="px-3 py-1 text-xs font-medium bg-info text-white rounded-button hover:bg-info-dark transition-colors whitespace-nowrap"
+          >
+            Revisar →
+          </button>
+        </div>
+      )}
+      {pendingReviewCount > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-orange-50 border border-orange-200 rounded-soft text-sm">
           <AlertCircle size={16} className="text-orange-500 shrink-0" />
           <span className="flex-1 text-orange-800">
-            <strong>{pendingPatientCount}</strong>{' '}
-            {pendingPatientCount === 1 ? 'paciente nuevo detectado' : 'pacientes nuevos detectados'} en la clínica externa — identifícalos para vincular sus citas.
+            <strong>{pendingReviewCount}</strong>{' '}
+            {pendingReviewCount === 1 ? 'paciente nuevo detectado' : 'pacientes nuevos detectados'} en la clínica externa — identifícalos para vincular sus citas.
           </span>
           <button
             onClick={() => setCurrentView('inbox')}

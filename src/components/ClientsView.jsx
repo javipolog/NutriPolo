@@ -6,6 +6,7 @@ import { useT } from '../i18n';
 import { ClientModal } from './ClientModal';
 import { ClientDetailView } from './ClientDetailView';
 import { deleteClientDocumentsDir } from '../services/documentService';
+import { PatientSuggestionsSection } from './PatientSuggestionsInbox';
 
 const OBJETIVO_LABELS = {
   perdida_grasa: 'Pérdida grasa',
@@ -67,6 +68,9 @@ export const ClientsView = () => {
 
   return (
     <div className="space-y-5 animate-fadeIn">
+      {/* Suggested new clients from external calendars */}
+      <PatientSuggestionsSection />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-sage-900">{t.clients_title}</h1>

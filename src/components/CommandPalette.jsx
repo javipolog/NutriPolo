@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, UserPlus } from 'lucide-react';
+import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, Inbox } from 'lucide-react';
 import useStore, { formatCurrency, formatDateShort } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
@@ -27,11 +27,6 @@ export const CommandPalette = ({ open, onClose }) => {
   const setCurrentView = useStore(s => s.setCurrentView);
   const setSelectedClientId = useStore(s => s.setSelectedClientId);
 
-  const pendingPatients = useMemo(
-    () => (patientSuggestions || []).filter(sg => sg.status === 'pending').length,
-    [patientSuggestions]
-  );
-
   const [syncing, setSyncing] = useState(false);
   const handleSyncCalendars = useCallback(async () => {
     if (!config.googleCalendar?.connected || syncing) return;
@@ -49,21 +44,28 @@ export const CommandPalette = ({ open, onClose }) => {
   const listRef = useRef(null);
   const t = useT();
 
+  const inboxDescription = useMemo(() => {
+    const confirm = patientSuggestions.filter(sg => sg.status === 'pending-confirm').length;
+    const review  = patientSuggestions.filter(sg => sg.status === 'pending').length;
+    if (confirm > 0 && review > 0) return `${confirm} por confirmar · ${review} por identificar`;
+    if (confirm > 0) return `${confirm} coincidencia${confirm !== 1 ? 's' : ''} por confirmar`;
+    if (review > 0)  return `${review} paciente${review !== 1 ? 's' : ''} por identificar`;
+    return 'Pacientes de calendarios externos';
+  }, [patientSuggestions]);
+
   const SECTIONS = useMemo(() => [
     { id: 'dashboard', label: t.nav_dashboard, icon: Home,          description: 'Panel de control y resumen' },
     { id: 'agenda',    label: t.nav_agenda,    icon: Calendar,      description: 'Citas y calendario' },
     { id: 'clients',   label: t.nav_clients,   icon: Users,         description: 'Gestión de clientes' },
+    { id: 'inbox',     label: 'Inbox de pacientes', icon: Inbox,    description: inboxDescription },
     { id: 'plans',     label: t.nav_plans,     icon: ClipboardList, description: 'Planes nutricionales' },
     { id: 'invoices',  label: t.nav_invoices,  icon: Receipt,       description: 'Facturación y pagos' },
     { id: 'services',  label: t.nav_services,  icon: Package,       description: 'Catálogo de servicios' },
     { id: 'settings',  label: t.nav_settings,  icon: Settings,      description: 'Configuración de la app' },
-    ...(pendingPatients > 0
-      ? [{ id: 'inbox', label: t.nav_inbox || 'Pacientes', icon: UserPlus, description: `${pendingPatients} paciente${pendingPatients > 1 ? 's' : ''} por identificar` }]
-      : []),
     ...(config.googleCalendar?.connected
       ? [{ id: '__sync__', label: 'Sincronizar calendarios', icon: RefreshCw, description: 'Sincronizar con Google Calendar ahora', action: 'sync' }]
       : []),
-  ], [t, pendingPatients, config.googleCalendar?.connected]);
+  ], [t, config.googleCalendar?.connected, inboxDescription]);
 
   useEffect(() => {
     if (open) {

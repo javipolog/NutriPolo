@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles, Download, RefreshCw, UserPlus } from 'lucide-react';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles, Download, RefreshCw } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import useStore from './stores/store';
@@ -231,6 +231,7 @@ function ViewLoader({ view }) {
             setComponents(c => ({ ...c, inbox: m.PatientSuggestionsInbox || m.default }));
             break;
           }
+
         }
       } catch {
         // Component not yet created — show placeholder
@@ -261,8 +262,10 @@ function AppContent() {
   const _future = useStore(s => s._future);
   const runAutoBackup = useStore(s => s.runAutoBackup);
   const validateDataIntegrity = useStore(s => s.validateDataIntegrity);
-  const pendingPatients = useStore(s =>
-    (s.patientSuggestions || []).filter(sg => sg.status === 'pending').length
+  const pendingTotal = useStore(s =>
+    (s.patientSuggestions || []).filter(sg =>
+      sg.status === 'pending' || sg.status === 'pending-confirm'
+    ).length
   );
 
   const toast = useToast();
@@ -322,12 +325,11 @@ function AppContent() {
   const navItems = [
     { id: 'dashboard', icon: Home,          label: t.nav_dashboard, shortcut: '1' },
     { id: 'agenda',    icon: Calendar,      label: t.nav_agenda,    shortcut: '2' },
-    { id: 'clients',   icon: Users,         label: t.nav_clients,   shortcut: '3' },
+    { id: 'clients',   icon: Users,         label: t.nav_clients,   shortcut: '3', badge: pendingTotal },
     { id: 'plans',     icon: ClipboardList, label: t.nav_plans,     shortcut: '4' },
     { id: 'invoices',  icon: Receipt,       label: t.nav_invoices,  shortcut: '5' },
     { id: 'services',  icon: Package,       label: t.nav_services,  shortcut: '6' },
     { id: 'settings',  icon: Settings,      label: t.nav_settings,  shortcut: '7' },
-    { id: 'inbox',     icon: UserPlus,      label: t.nav_inbox || 'Pacientes',    shortcut: null, badge: pendingPatients },
   ];
 
   const toastRef = useRef(toast);

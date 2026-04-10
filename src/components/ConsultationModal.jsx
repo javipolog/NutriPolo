@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Button, Modal, Input, Textarea, useToast } from './UI';
 import useStore, { todayISO } from '../stores/store';
 import { useT } from '../i18n';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { googleCalendar } from '../services/googleCalendarService';
 
 export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, defaultHora, onClose }) => {
@@ -10,6 +10,8 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const addConsultation = useStore(s => s.addConsultation);
   const updateConsultation = useStore(s => s.updateConsultation);
   const addMeasurement = useStore(s => s.addMeasurement);
+  const confirmAutoMatch = useStore(s => s.confirmAutoMatch);
+  const patientSuggestions = useStore(s => s.patientSuggestions);
   const config = useStore(s => s.config);
   const t = useT();
   const toast = useToast();
@@ -22,6 +24,14 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     [config.googleCalendar?.calendars, consultation?.sourceCalendarId]
   );
   const isReadonly = isEdit && sourceCal?.syncMode === 'readonly';
+  const isPendingReview = isEdit && consultation?.matchStatus === 'auto-pending-review';
+
+  const proposedClient = useMemo(
+    () => clients.find(c => c.id === consultation?.suggestedClienteId),
+    [clients, consultation?.suggestedClienteId]
+  );
+
+  const [reviewBannerDismissed, setReviewBannerDismissed] = useState(false);
 
   const [form, setForm] = useState({
     clienteId: defaultClientId || '',
@@ -58,6 +68,15 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
       if (import.meta.env.DEV) console.error('[GCal Push]', err);
       toast.error('Error al sincronizar con Google Calendar');
     });
+  };
+
+  const handleInlineConfirm = () => {
+    const sg = patientSuggestions.find(s => s.id === consultation?.suggestedFromId);
+    if (sg) {
+      confirmAutoMatch(sg.id);
+    }
+    toast.success(t.inbox_confirmed_ok || 'Coincidencia confirmada');
+    onClose();
   };
 
   const handleSave = () => {
@@ -99,6 +118,30 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
                 ? t.consultation_readonly_warning.replace('{cal}', sourceCal?.name || 'calendario externo')
                 : `Esta cita viene de "${sourceCal?.name || 'calendario externo'}" (solo lectura). Fecha, hora y duración no se pueden editar desde aquí.`}
             </span>
+          </div>
+        )}
+
+        {/* Auto-match review banner */}
+        {isPendingReview && !reviewBannerDismissed && (
+          <div className="p-3 bg-sky-50 border border-sky-200 rounded-soft">
+            <div className="flex items-center gap-2 mb-1">
+              <CheckCircle2 size={14} className="text-sky-600 shrink-0" />
+              <span className="text-xs font-semibold text-sky-700">
+                Coincidencia automática detectada
+                {consultation.matchScore != null && ` · ${Math.round(consultation.matchScore * 100)}% confianza`}
+              </span>
+            </div>
+            <p className="text-sm text-sage-700 mb-2">
+              Hemos vinculado esta cita a <strong>{proposedClient?.nombre || '?'}</strong> tentativamente.
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" variant="primary" onClick={handleInlineConfirm}>
+                {t.inbox_confirm || 'Confirmar'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setReviewBannerDismissed(true)}>
+                {t.inbox_pick_other || 'Elegir otro'}
+              </Button>
+            </div>
           </div>
         )}
 
@@ -240,6 +283,16 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           </div>
         )}
       </div>
+
+      {/* Audit footer */}
+      {isEdit && consultation?.matchedAt && (
+        <p className="text-xs text-sage-400 text-center mt-3">
+          {consultation.matchedBy === 'user'
+            ? `Confirmado por usuario el ${new Date(consultation.matchedByAt || consultation.matchedAt).toLocaleDateString('es-ES')} · detectado el ${new Date(consultation.matchedAt).toLocaleDateString('es-ES')}`
+            : `Detectado automáticamente · ${new Date(consultation.matchedAt).toLocaleDateString('es-ES')}`
+          }
+        </p>
+      )}
 
       <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
         <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>

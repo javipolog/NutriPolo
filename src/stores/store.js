@@ -191,7 +191,7 @@ const DEFAULT_SERVICES = [
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 8;
+const STORE_VERSION = 9;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -320,6 +320,112 @@ function migrateStore(persistedState, version) {
       }
     }
   }
+  if (version < 9) {
+    // v8 → v9: manual-approval for external-clinic matches.
+    // All external-clinic consultations get a matchStatus field.
+    // fuzzyAutoLinked=true rows become auto-pending-review (clienteId cleared, suggestedClienteId set).
+    // Existing patientSuggestions get consultationIds / topScore / suggestedClienteId fields.
+    // New 'pending-confirm' suggestion cards are created for auto-pending-review consultations.
+    const s = persistedState.state;
+    if (s) {
+      const externalClinicIds = new Set(
+        (s.config?.googleCalendar?.calendars || [])
+          .filter(c => c.purpose === 'external-clinic')
+          .map(c => c.id)
+      );
+
+      // Normalisation helper (mirrors fuzzyMatcher.normalize, no import here)
+      const _norm = (str) =>
+        (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+      // Map clientId → nombre for suggestion creation
+      const clientMap = {};
+      (s.clients || []).forEach(c => { if (c.id) clientMap[c.id] = c.nombre || ''; });
+
+      // Track pending-confirm groups: key = `${calId}||${normName}`, value = suggestion obj
+      const pendingConfirmMap = {};
+
+      // Migrate existing patientSuggestions first
+      s.patientSuggestions = (s.patientSuggestions || []).map(sg => ({
+        ...sg,
+        consultationIds: sg.consultationIds || [],
+        topScore: sg.topScore ?? (sg.candidates?.[0]?.score ?? null),
+        suggestedClienteId: sg.suggestedClienteId || null,
+      }));
+
+      // Migrate consultations
+      s.consultations = (s.consultations || []).map(c => {
+        if (!externalClinicIds.has(c.sourceCalendarId)) return c;
+
+        let matchStatus;
+        if (c.clienteId && !c.fuzzyAutoLinked)     matchStatus = 'exact';
+        else if (c.clienteId && c.fuzzyAutoLinked) matchStatus = 'auto-pending-review';
+        else if (!c.clienteId && c.suggestedFromId) matchStatus = 'suggested';
+        else                                         matchStatus = 'unknown';
+
+        const next = {
+          ...c,
+          matchStatus,
+          matchedBy: 'system',
+          matchedAt: c.lastSyncedAt || null,
+          matchedByAt: null,
+        };
+        delete next.fuzzyAutoLinked;
+
+        if (matchStatus === 'auto-pending-review') {
+          // Save the auto-linked client as suggested, clear clienteId so it's not
+          // attributed silently until user confirms
+          next.suggestedClienteId = c.clienteId;
+          next.clienteId = null;
+
+          // Build / update pending-confirm suggestion for this (calId, normalizedName) pair
+          const rawName = c.googleSummary || clientMap[c.clienteId] || '';
+          const normName = _norm(rawName);
+          const mapKey = `${c.sourceCalendarId}||${normName}`;
+          if (!pendingConfirmMap[mapKey]) {
+            const existingPendingConfirm = s.patientSuggestions.find(sg =>
+              sg.status === 'pending-confirm' &&
+              sg.sourceCalendarId === c.sourceCalendarId &&
+              sg.normalizedName === normName
+            );
+            if (existingPendingConfirm) {
+              pendingConfirmMap[mapKey] = existingPendingConfirm;
+            } else {
+              // Create a new pending-confirm suggestion
+              const newSg = {
+                id: `mig-${Date.now().toString(36)}-${Math.random().toString(36).substr(2)}`,
+                status: 'pending-confirm',
+                occurrences: 1,
+                candidates: c.suggestedClienteId
+                  ? [{ clienteId: c.suggestedClienteId, nombre: clientMap[c.suggestedClienteId] || '', score: 1 }]
+                  : (c.suggestedClienteId
+                    ? [{ clienteId: c.suggestedClienteId, nombre: clientMap[c.suggestedClienteId] || '', score: 1 }]
+                    : []),
+                suggestedClienteId: next.suggestedClienteId,
+                topScore: 1,
+                linkedClienteId: null,
+                dismissedAt: null,
+                detectedAt: c.lastSyncedAt || new Date().toISOString(),
+                sourceCalendarId: c.sourceCalendarId,
+                rawSummary: rawName,
+                normalizedName: normName,
+                firstSeenFecha: c.fecha || null,
+                firstSeenHora: c.hora || null,
+                consultationIds: [],
+              };
+              s.patientSuggestions = [...s.patientSuggestions, newSg];
+              pendingConfirmMap[mapKey] = newSg;
+            }
+          }
+          next.suggestedFromId = pendingConfirmMap[mapKey].id;
+          pendingConfirmMap[mapKey].consultationIds.push(c.id);
+          pendingConfirmMap[mapKey].occurrences = pendingConfirmMap[mapKey].consultationIds.length;
+        }
+
+        return next;
+      });
+    }
+  }
   return persistedState;
 }
 
@@ -429,6 +535,31 @@ const useStore = create(
         set(s => ({
           clients: s.clients.filter(c => c.id !== id),
           _history: [{ type: 'delete_client', item }, ...s._history].slice(0, 20),
+          // Cascade: downgrade any pending-confirm suggestions proposing this client
+          patientSuggestions: s.patientSuggestions.map(sg => {
+            const filteredCandidates = (sg.candidates || []).filter(c => c.clienteId !== id);
+            const wasSuggestedClient = sg.suggestedClienteId === id;
+            if (!wasSuggestedClient && !(sg.candidates || []).some(c => c.clienteId === id)) return sg;
+            return {
+              ...sg,
+              candidates: filteredCandidates,
+              topScore: filteredCandidates[0]?.score ?? null,
+              suggestedClienteId: wasSuggestedClient ? null : sg.suggestedClienteId,
+              status: (wasSuggestedClient && sg.status === 'pending-confirm')
+                ? (filteredCandidates.length > 0 ? 'pending' : 'pending')
+                : sg.status,
+            };
+          }),
+          // Cascade: downgrade consultations that pointed to the deleted client
+          consultations: s.consultations.map(c => {
+            if (c.suggestedClienteId !== id) return c;
+            return {
+              ...c,
+              suggestedClienteId: undefined,
+              matchScore: undefined,
+              matchStatus: 'suggested',
+            };
+          }),
         }));
       },
 
@@ -500,7 +631,38 @@ const useStore = create(
         // record as locally newer than Google's copy on the next sync.
         const isSyncOp = 'lastSyncedAt' in data || 'googleEventId' in data;
         const extra = isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() };
-        set(s => ({ consultations: s.consultations.map(c => c.id === id ? { ...c, ...data, ...extra } : c) }));
+
+        // Hook: if a user manually changes clienteId on a pending-review consultation,
+        // flip matchStatus to 'manual' and write audit fields.
+        const existing = get().consultations.find(c => c.id === id);
+        const isManualClientLink =
+          !isSyncOp &&
+          'clienteId' in data &&
+          data.clienteId &&
+          data.clienteId !== existing?.clienteId &&
+          existing?.matchStatus &&
+          existing.matchStatus !== 'exact' &&
+          existing.matchStatus !== 'manual';
+        const matchExtra = isManualClientLink ? {
+          matchStatus: 'manual',
+          matchedBy: 'user',
+          matchedByAt: new Date().toISOString(),
+          suggestedClienteId: undefined,
+        } : {};
+
+        set(s => ({ consultations: s.consultations.map(c => c.id === id ? { ...c, ...data, ...extra, ...matchExtra } : c) }));
+
+        // If manual link, mark the associated suggestion as linked
+        if (isManualClientLink && existing?.suggestedFromId) {
+          set(s => ({
+            patientSuggestions: s.patientSuggestions.map(sg =>
+              sg.id === existing.suggestedFromId && (sg.status === 'pending' || sg.status === 'pending-confirm')
+                ? { ...sg, status: 'linked', linkedClienteId: data.clienteId }
+                : sg
+            ),
+          }));
+        }
+
         const updated = get().consultations.find(c => c.id === id);
         if (updated?.estado === 'completada' && updated?.clienteId) {
           set(s => ({
@@ -575,22 +737,34 @@ const useStore = create(
       patientSuggestions: [],
 
       // Add or dedup a patient suggestion for an unrecognised external-clinic event.
-      // Dedup rule: if a PENDING suggestion already exists for the same
-      // (sourceCalendarId, normalizedName), increment its occurrences counter instead
-      // of creating a duplicate card in the inbox.
+      // Dedup rules:
+      //   - pending-confirm + same (calId, normalizedName): increment occurrences
+      //   - pending + same (calId, normalizedName) and new entry is pending-confirm:
+      //     upgrade existing to pending-confirm with the new suggestedClienteId/topScore
+      //   - pending + same (calId, normalizedName): increment occurrences
       addPatientSuggestion: (suggestion) => {
+        const incomingStatus = suggestion.status || 'pending';
         const existing = get().patientSuggestions.find(sg =>
-          sg.status === 'pending' &&
+          (sg.status === 'pending' || sg.status === 'pending-confirm') &&
           sg.sourceCalendarId === suggestion.sourceCalendarId &&
           sg.normalizedName === suggestion.normalizedName
         );
         if (existing) {
           set(s => ({
-            patientSuggestions: s.patientSuggestions.map(sg =>
-              sg.id === existing.id
-                ? { ...sg, occurrences: (sg.occurrences || 1) + 1 }
-                : sg
-            ),
+            patientSuggestions: s.patientSuggestions.map(sg => {
+              if (sg.id !== existing.id) return sg;
+              const upgraded = incomingStatus === 'pending-confirm' && sg.status === 'pending';
+              return {
+                ...sg,
+                occurrences: (sg.occurrences || 1) + 1,
+                ...(upgraded ? {
+                  status: 'pending-confirm',
+                  suggestedClienteId: suggestion.suggestedClienteId ?? sg.suggestedClienteId,
+                  topScore: suggestion.topScore ?? sg.topScore,
+                  candidates: suggestion.candidates?.length ? suggestion.candidates : sg.candidates,
+                } : {}),
+              };
+            }),
           }));
           return existing;
         }
@@ -601,6 +775,9 @@ const useStore = create(
           linkedClienteId: null,
           dismissedAt: null,
           detectedAt: new Date().toISOString(),
+          consultationIds: [],
+          topScore: null,
+          suggestedClienteId: null,
           ...suggestion,      // sourceCalendarId, rawSummary, normalizedName, etc.
           id: generateId(),   // always a fresh ID regardless of suggestion payload
         };
@@ -611,6 +788,7 @@ const useStore = create(
       // Mark a suggestion as linked and backfill clienteId on every consultation
       // that was imported with suggestedFromId pointing to this suggestion.
       linkPatientSuggestion: (suggestionId, clienteId) => {
+        const now = new Date().toISOString();
         set(s => ({
           patientSuggestions: s.patientSuggestions.map(sg =>
             sg.id === suggestionId
@@ -618,8 +796,16 @@ const useStore = create(
               : sg
           ),
           consultations: s.consultations.map(c =>
-            c.suggestedFromId === suggestionId && !c.clienteId
-              ? { ...c, clienteId, suggestedFromId: undefined }
+            c.suggestedFromId === suggestionId
+              ? {
+                  ...c,
+                  clienteId,
+                  suggestedFromId: undefined,
+                  suggestedClienteId: undefined,
+                  matchStatus: 'manual',
+                  matchedBy: 'user',
+                  matchedByAt: now,
+                }
               : c
           ),
         }));
@@ -634,15 +820,58 @@ const useStore = create(
 
       // Dismiss a suggestion so it never reappears in the inbox for this patient name.
       // _syncExternalClinic checks the dismissed set before creating new suggestions.
+      // Cascade: linked consultations get matchStatus='dismissed' so the calendar stops
+      // showing them as pending-review and shows them as greyed-out dismissed instead.
       dismissPatientSuggestion: (suggestionId) => {
+        const now = new Date().toISOString();
         set(s => ({
           patientSuggestions: s.patientSuggestions.map(sg =>
             sg.id === suggestionId
-              ? { ...sg, status: 'dismissed', dismissedAt: new Date().toISOString() }
+              ? { ...sg, status: 'dismissed', dismissedAt: now }
               : sg
+          ),
+          consultations: s.consultations.map(c =>
+            c.suggestedFromId === suggestionId
+              ? {
+                  ...c,
+                  matchStatus: 'dismissed',
+                  matchedBy: 'user',
+                  matchedByAt: now,
+                  suggestedClienteId: undefined,
+                  matchScore: undefined,
+                }
+              : c
           ),
         }));
       },
+
+      // 1-click confirmation of a high-confidence auto-match (pending-confirm → linked)
+      confirmAutoMatch: (suggestionId) => {
+        const sg = get().patientSuggestions.find(s => s.id === suggestionId);
+        if (!sg || sg.status !== 'pending-confirm' || !sg.suggestedClienteId) return;
+        get().linkPatientSuggestion(suggestionId, sg.suggestedClienteId);
+      },
+
+      // Override: user rejects the auto-proposed client and picks a different one
+      overrideAutoMatch: (suggestionId, newClienteId) => {
+        get().linkPatientSuggestion(suggestionId, newClienteId);
+      },
+
+      // Bulk confirm all pending-confirm suggestions at once
+      confirmAllAutoMatches: () => {
+        const pending = get().patientSuggestions.filter(sg => sg.status === 'pending-confirm');
+        pending.forEach(sg => get().confirmAutoMatch(sg.id));
+        return pending.length;
+      },
+
+      // Attach a consultation ID to a suggestion's consultationIds array
+      attachConsultationToSuggestion: (suggestionId, consultationId) => set(s => ({
+        patientSuggestions: s.patientSuggestions.map(sg =>
+          sg.id === suggestionId
+            ? { ...sg, consultationIds: [...(sg.consultationIds || []), consultationId] }
+            : sg
+        ),
+      })),
 
       // ---- SYNC AUDIT (Phase 3 — mass-delete log, stats) ----
       syncAudit: { lastFullSyncAt: null, lastSyncStats: {}, massDeleteEvents: [] },
@@ -679,13 +908,15 @@ const useStore = create(
         });
       },
 
-      // Ignore mass-delete once: clear pending so the next sync runs normally,
-      // keeping the new (smaller) count as the new baseline.
+      // Ignore mass-delete once: clear pending AND reset the baseline so the next
+      // successful sync re-establishes lastKnownRemoteCount from the current remote
+      // count via updateCalendarTracking. Without clearing the baseline, _detectMassDelete
+      // sees the same drop on the very next sync and re-suspends immediately.
       ignoreMassDeleteOnce: (calendarId) => {
         set(s => {
           const calendars = (s.config.googleCalendar?.calendars || []).map(c =>
             c.id === calendarId
-              ? { ...c, massDeletePending: null }
+              ? { ...c, massDeletePending: null, lastKnownRemoteCount: null, lastKnownRemoteSyncAt: null }
               : c
           );
           return { config: { ...s.config, googleCalendar: { ...s.config.googleCalendar, calendars } } };

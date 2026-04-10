@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import {
     Calendar, Users, ClipboardList, Receipt, MapPin,
-    AlertTriangle, CheckCircle, Clock, ArrowRight,
+    AlertTriangle, CheckCircle, CheckCircle2, Clock, ArrowRight,
     UserPlus, Activity, Bell, TrendingUp, MessageCircle
 } from 'lucide-react';
 import { Card, StatCard, Button, EmptyState, StatusBadge, useToast } from './UI';
@@ -245,12 +245,19 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
    SECTION: ALERTS PANEL
    ============================================ */
 
-const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, pendingPatients, onNavigate }) => {
+const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, pendingConfirm, pendingReview, onNavigate }) => {
     const alerts = [
-        pendingPatients > 0 && {
+        pendingConfirm > 0 && {
+            icon: CheckCircle2,
+            color: 'info',
+            title: `${pendingConfirm} coincidencia${pendingConfirm !== 1 ? 's' : ''} por confirmar`,
+            desc: 'Pacientes detectados automáticamente — aprueba con un clic',
+            action: () => onNavigate('inbox'),
+        },
+        pendingReview > 0 && {
             icon: UserPlus,
             color: 'orange',
-            title: `${pendingPatients} paciente${pendingPatients !== 1 ? 's' : ''} nuevo${pendingPatients !== 1 ? 's' : ''} por identificar`,
+            title: `${pendingReview} paciente${pendingReview !== 1 ? 's' : ''} por identificar`,
             desc: 'Detectados en la clínica externa — vincúlalos o crea sus fichas',
             action: () => onNavigate('inbox'),
         },
@@ -582,7 +589,11 @@ export const Dashboard = () => {
       () => filterVisibleConsultations(allConsultations, config.googleCalendar),
       [allConsultations, config.googleCalendar]
     );
-    const pendingPatients = useMemo(
+    const pendingConfirm = useMemo(
+      () => (patientSuggestions || []).filter(sg => sg.status === 'pending-confirm').length,
+      [patientSuggestions]
+    );
+    const pendingReview = useMemo(
       () => (patientSuggestions || []).filter(sg => sg.status === 'pending').length,
       [patientSuggestions]
     );
@@ -647,12 +658,16 @@ export const Dashboard = () => {
         };
     }, [clients]);
 
-    // Unbilled consultations (computed once with Set)
+    // Unbilled consultations (exclude pending-confirm — not yet assigned to a client)
     const unbilledCount = useMemo(() => {
         const billedIds = new Set(
             invoices.flatMap(inv => (inv.items || []).map(item => item.consultationId).filter(Boolean))
         );
-        return consultations.filter(c => c.estado === 'completada' && !billedIds.has(c.id)).length;
+        return consultations.filter(c =>
+          c.estado === 'completada' &&
+          !billedIds.has(c.id) &&
+          c.matchStatus !== 'auto-pending-review'
+        ).length;
     }, [consultations, invoices]);
 
     // Last 6 months data for charts
@@ -722,7 +737,8 @@ export const Dashboard = () => {
                         expiringPlans={expiringPlans}
                         unbilledCount={unbilledCount}
                         upcomingCount={upcoming.length}
-                        pendingPatients={pendingPatients}
+                        pendingConfirm={pendingConfirm}
+                        pendingReview={pendingReview}
                         onNavigate={setCurrentView}
                     />
                 </div>
