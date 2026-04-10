@@ -12,6 +12,7 @@
 
 import { invoke } from '@tauri-apps/api/tauri';
 import useStore from '../stores/store';
+import { extractPatientName, findBestMatches } from './fuzzyMatcher.js';
 
 let _refreshPromise = null;
 let _syncPromise = null;
@@ -149,6 +150,46 @@ export const googleCalendar = {
       notasCliente: event.description || '',
       lastSyncedAt: new Date().toISOString(),
       sourceCalendarId: sourceCalendarId || null,
+    };
+  },
+
+  // ── Event → PersonalEvent conversion ───────────────────────────────────
+
+  /**
+   * Convert a Google Calendar event into a partial personalEvent object.
+   * Used for calendars whose purpose === 'personal' (ballet, birthdays, etc.).
+   * No client matching, no clinical fields — stays strictly isolated from
+   * consultations so these events never contaminate billing / stats / dashboard.
+   */
+  eventToPersonalEvent(event, sourceCalendarId) {
+    const startStr = event.start_datetime || '';
+    const endStr   = event.end_datetime   || '';
+    const isAllDay = !startStr.includes('T');
+
+    let fecha, hora, durMin;
+    if (isAllDay) {
+      fecha  = startStr.slice(0, 10);
+      hora   = '00:00';
+      durMin = 24 * 60;
+    } else {
+      fecha = startStr.slice(0, 10);
+      hora  = startStr.slice(11, 16);
+      const startMs = new Date(startStr).getTime();
+      const endMs   = endStr ? new Date(endStr).getTime() : startMs + 3600000;
+      durMin = Math.max(1, Math.round((endMs - startMs) / 60000));
+    }
+
+    return {
+      googleEventId: event.id,
+      sourceCalendarId: sourceCalendarId || null,
+      title: event.summary || '(sin título)',
+      fecha,
+      hora,
+      duracion: durMin,
+      allDay: isAllDay,
+      lastSyncedAt: new Date().toISOString(),
+      remoteUpdated: event.updated || null,
+      cancelled: event.status === 'cancelled',
     };
   },
 
@@ -371,6 +412,298 @@ export const googleCalendar = {
   },
 
   /**
+   * Mass-delete guard: returns true if the number of remote events has dropped
+   * suspiciously compared to the last known baseline.
+   *
+   * Triggers when BOTH conditions hold:
+   *   - Absolute drop ≥ 5 events
+   *   - Percentage drop ≥ 50%
+   *
+   * A 7-day clock-drift guard prevents false positives after long offline periods
+   * or system clock jumps (during which the event window simply shifts).
+   */
+  _detectMassDelete(calendarConfig, remoteEvents) {
+    const prev = calendarConfig.lastKnownRemoteCount;
+    if (prev == null || prev < 5) return false;   // No baseline yet or too small to be meaningful
+
+    const lastSyncAt = calendarConfig.lastKnownRemoteSyncAt;
+    if (lastSyncAt) {
+      const daysSince = (Date.now() - new Date(lastSyncAt).getTime()) / 86400000;
+      if (daysSince > 7) return false;             // Clock drift / long offline period
+    }
+
+    const now = remoteEvents.length;
+    const drop = prev - now;
+    const dropPct = drop / prev;
+    return drop >= 5 && dropPct >= 0.5;
+  },
+
+  /**
+   * Dispatcher: picks the correct sync strategy based on the calendar's
+   * `purpose` field (introduced in store v8). Preserves pre-v8 behavior when
+   * `purpose` is missing by falling through to the consultation-based sync.
+   *
+   *   personal         → _syncPersonalCalendar  (personalEvents, NEVER consultations)
+   *   holidays         → noop (skipped)
+   *   primary          → _syncConsultationsCalendar (bidirectional with three-way merge)
+   *   external-clinic  → _syncExternalClinic (pull-only + fuzzy patient matching)
+   *   other / missing  → _syncConsultationsCalendar (legacy behavior)
+   *
+   * Mass-delete detection runs here — BEFORE any sync strategy — for all calendars.
+   *
+   * @param {object} store           Zustand store state (useStore.getState())
+   * @param {string} token           Valid Google OAuth access token
+   * @param {object} calendarConfig  { id, syncMode, purpose, ... }
+   */
+  async syncCalendar(store, token, calendarConfig) {
+    const purpose = calendarConfig.purpose || 'other';
+    if (purpose === 'holidays') {
+      return { pushed: 0, pulled: 0, updated: 0, skipped: true };
+    }
+
+    // Suspend sync while a mass-delete is waiting for user resolution.
+    if (calendarConfig.massDeletePending) {
+      if (import.meta.env.DEV) console.warn(`[GCal Sync] Calendar ${calendarConfig.id} suspended — mass-delete pending review`);
+      return { pushed: 0, pulled: 0, updated: 0, suspended: true };
+    }
+
+    if (purpose === 'personal') {
+      return this._syncPersonalCalendar(store, token, calendarConfig);
+    }
+    if (purpose === 'external-clinic') {
+      return this._syncExternalClinic(store, token, calendarConfig);
+    }
+    return this._syncConsultationsCalendar(store, token, calendarConfig);
+  },
+
+  /**
+   * Sync an external-clinic calendar (e.g. Sinergia receptionist agenda).
+   * Pull-only: never pushes back to Google.
+   *
+   * For each new event:
+   *   1. Extract a clean patient name via extractPatientName().
+   *   2. Try exact name match against known clients.
+   *   3. If no exact match, run fuzzy matching:
+   *      - score ≥ fuzzyAutoThreshold (0.92) → auto-link silently (fuzzyAutoLinked: true)
+   *      - score ≥ fuzzySuggestThreshold (0.75) → add to patientSuggestions inbox
+   *      - score < 0.75 → add as unknown-patient suggestion (no candidates)
+   *   4. Dismissed suggestions skip re-creation for that normalizedName + calendar.
+   *   5. Imports the consultation with optional suggestedFromId so linkPatientSuggestion
+   *      can back-fill clienteId on every affected consultation in one shot.
+   */
+  async _syncExternalClinic(store, token, calendarConfig) {
+    const calId = calendarConfig.id;
+    const autoThreshold    = calendarConfig.fuzzyAutoThreshold    ?? 0.92;
+    const suggestThreshold = calendarConfig.fuzzySuggestThreshold ?? 0.75;
+
+    const now = new Date();
+    const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
+    const timeMax = new Date(now.getTime() + 30 * 86400000).toISOString();
+
+    const [remoteEvents, deletedIds] = await Promise.all([
+      this.listEvents(token, calId, timeMin, timeMax),
+      this.listDeletedEventIds(token, calId, timeMin, timeMax),
+    ]);
+
+    // ── Mass-delete guard ──────────────────────────────────────────────────────
+    if (this._detectMassDelete(calendarConfig, remoteEvents)) {
+      const prev = calendarConfig.lastKnownRemoteCount;
+      useStore.getState().markCalendarMassDeletePending(calId, {
+        prevCount: prev, newCount: remoteEvents.length, drop: prev - remoteEvents.length,
+      });
+      if (import.meta.env.DEV) console.warn(`[GCal ExternalClinic] Mass-delete detected on ${calId} — sync suspended`);
+      return { pushed: 0, pulled: 0, updated: 0, suspended: true };
+    }
+
+    const stats = { pushed: 0, pulled: 0, updated: 0 };
+
+    // Re-read store after async I/O to get the freshest state
+    let freshStore = useStore.getState();
+    const { clients } = freshStore;
+
+    // Names already dismissed by the user for this calendar → skip re-proposing
+    const dismissedNames = new Set(
+      freshStore.patientSuggestions
+        .filter(sg => sg.status === 'dismissed' && sg.sourceCalendarId === calId)
+        .map(sg => sg.normalizedName)
+    );
+
+    // Index existing consultations from this calendar for O(1) lookups
+    const existingByGoogleId = {};
+    for (const c of freshStore.consultations) {
+      if (c.sourceCalendarId === calId && c.googleEventId) {
+        existingByGoogleId[c.googleEventId] = c;
+      }
+    }
+
+    const _normalize = (s) =>
+      (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+
+    for (const ev of remoteEvents) {
+      if (!ev.id) continue;
+      const existing = existingByGoogleId[ev.id];
+
+      if (existing) {
+        // Update only if the remote version is newer than our last known snapshot
+        const remoteTs = ev.updated ? new Date(ev.updated).getTime() : 0;
+        const knownTs  = existing.remoteUpdated ? new Date(existing.remoteUpdated).getTime() : 0;
+        const needsUpdate = remoteTs > knownTs || (ev.status === 'cancelled' && existing.estado !== 'cancelada');
+        if (needsUpdate) {
+          const partial = this.eventToConsultation(ev, clients, calId);
+          useStore.getState().updateConsultation(existing.id, {
+            ...partial,
+            remoteUpdated: ev.updated || null,
+          });
+          stats.updated++;
+        }
+        continue;
+      }
+
+      // Brand-new event — skip cancelled ones (nothing to import)
+      if (ev.status === 'cancelled') continue;
+
+      // ── Patient name extraction + matching ──────────────────────────────────
+      const rawName       = extractPatientName(ev.summary || '');
+      const normalizedName = _normalize(rawName);
+
+      // eventToConsultation already tries exact-match via its internal normalize
+      const partial = this.eventToConsultation(ev, clients, calId);
+      let { clienteId } = partial;
+      let suggestedFromId;
+      let fuzzyAutoLinked = false;
+
+      if (!clienteId && normalizedName) {
+        // Exact match by normalizedName didn't fire in eventToConsultation;
+        // try the richer extractPatientName variant through fuzzy engine
+        const latestStore = useStore.getState();
+        const { auto, candidates } = findBestMatches(
+          rawName,
+          latestStore.clients,
+          { autoThreshold, suggestThreshold },
+        );
+
+        if (auto) {
+          // High-confidence fuzzy match — link silently
+          clienteId = auto.clienteId;
+          fuzzyAutoLinked = true;
+        } else if (!dismissedNames.has(normalizedName)) {
+          // Create or increment a suggestion card in the inbox
+          const sg = latestStore.addPatientSuggestion({
+            sourceCalendarId: calId,
+            rawSummary: ev.summary || '',
+            normalizedName,
+            firstSeenFecha: partial.fecha || null,
+            firstSeenHora:  partial.hora  || null,
+            candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
+          });
+          suggestedFromId = sg?.id;
+        }
+      }
+
+      useStore.getState().addConsultation({
+        ...partial,
+        clienteId,
+        remoteUpdated: ev.updated || null,
+        ...(suggestedFromId   ? { suggestedFromId }        : {}),
+        ...(fuzzyAutoLinked   ? { fuzzyAutoLinked: true }  : {}),
+      });
+      stats.pulled++;
+    }
+
+    // Cancelled / deleted remote events → mark consultation cancelled (never hard-delete)
+    const cancelledSet = new Set(deletedIds);
+    for (const c of useStore.getState().consultations) {
+      if (c.sourceCalendarId === calId && c.googleEventId && cancelledSet.has(c.googleEventId)) {
+        if (c.estado !== 'cancelada') {
+          useStore.getState().updateConsultation(c.id, {
+            estado: 'cancelada',
+            lastSyncedAt: new Date().toISOString(),
+          });
+          stats.updated++;
+        }
+      }
+    }
+
+    useStore.getState().updateCalendarTracking(calId, remoteEvents.length);
+    return stats;
+  },
+
+  /**
+   * Sync a personal calendar (ballet, birthdays, etc.) into `personalEvents`.
+   * Pull-only. Never touches `consultations` — keeps clinical data clean.
+   *
+   * @returns {{ pushed: number, pulled: number, updated: number }}
+   */
+  async _syncPersonalCalendar(store, token, calendarConfig) {
+    const calId = calendarConfig.id;
+    const now = new Date();
+    const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
+    const timeMax = new Date(now.getTime() + 30 * 86400000).toISOString();
+
+    const [remoteEvents, deletedIds] = await Promise.all([
+      this.listEvents(token, calId, timeMin, timeMax),
+      this.listDeletedEventIds(token, calId, timeMin, timeMax),
+    ]);
+
+    // ── Mass-delete guard ──────────────────────────────────────────────────────
+    if (this._detectMassDelete(calendarConfig, remoteEvents)) {
+      const prev = calendarConfig.lastKnownRemoteCount;
+      useStore.getState().markCalendarMassDeletePending(calId, {
+        prevCount: prev, newCount: remoteEvents.length, drop: prev - remoteEvents.length,
+      });
+      if (import.meta.env.DEV) console.warn(`[GCal Personal] Mass-delete detected on ${calId} — sync suspended`);
+      return { pushed: 0, pulled: 0, updated: 0, suspended: true };
+    }
+
+    const stats = { pushed: 0, pulled: 0, updated: 0 };
+
+    // Index existing personalEvents from THIS calendar for O(1) lookups.
+    const freshStore = useStore.getState();
+    const existingByGoogleId = {};
+    for (const e of freshStore.personalEvents) {
+      if (e.sourceCalendarId === calId && e.googleEventId) {
+        existingByGoogleId[e.googleEventId] = e;
+      }
+    }
+
+    for (const ev of remoteEvents) {
+      if (!ev.id) continue;
+      const existing = existingByGoogleId[ev.id];
+      const partial = this.eventToPersonalEvent(ev, calId);
+
+      if (!existing) {
+        // Never add cancelled events as brand-new entries
+        if (ev.status === 'cancelled') continue;
+        freshStore.addPersonalEvent(partial);
+        stats.pulled++;
+      } else {
+        // Update only if remote is newer (remoteUpdated shadow)
+        const remoteTs = ev.updated ? new Date(ev.updated).getTime() : 0;
+        const knownTs  = existing.remoteUpdated ? new Date(existing.remoteUpdated).getTime() : 0;
+        if (remoteTs > knownTs) {
+          freshStore.updatePersonalEvent(existing.id, partial);
+          stats.updated++;
+        }
+      }
+    }
+
+    // Cancelled events → mark personalEvent.cancelled = true (never hard-delete).
+    const cancelledSet = new Set(deletedIds);
+    const latest = useStore.getState().personalEvents;
+    for (const e of latest) {
+      if (e.sourceCalendarId === calId && e.googleEventId && cancelledSet.has(e.googleEventId)) {
+        if (!e.cancelled) {
+          useStore.getState().updatePersonalEvent(e.id, { cancelled: true });
+          stats.updated++;
+        }
+      }
+    }
+
+    useStore.getState().updateCalendarTracking(calId, remoteEvents.length);
+    return stats;
+  },
+
+  /**
    * Sync consultations ±30 days for a single Google Calendar.
    * Bidirectional calendars: push locally-modified consultations, then pull.
    * Read-only calendars: pull only. Cancelled events → "cancelada" (never delete).
@@ -380,7 +713,7 @@ export const googleCalendar = {
    * @param {object} calendarConfig  { id, syncMode }
    * @returns {{ pushed: number, pulled: number, updated: number }}
    */
-  async syncCalendar(store, token, calendarConfig) {
+  async _syncConsultationsCalendar(store, token, calendarConfig) {
     const { clients, updateConsultation, addConsultation } = store;
     const calId = calendarConfig.id;
     const isBidirectional = calendarConfig.syncMode === 'bidirectional';
@@ -394,13 +727,23 @@ export const googleCalendar = {
       this.listDeletedEventIds(token, calId, timeMin, timeMax),
     ]);
 
+    // ── Mass-delete guard ──────────────────────────────────────────────────────
+    if (this._detectMassDelete(calendarConfig, remoteEvents)) {
+      const prev = calendarConfig.lastKnownRemoteCount;
+      useStore.getState().markCalendarMassDeletePending(calId, {
+        prevCount: prev, newCount: remoteEvents.length, drop: prev - remoteEvents.length,
+      });
+      if (import.meta.env.DEV) console.warn(`[GCal Primary] Mass-delete detected on ${calId} — sync suspended`);
+      return { pushed: 0, pulled: 0, updated: 0, suspended: true };
+    }
+
     const consultations = store.consultations;
     const localConsultations = consultations.filter(c => {
       const d = new Date(c.fecha);
       return d >= new Date(timeMin) && d <= new Date(timeMax);
     });
 
-    const stats = { pushed: 0, pulled: 0, updated: 0 };
+    const stats = { pushed: 0, pulled: 0, updated: 0, conflicts: 0 };
 
     // Index remote events for O(1) lookups
     const remoteByGoogleId = {};
@@ -420,7 +763,11 @@ export const googleCalendar = {
               () => this.updateEvent(token, calId, c.googleEventId, event),
               { gcalConfig }
             );
-            updateConsultation(c.id, { lastSyncedAt: new Date().toISOString(), syncPending: false });
+            updateConsultation(c.id, {
+              lastSyncedAt: new Date().toISOString(),
+              syncPending: false,
+              remoteUpdated: remoteByGoogleId[c.googleEventId]?.updated || c.remoteUpdated,
+            });
             stats.pushed++;
             continue;
           }
@@ -436,33 +783,78 @@ export const googleCalendar = {
               googleEventId: result.id,
               sourceCalendarId: calId,
               lastSyncedAt: new Date().toISOString(),
+              remoteUpdated: result.updated || new Date().toISOString(),
             });
             stats.pushed++;
             continue;
           }
 
-          // Case 2: Linked consultation, locally modified since last sync → update on Google
+          // Case 2: Three-way merge — linked consultation, detect local+remote change
           if (c.googleEventId && c.sourceCalendarId === calId && c.localUpdatedAt && c.lastSyncedAt) {
-            const localTs = new Date(c.localUpdatedAt).getTime();
-            const syncTs = new Date(c.lastSyncedAt).getTime();
-            if (localTs > syncTs) {
-              const remote = remoteByGoogleId[c.googleEventId];
-              // Last-write-wins: only push if local is newer than remote
-              const remoteTs = remote?.updated ? new Date(remote.updated).getTime() : 0;
-              if (localTs > remoteTs) {
+            const localTs  = new Date(c.localUpdatedAt).getTime();
+            const syncTs   = new Date(c.lastSyncedAt).getTime();
+            const localChanged = localTs > syncTs;
+
+            const remote = remoteByGoogleId[c.googleEventId];
+            const remoteTs   = remote?.updated ? new Date(remote.updated).getTime() : 0;
+            const knownTs    = c.remoteUpdated  ? new Date(c.remoteUpdated).getTime()  : 0;
+            const remoteChanged = remoteTs > 0 && remoteTs > knownTs;
+
+            if (localChanged && remoteChanged) {
+              // ── True conflict: both sides changed since last sync ─────────────
+              if (localTs >= remoteTs) {
+                // Local wins → push to Google; save remote as shadow for possible undo
+                const conflictShadow = remote ? {
+                  fecha: remote.start?.dateTime?.slice(0, 10) || remote.start?.date,
+                  hora:  remote.start?.dateTime?.slice(11, 16),
+                  duracion: remote.end?.dateTime && remote.start?.dateTime
+                    ? Math.round((new Date(remote.end.dateTime) - new Date(remote.start.dateTime)) / 60000)
+                    : undefined,
+                } : null;
                 const event = this.consultationToEvent(c, clients);
                 await this.withRetry(
                   () => this.updateEvent(token, calId, c.googleEventId, event),
                   { gcalConfig }
                 );
-                updateConsultation(c.id, { lastSyncedAt: new Date().toISOString() });
-                stats.pushed++;
+                updateConsultation(c.id, {
+                  lastSyncedAt: new Date().toISOString(),
+                  remoteUpdated: remote?.updated || new Date().toISOString(),
+                  syncConflict: true,
+                  conflictShadow,
+                });
+              } else {
+                // Remote wins → pull remote; save local as shadow for possible undo
+                const conflictShadow = {
+                  fecha: c.fecha, hora: c.hora, duracion: c.duracion,
+                };
+                const partial = this.eventToConsultation(remote, clients, calId);
+                updateConsultation(c.id, {
+                  ...partial,
+                  lastSyncedAt: new Date().toISOString(),
+                  remoteUpdated: remote.updated || new Date().toISOString(),
+                  syncConflict: true,
+                  conflictShadow,
+                });
               }
+              stats.conflicts++;
+            } else if (localChanged) {
+              // Only local changed → push to Google
+              const event = this.consultationToEvent(c, clients);
+              await this.withRetry(
+                () => this.updateEvent(token, calId, c.googleEventId, event),
+                { gcalConfig }
+              );
+              updateConsultation(c.id, {
+                lastSyncedAt: new Date().toISOString(),
+                remoteUpdated: remote?.updated || c.remoteUpdated,
+                syncConflict: false,
+              });
+              stats.pushed++;
             }
+            // If only remoteChanged (no local change) → handled in PULL phase below
           }
         } catch (e) {
           if (import.meta.env.DEV) console.error(`[GCal Push] Error for consultation ${c.id}:`, e);
-          // Mark as pending sync for retry on next cycle
           updateConsultation(c.id, { syncPending: true });
         }
       }
@@ -483,19 +875,24 @@ export const googleCalendar = {
       if (c.googleEventId && remoteByGoogleId[c.googleEventId]) {
         const remote = remoteByGoogleId[c.googleEventId];
 
-        // For bidirectional: skip if local is newer (already pushed above)
-        if (isBidirectional && c.localUpdatedAt) {
+        // For bidirectional: skip if we already handled this above (local changed)
+        if (isBidirectional && c.localUpdatedAt && c.lastSyncedAt) {
           const localTs = new Date(c.localUpdatedAt).getTime();
-          const remoteTs = remote.updated ? new Date(remote.updated).getTime() : 0;
-          if (localTs > remoteTs) continue;
+          const syncTs  = new Date(c.lastSyncedAt).getTime();
+          if (localTs > syncTs) continue;  // handled in push phase
         }
+
+        const remoteTs = remote.updated ? new Date(remote.updated).getTime() : 0;
+        const knownTs  = c.remoteUpdated ? new Date(c.remoteUpdated).getTime() : 0;
+        if (remoteTs <= knownTs) continue;  // no change on remote side
 
         const partial = this.eventToConsultation(remote, clients, calId);
         updateConsultation(c.id, {
           ...partial,
           lastSyncedAt: new Date().toISOString(),
-          localUpdatedAt: remote.updated || new Date().toISOString(),
+          remoteUpdated: remote.updated || new Date().toISOString(),
           syncPending: false,
+          syncConflict: false,
         });
         stats.updated++;
       }
@@ -519,7 +916,7 @@ export const googleCalendar = {
           ...partial,
           tipo: partial.tipo || 'Google Calendar',
           sourceCalendarId: calId,
-          localUpdatedAt: ev.updated || new Date().toISOString(),
+          remoteUpdated: ev.updated || new Date().toISOString(),
         });
         stats.pulled++;
       }
@@ -536,6 +933,9 @@ export const googleCalendar = {
         }
       }
     }
+
+    // ── Update baseline tracking for next mass-delete check ───────────────────
+    useStore.getState().updateCalendarTracking(calId, remoteEvents.length);
 
     return stats;
   },

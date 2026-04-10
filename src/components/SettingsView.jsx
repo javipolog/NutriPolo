@@ -4,10 +4,10 @@ import {
   Eye, EyeOff, RotateCcw, Send, Loader2, X, Plus, Edit2,
   Trash2, MapPin, ClipboardList, Languages, Calendar, RefreshCw,
   LogOut, Wifi, Palette, Image, Type, ChevronDown, ChevronUp, FileText,
-  Archive, HardDriveDownload, History, ShieldCheck, Clock
+  Archive, HardDriveDownload, History, ShieldCheck, Clock, AlertTriangle, Settings2
 } from 'lucide-react';
 import { Button, Input, Textarea, useToast, useConfirm } from './UI';
-import useStore, { generateId, DEFAULT_INVOICE_DESIGN } from '../stores/store';
+import useStore, { generateId, DEFAULT_INVOICE_DESIGN, inferCalendarPurpose } from '../stores/store';
 import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
 import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar } from '../services/googleCalendarService';
@@ -358,13 +358,29 @@ const SmtpSection = () => {
 
 const GoogleCalendarSection = () => {
   const config = useStore(s => s.config);
+  const consultations = useStore(s => s.consultations);
   const updateConfig = useStore(s => s.updateConfig);
   const clearGoogleCalendarData = useStore(s => s.clearGoogleCalendarData);
   const removeConsultationsForCalendar = useStore(s => s.removeConsultationsForCalendar);
+  const removePersonalEventsForCalendar = useStore(s => s.removePersonalEventsForCalendar);
+  const convertConsultationsToPersonal = useStore(s => s.convertConsultationsToPersonal);
+  const acceptMassDelete = useStore(s => s.acceptMassDelete);
+  const ignoreMassDeleteOnce = useStore(s => s.ignoreMassDeleteOnce);
   const toast = useToast();
+
+  // 3-option migration dialog state (convert / hide / cancel) — useConfirm
+  // only supports yes/no, so we roll a tiny inline modal for this case.
+  const [migrationPrompt, setMigrationPrompt] = useState(null);
+  const [showAdvancedFuzzy, setShowAdvancedFuzzy] = useState(false);
 
   const gcal = config.googleCalendar || {};
   const setGcal = (partial) => updateConfig({ googleCalendar: { ...gcal, ...partial } });
+
+  // Helper: update a single calendar's stored config
+  const updateStoredCal = (calId, patch) => {
+    const updated = (gcal.calendars || []).map(c => c.id === calId ? { ...c, ...patch } : c);
+    setGcal({ calendars: updated });
+  };
 
   // Keep clientId/clientSecret in the store so they survive tab navigation
   const clientId = gcal.clientId || '';
@@ -405,13 +421,23 @@ const GoogleCalendarSection = () => {
       const primary = calList.find(c => c.primary) || calList[0];
       const userEmail = primary?.id || '';
 
-      const newCalendars = calList.map(c => ({
-        id: c.id,
-        name: c.summary,
-        color: c.background_color,
-        accessRole: c.access_role,
-        syncMode: 'disabled',
-      }));
+      const newCalendars = calList.map(c => {
+        const base = {
+          id: c.id,
+          name: c.summary,
+          color: c.background_color,
+          accessRole: c.access_role,
+          syncMode: 'disabled',
+          // Multi-calendar v8 fields — set from inference, user can override in UI
+          purpose: inferCalendarPurpose({ id: c.id, name: c.summary, syncMode: 'disabled' }),
+          lastKnownRemoteCount: null,
+          lastKnownRemoteSyncAt: null,
+          massDeletePending: null,
+          fuzzyAutoThreshold: 0.92,
+          fuzzySuggestThreshold: 0.75,
+        };
+        return base;
+      });
 
       // Auto-detect NutriPolo calendar: set as bidirectional push target if writable
       const nutripoloIdx = newCalendars.findIndex(
@@ -422,6 +448,7 @@ const GoogleCalendarSection = () => {
         const npCal = newCalendars[nutripoloIdx];
         const canWrite = npCal.accessRole !== 'reader';
         npCal.syncMode = canWrite ? 'bidirectional' : 'readonly';
+        npCal.purpose = canWrite ? 'primary' : 'other';
         if (canWrite) defaultPushCalendarId = npCal.id;
       }
 
@@ -500,12 +527,31 @@ const GoogleCalendarSection = () => {
     );
   };
 
+  // Build a fresh stored-entry shell for a calendar we haven't seen before.
+  // Infers purpose from name so the UI always has a concrete value to bind.
+  const makeNewStoredCalendar = (cal, syncMode) => {
+    const seed = { id: cal.id, name: cal.summary, syncMode };
+    return {
+      id: cal.id,
+      name: cal.summary,
+      color: cal.background_color,
+      accessRole: cal.access_role,
+      syncMode,
+      purpose: inferCalendarPurpose(seed),
+      lastKnownRemoteCount: null,
+      lastKnownRemoteSyncAt: null,
+      massDeletePending: null,
+      fuzzyAutoThreshold: 0.92,
+      fuzzySuggestThreshold: 0.75,
+    };
+  };
+
   const handleCalendarSyncMode = (cal, newMode) => {
     const current = gcal.calendars || [];
     const exists = current.find(sc => sc.id === cal.id);
     const updated = exists
       ? current.map(sc => sc.id === cal.id ? { ...sc, syncMode: newMode } : sc)
-      : [...current, { id: cal.id, name: cal.summary, color: cal.background_color, accessRole: cal.access_role, syncMode: newMode }];
+      : [...current, makeNewStoredCalendar(cal, newMode)];
 
     const patch = { calendars: updated };
 
@@ -525,6 +571,103 @@ const GoogleCalendarSection = () => {
       removeConsultationsForCalendar(cal.id);
     }
   };
+
+  // Apply a purpose change (no side effects on consultations — caller decides).
+  const applyPurposeChange = (cal, newPurpose) => {
+    const current = gcal.calendars || [];
+    const stored = current.find(sc => sc.id === cal.id);
+    // primary ⇒ bidirectional (if writable); everything else ⇒ readonly,
+    // preserving a pre-existing 'disabled' so users can keep a calendar off.
+    const canWrite = (stored?.accessRole || cal.access_role) !== 'reader';
+    let newSyncMode;
+    if (newPurpose === 'primary') {
+      if (!canWrite) {
+        toast.error('No se puede marcar como principal un calendario de solo lectura');
+        return;
+      }
+      newSyncMode = 'bidirectional';
+    } else {
+      // Non-primary: if was bidirectional, downgrade to readonly. Keep 'disabled' as-is.
+      const prev = stored?.syncMode || 'disabled';
+      newSyncMode = prev === 'disabled' ? 'disabled' : (prev === 'bidirectional' ? 'readonly' : prev);
+    }
+
+    let updated;
+    if (stored) {
+      updated = current.map(sc =>
+        sc.id === cal.id ? { ...sc, purpose: newPurpose, syncMode: newSyncMode } : sc
+      );
+    } else {
+      updated = [...current, { ...makeNewStoredCalendar(cal, newSyncMode), purpose: newPurpose }];
+    }
+
+    // Enforce single-primary: demote any other primary to 'other' + readonly.
+    if (newPurpose === 'primary') {
+      updated = updated.map(sc =>
+        sc.id !== cal.id && sc.purpose === 'primary'
+          ? { ...sc, purpose: 'other', syncMode: sc.syncMode === 'bidirectional' ? 'readonly' : sc.syncMode }
+          : sc
+      );
+    }
+
+    const patch = { calendars: updated };
+    if (newPurpose === 'primary') {
+      patch.defaultPushCalendarId = cal.id;
+    } else if (gcal.defaultPushCalendarId === cal.id && newSyncMode !== 'bidirectional') {
+      const other = updated.find(sc => sc.syncMode === 'bidirectional' && sc.id !== cal.id);
+      patch.defaultPushCalendarId = other?.id || null;
+    }
+    setGcal(patch);
+  };
+
+  const handleCalendarPurpose = (cal, newPurpose) => {
+    const current = gcal.calendars || [];
+    const stored = current.find(sc => sc.id === cal.id);
+    const prevPurpose = stored?.purpose || inferCalendarPurpose({ id: cal.id, name: cal.summary });
+    if (prevPurpose === newPurpose) return;
+
+    // Count local consultations attached to this calendar — these need migration
+    // when switching to 'personal' (they're not clinical anymore).
+    const affectedCount = consultations.filter(c => c.sourceCalendarId === cal.id).length;
+
+    // Switching TO personal with existing consultations → 3-option dialog.
+    if (newPurpose === 'personal' && affectedCount > 0) {
+      setMigrationPrompt({ cal, newPurpose, count: affectedCount });
+      return;
+    }
+
+    applyPurposeChange(cal, newPurpose);
+  };
+
+  // Migration dialog resolvers
+  const handleMigrationConvert = () => {
+    if (!migrationPrompt) return;
+    const { cal, count } = migrationPrompt;
+    convertConsultationsToPersonal(cal.id);
+    applyPurposeChange(cal, 'personal');
+    setMigrationPrompt(null);
+    toast.success(`${count} citas convertidas a eventos personales`);
+  };
+
+  const handleMigrationHide = () => {
+    if (!migrationPrompt) return;
+    const { cal } = migrationPrompt;
+    const current = gcal.calendars || [];
+    const stored = current.find(sc => sc.id === cal.id);
+    const updated = stored
+      ? current.map(sc => sc.id === cal.id ? { ...sc, purpose: 'personal', syncMode: 'disabled' } : sc)
+      : [...current, { ...makeNewStoredCalendar(cal, 'disabled'), purpose: 'personal' }];
+    const patch = { calendars: updated };
+    if (gcal.defaultPushCalendarId === cal.id) {
+      const other = updated.find(sc => sc.syncMode === 'bidirectional' && sc.id !== cal.id);
+      patch.defaultPushCalendarId = other?.id || null;
+    }
+    setGcal(patch);
+    setMigrationPrompt(null);
+    toast.success('Calendario desactivado — las citas quedan ocultas');
+  };
+
+  const handleMigrationCancel = () => setMigrationPrompt(null);
 
   if (gcal.connected) {
     return (
@@ -552,35 +695,145 @@ const GoogleCalendarSection = () => {
               {calendars.map(cal => {
                 const stored = (gcal.calendars || []).find(sc => sc.id === cal.id);
                 const syncMode = stored?.syncMode || 'disabled';
+                const purpose = stored?.purpose || inferCalendarPurpose({ id: cal.id, name: cal.summary, syncMode });
                 const isReader = cal.access_role === 'reader';
+                const purposeBadge = {
+                  primary:           { label: 'principal', cls: 'bg-green-100 text-green-700' },
+                  'external-clinic': { label: 'clínica',   cls: 'bg-purple-100 text-purple-700' },
+                  personal:          { label: 'personal',  cls: 'bg-sage-200 text-sage-700' },
+                  holidays:          { label: 'festivos',  cls: 'bg-amber-100 text-amber-600' },
+                  other:             { label: '',          cls: '' },
+                }[purpose] || { label: '', cls: '' };
                 return (
-                  <div key={cal.id} className="flex items-center gap-2 p-2 rounded-button border border-sage-200 bg-sage-50">
-                    <span
-                      className="w-3 h-3 rounded-full shrink-0"
-                      style={{ backgroundColor: cal.background_color || '#4285f4' }}
-                    />
-                    <span className="flex-1 text-sm text-sage-700 truncate">{cal.summary || cal.id}</span>
-                    {isReader && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-badge whitespace-nowrap">solo lectura</span>
+                  <div key={cal.id} className="p-2 rounded-button border border-sage-200 bg-sage-50 space-y-1.5">
+                    {/* Top row: color dot, name, badges */}
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3 h-3 rounded-full shrink-0"
+                        style={{ backgroundColor: cal.background_color || '#4285f4' }}
+                      />
+                      <span className="flex-1 text-sm text-sage-700 truncate">{cal.summary || cal.id}</span>
+                      {purposeBadge.label && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-badge whitespace-nowrap ${purposeBadge.cls}`}>
+                          {purposeBadge.label}
+                        </span>
+                      )}
+                      {isReader && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-badge whitespace-nowrap">solo lectura</span>
+                      )}
+                      {gcal.defaultPushCalendarId === cal.id && (
+                        <span className="text-[10px] px-1.5 py-0.5 bg-wellness-100 text-wellness-600 rounded-badge whitespace-nowrap">destino</span>
+                      )}
+                    </div>
+                    {/* Bottom row: purpose + sync mode selectors */}
+                    <div className="flex items-center gap-2 pl-5">
+                      <label className="text-[10px] text-sage-500 whitespace-nowrap">Tipo:</label>
+                      <select
+                        value={purpose}
+                        onChange={e => handleCalendarPurpose(cal, e.target.value)}
+                        className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 flex-1"
+                      >
+                        {!isReader && <option value="primary">Principal (NutriPolo)</option>}
+                        <option value="external-clinic">Clínica externa</option>
+                        <option value="personal">Personal</option>
+                        <option value="holidays">Festivos</option>
+                        <option value="other">Otro</option>
+                      </select>
+                      <select
+                        value={syncMode}
+                        onChange={e => handleCalendarSyncMode(cal, e.target.value)}
+                        className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+                      >
+                        {!isReader && <option value="bidirectional">↔ Bidireccional</option>}
+                        <option value="readonly">← Solo lectura</option>
+                        <option value="disabled">✗ Desactivado</option>
+                      </select>
+                    </div>
+
+                    {/* Mass-delete pending resolution panel */}
+                    {stored?.massDeletePending && (
+                      <div className="ml-5 mt-1 p-2.5 bg-red-50 border border-red-200 rounded-button space-y-2">
+                        <div className="flex items-start gap-2">
+                          <AlertTriangle size={13} className="text-red-500 shrink-0 mt-0.5" />
+                          <p className="text-xs text-red-800 leading-snug">
+                            <strong>Posible borrado masivo:</strong> {stored.massDeletePending.prevCount} → {stored.massDeletePending.newCount} eventos ({stored.massDeletePending.drop} eliminados en Google). Sincronización pausada.
+                          </p>
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          <button
+                            onClick={() => { ignoreMassDeleteOnce(stored.id); toast.info('Sincronización reanudada'); }}
+                            className="px-2 py-1 text-[11px] font-medium bg-white border border-red-300 text-red-700 rounded-button hover:bg-red-50 transition-colors"
+                          >
+                            Ignorar y reanudar
+                          </button>
+                          <button
+                            onClick={() => { acceptMassDelete(stored.id); toast.success('Borrados aceptados — próxima sync aplicará los cambios'); }}
+                            className="px-2 py-1 text-[11px] font-medium bg-red-500 text-white rounded-button hover:bg-red-600 transition-colors"
+                          >
+                            Aceptar borrados
+                          </button>
+                          <button
+                            onClick={() => handleCalendarSyncMode(cal, 'disabled')}
+                            className="px-2 py-1 text-[11px] text-red-500 hover:text-red-700 transition-colors"
+                          >
+                            Desactivar calendario
+                          </button>
+                        </div>
+                      </div>
                     )}
-                    {gcal.defaultPushCalendarId === cal.id && (
-                      <span className="text-[10px] px-1.5 py-0.5 bg-wellness-100 text-wellness-600 rounded-badge whitespace-nowrap">destino</span>
-                    )}
-                    <select
-                      value={syncMode}
-                      onChange={e => handleCalendarSyncMode(cal, e.target.value)}
-                      className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
-                    >
-                      {!isReader && <option value="bidirectional">↔ Bidireccional</option>}
-                      <option value="readonly">← Solo lectura</option>
-                      <option value="disabled">✗ Desactivado</option>
-                    </select>
                   </div>
                 );
               })}
             </div>
           )}
         </div>
+
+        {/* Migration dialog (purpose → personal with existing consultations) */}
+        {migrationPrompt && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={handleMigrationCancel}>
+            <div className="bg-white rounded-card max-w-md w-full p-5 space-y-3" onClick={e => e.stopPropagation()}>
+              <h3 className="text-lg font-semibold text-sage-700">Cambiar a calendario personal</h3>
+              <p className="text-sm text-sage-600">
+                Este calendario tiene <strong>{migrationPrompt.count}</strong> cita{migrationPrompt.count === 1 ? '' : 's'} registrada{migrationPrompt.count === 1 ? '' : 's'} como consulta.
+                Al cambiar el tipo a <em>Personal</em>, estas ya no serán consultas clínicas. ¿Qué prefieres hacer con ellas?
+              </p>
+              <div className="space-y-2 pt-2">
+                <Button variant="primary" className="w-full justify-start" onClick={handleMigrationConvert}>
+                  Convertir en eventos personales
+                  <span className="block text-xs opacity-80 mt-0.5">Se moverán fuera de facturación, estadísticas y agenda clínica.</span>
+                </Button>
+                <Button variant="secondary" className="w-full justify-start" onClick={handleMigrationHide}>
+                  Desactivar el calendario
+                  <span className="block text-xs opacity-80 mt-0.5">Las consultas permanecen guardadas pero ocultas hasta que reactives el calendario.</span>
+                </Button>
+                <Button variant="ghost" className="w-full" onClick={handleMigrationCancel}>
+                  Cancelar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Purpose summary card */}
+        {(gcal.calendars || []).length > 0 && (() => {
+          const counts = { primary: 0, 'external-clinic': 0, personal: 0, holidays: 0, disabled: 0 };
+          for (const c of gcal.calendars || []) {
+            if (c.syncMode === 'disabled') { counts.disabled++; continue; }
+            counts[c.purpose || 'other'] = (counts[c.purpose || 'other'] || 0) + 1;
+          }
+          const parts = [
+            counts.primary && `${counts.primary} principal`,
+            counts['external-clinic'] && `${counts['external-clinic']} clínica`,
+            counts.personal && `${counts.personal} personal`,
+            counts.holidays && `${counts.holidays} festivos`,
+            counts.disabled && `${counts.disabled} desactivado${counts.disabled > 1 ? 's' : ''}`,
+          ].filter(Boolean);
+          return parts.length ? (
+            <div className="px-3 py-2 bg-sage-50 border border-sage-200 rounded-soft text-xs text-sage-500">
+              {parts.join(' · ')}
+            </div>
+          ) : null;
+        })()}
 
         {/* Push calendar indicator */}
         {gcal.defaultPushCalendarId && (() => {
@@ -597,6 +850,57 @@ const GoogleCalendarSection = () => {
             </div>
           ) : null;
         })()}
+
+        {/* Advanced: fuzzy thresholds (collapsed by default) */}
+        {(gcal.calendars || []).some(c => c.purpose === 'external-clinic') && (
+          <div className="border border-sage-200 rounded-soft overflow-hidden">
+            <button
+              onClick={() => setShowAdvancedFuzzy(v => !v)}
+              className="w-full flex items-center justify-between px-3 py-2 bg-sage-50 text-xs text-sage-600 hover:bg-sage-100 transition-colors"
+            >
+              <span className="flex items-center gap-1.5">
+                <Settings2 size={12} />
+                Configuración avanzada — detección de pacientes
+              </span>
+              {showAdvancedFuzzy ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+            </button>
+            {showAdvancedFuzzy && (
+              <div className="px-3 pb-3 pt-2 space-y-3">
+                {(gcal.calendars || []).filter(c => c.purpose === 'external-clinic').map(c => (
+                  <div key={c.id} className="space-y-2">
+                    <p className="text-[11px] font-medium text-sage-600">{c.name}</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] text-sage-500 mb-1">
+                          Umbral auto-link ({Math.round((c.fuzzyAutoThreshold ?? 0.92) * 100)}%)
+                        </label>
+                        <input
+                          type="range" min="70" max="99" step="1"
+                          value={Math.round((c.fuzzyAutoThreshold ?? 0.92) * 100)}
+                          onChange={e => updateStoredCal(c.id, { fuzzyAutoThreshold: parseInt(e.target.value) / 100 })}
+                          className="w-full accent-wellness-400"
+                        />
+                        <p className="text-[10px] text-sage-400 mt-0.5">Mínimo para vincular automáticamente</p>
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-sage-500 mb-1">
+                          Umbral sugerencia ({Math.round((c.fuzzySuggestThreshold ?? 0.75) * 100)}%)
+                        </label>
+                        <input
+                          type="range" min="50" max="90" step="1"
+                          value={Math.round((c.fuzzySuggestThreshold ?? 0.75) * 100)}
+                          onChange={e => updateStoredCal(c.id, { fuzzySuggestThreshold: parseInt(e.target.value) / 100 })}
+                          className="w-full accent-wellness-400"
+                        />
+                        <p className="text-[10px] text-sage-400 mt-0.5">Mínimo para proponer en el buzón</p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Auto-sync toggle */}
         <div className="flex items-center justify-between">

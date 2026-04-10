@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles, Download, RefreshCw } from 'lucide-react';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles, Download, RefreshCw, UserPlus } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import useStore from './stores/store';
@@ -226,6 +226,11 @@ function ViewLoader({ view }) {
             setComponents(c => ({ ...c, settings: m.SettingsView || m.default }));
             break;
           }
+          case 'inbox': {
+            const m = await import('./components/PatientSuggestionsInbox');
+            setComponents(c => ({ ...c, inbox: m.PatientSuggestionsInbox || m.default }));
+            break;
+          }
         }
       } catch {
         // Component not yet created — show placeholder
@@ -256,6 +261,9 @@ function AppContent() {
   const _future = useStore(s => s._future);
   const runAutoBackup = useStore(s => s.runAutoBackup);
   const validateDataIntegrity = useStore(s => s.validateDataIntegrity);
+  const pendingPatients = useStore(s =>
+    (s.patientSuggestions || []).filter(sg => sg.status === 'pending').length
+  );
 
   const toast = useToast();
   const t = useT();
@@ -319,6 +327,7 @@ function AppContent() {
     { id: 'invoices',  icon: Receipt,       label: t.nav_invoices,  shortcut: '5' },
     { id: 'services',  icon: Package,       label: t.nav_services,  shortcut: '6' },
     { id: 'settings',  icon: Settings,      label: t.nav_settings,  shortcut: '7' },
+    { id: 'inbox',     icon: UserPlus,      label: t.nav_inbox || 'Pacientes',    shortcut: null, badge: pendingPatients },
   ];
 
   const toastRef = useRef(toast);
@@ -405,25 +414,45 @@ function AppContent() {
                 <li key={item.id}>
                   <button
                     onClick={() => setCurrentView(item.id)}
-                    className={`w-full flex items-center gap-3 rounded-button transition-colors duration-150 group ${
+                    className={`relative w-full flex items-center gap-3 rounded-button transition-colors duration-150 group ${
                       sidebarCollapsed ? 'justify-center p-3' : 'px-3 py-2.5'
                     } ${currentView === item.id
                       ? 'bg-wellness-400 text-white'
                       : 'text-sage-600 hover:bg-sage-200 hover:text-sage-900'
                     }`}
-                    title={sidebarCollapsed ? `${item.label} (Ctrl+${item.shortcut})` : `Ctrl+${item.shortcut}`}
+                    title={sidebarCollapsed
+                      ? `${item.label}${item.shortcut ? ` (Ctrl+${item.shortcut})` : ''}`
+                      : item.shortcut ? `Ctrl+${item.shortcut}` : item.label
+                    }
                   >
                     <item.icon size={17} className="shrink-0" />
+                    {/* Badge dot on collapsed sidebar */}
+                    {sidebarCollapsed && item.badge > 0 && (
+                      <span className="absolute top-1 right-1 min-w-[14px] h-3.5 flex items-center justify-center px-1 rounded-full bg-orange-400 text-white text-[9px] font-bold leading-none">
+                        {item.badge > 99 ? '99+' : item.badge}
+                      </span>
+                    )}
                     {!sidebarCollapsed && (
                       <>
                         <span className="flex-1 text-left text-sm font-medium">{item.label}</span>
-                        <kbd className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                          currentView === item.id
-                            ? 'bg-wellness-500/40 text-wellness-100 border-wellness-300/30'
-                            : 'bg-sage-200 text-sage-500 border-sage-300 group-hover:bg-sage-300'
-                        }`}>
-                          {item.shortcut}
-                        </kbd>
+                        {/* Badge pill takes priority over keyboard shortcut */}
+                        {item.badge > 0 ? (
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                            currentView === item.id
+                              ? 'bg-white/30 text-white'
+                              : 'bg-orange-400 text-white'
+                          }`}>
+                            {item.badge > 99 ? '99+' : item.badge}
+                          </span>
+                        ) : item.shortcut ? (
+                          <kbd className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                            currentView === item.id
+                              ? 'bg-wellness-500/40 text-wellness-100 border-wellness-300/30'
+                              : 'bg-sage-200 text-sage-500 border-sage-300 group-hover:bg-sage-300'
+                          }`}>
+                            {item.shortcut}
+                          </kbd>
+                        ) : null}
                       </>
                     )}
                   </button>

@@ -435,6 +435,58 @@ export const TRANSLATIONS = {
     gcal_sync_updated:       'actualizados',
     gcal_sync_error:         'Error al sincronizar con Google Calendar',
     gcal_sync_retry:         'Reintentar',
+
+    // Calendar purposes (multi-calendar v8)
+    purpose_label:           'Tipo',
+    purpose_primary:         'Principal (NutriPolo)',
+    purpose_external_clinic: 'Clínica externa',
+    purpose_personal:        'Personal',
+    purpose_holidays:        'Festivos',
+    purpose_other:           'Otro',
+    personal_event_prefix:   'Personal',
+    purpose_migrate_title:   'Cambiar a calendario personal',
+    purpose_migrate_body:    'Este calendario tiene citas registradas como consulta. Al cambiar el tipo a Personal, ya no serán consultas clínicas.',
+    purpose_migrate_convert: 'Convertir en eventos personales',
+    purpose_migrate_convert_hint: 'Se moverán fuera de facturación, estadísticas y agenda clínica.',
+    purpose_migrate_hide:    'Desactivar el calendario',
+    purpose_migrate_hide_hint: 'Las consultas permanecen guardadas pero ocultas hasta que reactives el calendario.',
+    purpose_primary_reader_error: 'No se puede marcar como principal un calendario de solo lectura',
+
+    // Patient suggestions inbox (multi-calendar v8 Phase 2)
+    nav_inbox:                   'Pacientes',
+    patient_inbox_title:         'Nuevos pacientes detectados',
+    patient_inbox_empty:         'Sin sugerencias pendientes de revisar',
+    patient_inbox_pending:       'paciente por identificar',
+    patient_inbox_pending_plural:'pacientes por identificar',
+    suggestion_raw_summary:      'Resumen original',
+    suggestion_extracted_name:   'Nombre detectado',
+    suggestion_first_seen:       'Primera vez',
+    suggestion_occurrences:      'ocurrencias',
+    suggestion_candidates:       'Candidatos similares',
+    suggestion_no_candidates:    'Sin candidatos — posiblemente un paciente nuevo',
+    suggestion_link:             'Vincular',
+    suggestion_create:           'Crear cliente nuevo',
+    suggestion_dismiss:          'Descartar',
+    suggestion_linked_ok:        'Vinculado a',
+    suggestion_created_ok:       'creado y vinculado',
+    suggestion_dismissed_ok:     'Sugerencia descartada — no volverá a aparecer',
+    new_patients_banner:         'paciente nuevo detectado en la clínica externa',
+    new_patients_banner_plural:  'pacientes nuevos detectados en la clínica externa',
+    new_patients_review:         'Revisar',
+
+    // Mass-delete protection (Phase 3)
+    mass_delete_title:       'Posible borrado masivo en',
+    mass_delete_explanation: 'eventos eliminados en Google. La sincronización está pausada.',
+    mass_delete_accept:      'Aceptar borrados',
+    mass_delete_ignore:      'Ignorar y reanudar',
+    mass_delete_suspend:     'Desactivar calendario',
+
+    // Conflict resolution (Phase 3)
+    sync_conflict_resolved:        'conflicto resuelto — la versión más reciente se conservó',
+    sync_conflict_resolved_plural: 'conflictos resueltos — la versión más reciente se conservó',
+
+    // Readonly consultation modal (Phase 3)
+    consultation_readonly_warning: 'Esta cita viene de "{cal}" (solo lectura). Fecha, hora y duración no se pueden editar desde aquí.',
   },
 
   ca: {
@@ -799,6 +851,59 @@ export const TRANSLATIONS = {
     gcal_sync_updated:       'actualitzats',
     gcal_sync_error:         'Error en sincronitzar amb Google Calendar',
     gcal_sync_retry:         'Reintentar',
+
+    // Calendar purposes
+    purpose_label:           'Tipus',
+    purpose_primary:         'Principal (NutriPolo)',
+    purpose_external_clinic: 'Clínica externa',
+    purpose_personal:        'Personal',
+    purpose_holidays:        'Festius',
+    purpose_other:           'Altre',
+    personal_event_prefix:   'Personal',
+    purpose_migrate_title:   'Canviar a calendari personal',
+    purpose_migrate_body:    'Aquest calendari té cites registrades com a consulta. En canviar el tipus a Personal, ja no seran consultes clíniques.',
+    purpose_migrate_convert: 'Convertir en esdeveniments personals',
+    purpose_migrate_convert_hint: 'Es mouran fora de facturació, estadístiques i agenda clínica.',
+    purpose_migrate_hide:    'Desactivar el calendari',
+    purpose_migrate_hide_hint: 'Les consultes es mantenen guardades però ocultes fins que reactivis el calendari.',
+    purpose_primary_reader_error: 'No es pot marcar com a principal un calendari només lectura',
+
+    // Patient suggestions inbox
+    nav_inbox:                   'Pacients',
+    patient_inbox_title:         'Nous pacients detectats',
+    patient_inbox_empty:         'Sense suggeriments pendents de revisar',
+    patient_inbox_pending:       'pacient per identificar',
+    patient_inbox_pending_plural:'pacients per identificar',
+    suggestion_raw_summary:      'Resum original',
+    suggestion_extracted_name:   'Nom detectat',
+    suggestion_first_seen:       'Primera vegada',
+    suggestion_occurrences:      'ocurrències',
+    suggestion_candidates:       'Candidats similars',
+    suggestion_no_candidates:    'Sense candidats — possiblement un pacient nou',
+    suggestion_link:             'Vincular',
+    suggestion_create:           'Crear client nou',
+    suggestion_dismiss:          'Descartar',
+    suggestion_linked_ok:        'Vinculat a',
+    suggestion_created_ok:       'creat i vinculat',
+    suggestion_dismissed_ok:     'Suggeriment descartat — no tornarà a aparèixer',
+    new_patients_banner:         'pacient nou detectat a la clínica externa',
+    new_patients_banner_plural:  'pacients nous detectats a la clínica externa',
+    new_patients_review:         'Revisar',
+
+    // Mass-delete protection (Phase 3)
+    mass_delete_title:       'Possible esborrada massiva a',
+    mass_delete_explanation: 'esdeveniments eliminats a Google. La sincronització està en pausa.',
+    mass_delete_accept:      'Acceptar esborrades',
+    mass_delete_ignore:      'Ignorar i reprendre',
+    mass_delete_suspend:     'Desactivar calendari',
+
+    // Conflict resolution (Phase 3)
+    sync_conflict_resolved:        'conflicte resolt — la versió més recent s\'ha conservat',
+    sync_conflict_resolved_plural: 'conflictes resolts — la versió més recent s\'ha conservat',
+
+    // Readonly consultation modal (Phase 3)
+    consultation_readonly_warning: 'Aquesta cita ve de "{cal}" (només lectura). Data, hora i durada no es poden editar des d\'aquí.',
+
     day_mon: 'Dilluns', day_tue: 'Dimarts', day_wed: 'Dimecres', day_thu: 'Dijous',
     day_fri: 'Divendres', day_sat: 'Dissabte', day_sun: 'Diumenge',
   },
@@ -1004,6 +1109,59 @@ export const TRANSLATIONS = {
     gcal_sync_updated:       'updated',
     gcal_sync_error:         'Error syncing with Google Calendar',
     gcal_sync_retry:         'Retry',
+
+    // Calendar purposes
+    purpose_label:           'Type',
+    purpose_primary:         'Main (NutriPolo)',
+    purpose_external_clinic: 'External clinic',
+    purpose_personal:        'Personal',
+    purpose_holidays:        'Holidays',
+    purpose_other:           'Other',
+    personal_event_prefix:   'Personal',
+    purpose_migrate_title:   'Switch to personal calendar',
+    purpose_migrate_body:    'This calendar has events stored as consultations. Switching to Personal means they are no longer clinical consultations.',
+    purpose_migrate_convert: 'Convert to personal events',
+    purpose_migrate_convert_hint: 'They will leave billing, stats, and the clinical agenda.',
+    purpose_migrate_hide:    'Disable the calendar',
+    purpose_migrate_hide_hint: 'Existing consultations stay stored but hidden until you re-enable it.',
+    purpose_primary_reader_error: 'A read-only calendar cannot be marked as main',
+
+    // Patient suggestions inbox
+    nav_inbox:                   'Patients',
+    patient_inbox_title:         'New patients detected',
+    patient_inbox_empty:         'No pending suggestions to review',
+    patient_inbox_pending:       'patient to identify',
+    patient_inbox_pending_plural:'patients to identify',
+    suggestion_raw_summary:      'Original summary',
+    suggestion_extracted_name:   'Detected name',
+    suggestion_first_seen:       'First seen',
+    suggestion_occurrences:      'occurrences',
+    suggestion_candidates:       'Similar candidates',
+    suggestion_no_candidates:    'No candidates — likely a new patient',
+    suggestion_link:             'Link',
+    suggestion_create:           'Create new client',
+    suggestion_dismiss:          'Dismiss',
+    suggestion_linked_ok:        'Linked to',
+    suggestion_created_ok:       'created and linked',
+    suggestion_dismissed_ok:     'Suggestion dismissed — won\'t reappear',
+    new_patients_banner:         'new patient detected from external clinic',
+    new_patients_banner_plural:  'new patients detected from external clinic',
+    new_patients_review:         'Review',
+
+    // Mass-delete protection (Phase 3)
+    mass_delete_title:       'Possible mass deletion in',
+    mass_delete_explanation: 'events deleted in Google. Sync is paused.',
+    mass_delete_accept:      'Accept deletions',
+    mass_delete_ignore:      'Ignore and resume',
+    mass_delete_suspend:     'Disable calendar',
+
+    // Conflict resolution (Phase 3)
+    sync_conflict_resolved:        'conflict resolved — the most recent version was kept',
+    sync_conflict_resolved_plural: 'conflicts resolved — the most recent version was kept',
+
+    // Readonly consultation modal (Phase 3)
+    consultation_readonly_warning: 'This appointment comes from "{cal}" (read-only). Date, time and duration cannot be edited here.',
+
     day_mon: 'Monday', day_tue: 'Tuesday', day_wed: 'Wednesday', day_thu: 'Thursday',
     day_fri: 'Friday', day_sat: 'Saturday', day_sun: 'Sunday',
   },

@@ -245,8 +245,15 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
    SECTION: ALERTS PANEL
    ============================================ */
 
-const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, onNavigate }) => {
+const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, pendingPatients, onNavigate }) => {
     const alerts = [
+        pendingPatients > 0 && {
+            icon: UserPlus,
+            color: 'orange',
+            title: `${pendingPatients} paciente${pendingPatients !== 1 ? 's' : ''} nuevo${pendingPatients !== 1 ? 's' : ''} por identificar`,
+            desc: 'Detectados en la clínica externa — vincúlalos o crea sus fichas',
+            action: () => onNavigate('inbox'),
+        },
         followUps.length > 0 && {
             icon: AlertTriangle,
             color: 'warning',
@@ -278,6 +285,7 @@ const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, o
     ].filter(Boolean);
 
     const colorMap = {
+        orange:  { bg: 'bg-orange-50',     border: 'border-orange-200', text: 'text-orange-600' },
         warning: { bg: 'bg-warning-light', border: 'border-warning/20', text: 'text-warning' },
         danger:  { bg: 'bg-danger-light',  border: 'border-danger/20',  text: 'text-danger'  },
         amber:   { bg: 'bg-warning-light', border: 'border-warning/20', text: 'text-warning' },
@@ -569,9 +577,14 @@ export const Dashboard = () => {
     const nutritionPlans = useStore(s => s.nutritionPlans);
     const invoices       = useStore(s => s.invoices);
     const config         = useStore(s => s.config);
+    const patientSuggestions = useStore(s => s.patientSuggestions);
     const consultations  = useMemo(
       () => filterVisibleConsultations(allConsultations, config.googleCalendar),
       [allConsultations, config.googleCalendar]
+    );
+    const pendingPatients = useMemo(
+      () => (patientSuggestions || []).filter(sg => sg.status === 'pending').length,
+      [patientSuggestions]
     );
     const setCurrentView = useStore(s => s.setCurrentView);
     const getTodayConsultations   = useStore(s => s.getTodayConsultations);
@@ -709,6 +722,7 @@ export const Dashboard = () => {
                         expiringPlans={expiringPlans}
                         unbilledCount={unbilledCount}
                         upcomingCount={upcoming.length}
+                        pendingPatients={pendingPatients}
                         onNavigate={setCurrentView}
                     />
                 </div>

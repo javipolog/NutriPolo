@@ -105,6 +105,52 @@ export function filterVisibleConsultations(consultations, googleCalendarConfig) 
   );
 }
 
+// Parallel filter for personal events (ballet, birthdays, etc. from read-only personal calendars).
+// These live in their own collection and must NEVER leak into consultations / billing / stats.
+export function filterVisiblePersonalEvents(personalEvents, googleCalendarConfig) {
+  if (!Array.isArray(personalEvents)) return [];
+  const calendars = googleCalendarConfig?.calendars || [];
+  if (calendars.length === 0) return personalEvents;
+  const enabledIds = new Set(
+    calendars.filter(c => c.syncMode !== 'disabled').map(c => c.id)
+  );
+  return personalEvents.filter(e =>
+    !e.sourceCalendarId || enabledIds.has(e.sourceCalendarId)
+  );
+}
+
+// Detect Google "holiday" / festive calendars from id+name heuristics.
+// Defined as hoisted function so migrateStore (below) can call it.
+export function isHolidayCalendarLike(cal) {
+  if (!cal) return false;
+  const id = (cal.id || '').toLowerCase();
+  const name = (cal.name || cal.summary || '').toLowerCase();
+  return (
+    id.endsWith('@holiday.calendar.google.com') ||
+    id.includes('holiday@group.v.calendar.google.com') ||
+    /holiday|holidays|festivo|festivos|vacaciones|días festivos/.test(name)
+  );
+}
+
+// Infer a reasonable default `purpose` for a calendar entry that existed before
+// the multi-purpose migration. Manual override via Settings is still required
+// for anything the heuristic gets wrong.
+//   primary         — NutriPolo's own calendar (bidirectional)
+//   external-clinic — Sinergia / external agenda we read patients from
+//   personal        — ballet, birthdays, private events (NOT consultations)
+//   holidays        — Google's holiday calendars
+//   other           — unknown, safest readonly default
+export function inferCalendarPurpose(cal) {
+  if (!cal) return 'other';
+  if (isHolidayCalendarLike(cal)) return 'holidays';
+  const name = (cal.name || cal.summary || '').toLowerCase();
+  // Primary check runs first: "NutriPolo App" matches here and skips the broader /nutri/ bucket below.
+  if (cal.syncMode === 'bidirectional' || /nutripolo/.test(name)) return 'primary';
+  // Broader fallback — "Raquel Polo Nutri" (Sinergia) lands here via "nutri".
+  if (/sinergia|clínica|clinica|clinic|nutri/.test(name)) return 'external-clinic';
+  return 'other';
+}
+
 // ============================================
 // INVOICE TOTALS COMPUTATION
 // ============================================
@@ -145,7 +191,7 @@ const DEFAULT_SERVICES = [
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 7;
+const STORE_VERSION = 8;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -246,6 +292,34 @@ function migrateStore(persistedState, version) {
       delete persistedState.state.invoiceCounter;
     }
   }
+  if (version < 8) {
+    // v7 → v8: multi-calendar purposes, personal events collection, mass-delete tracking.
+    // Bidirectional vs readonly (transport) is now separate from purpose (semantics):
+    //   primary           → bidirectional sync, our own agenda
+    //   external-clinic   → readonly, fuzzy-match new patients to existing clients
+    //   personal          → readonly, land in personalEvents (NEVER consultations)
+    //   holidays / other  → readonly, plain events
+    const s = persistedState.state;
+    if (s) {
+      if (!Array.isArray(s.personalEvents))    s.personalEvents    = [];
+      if (!Array.isArray(s.patientSuggestions)) s.patientSuggestions = [];
+      if (!s.syncAudit) {
+        s.syncAudit = { lastFullSyncAt: null, lastSyncStats: {}, massDeleteEvents: [] };
+      }
+      const cals = s.config?.googleCalendar?.calendars;
+      if (Array.isArray(cals)) {
+        s.config.googleCalendar.calendars = cals.map(c => ({
+          ...c,
+          purpose: c.purpose || inferCalendarPurpose(c),
+          lastKnownRemoteCount: c.lastKnownRemoteCount ?? null,
+          lastKnownRemoteSyncAt: c.lastKnownRemoteSyncAt || null,
+          massDeletePending: c.massDeletePending || null,
+          fuzzyAutoThreshold: c.fuzzyAutoThreshold ?? 0.92,
+          fuzzySuggestThreshold: c.fuzzySuggestThreshold ?? 0.75,
+        }));
+      }
+    }
+  }
   return persistedState;
 }
 
@@ -313,9 +387,14 @@ const useStore = create(
         },
         consultations: s.consultations.map(c => {
           if (!c.googleEventId) return c;
-          const { googleEventId, lastSyncedAt, googleSummary, sourceCalendarId, ...rest } = c;
+          const { googleEventId, lastSyncedAt, googleSummary, sourceCalendarId, remoteUpdated, ...rest } = c;
           return rest;
         }),
+        // Personal events come 100% from Google; disconnecting orphans them.
+        personalEvents: [],
+        // Patient suggestions are generated from external-clinic pulls → same rule.
+        patientSuggestions: [],
+        syncAudit: { lastFullSyncAt: null, lastSyncStats: {}, massDeleteEvents: [] },
       })),
 
       // ---- CLIENTS ----
@@ -442,6 +521,189 @@ const useStore = create(
       removeConsultationsForCalendar: (calendarId) => set(s => ({
         consultations: s.consultations.filter(c => c.sourceCalendarId !== calendarId),
       })),
+
+      // ---- PERSONAL EVENTS ----
+      // Events pulled from calendars whose purpose === 'personal' (ballet, birthdays,
+      // appointments that are NOT consultations). Deliberately isolated from
+      // `consultations` so they can never contaminate revenue, billing, dashboard
+      // stats or the "today's consultations" list.
+      personalEvents: [],
+
+      addPersonalEvent: (event) => {
+        const newE = {
+          id: event.id || generateId(),
+          ...event,
+        };
+        set(s => ({ personalEvents: [...s.personalEvents, newE] }));
+        return newE;
+      },
+      updatePersonalEvent: (id, data) => set(s => ({
+        personalEvents: s.personalEvents.map(e => e.id === id ? { ...e, ...data } : e),
+      })),
+      deletePersonalEvent: (id) => set(s => ({
+        personalEvents: s.personalEvents.filter(e => e.id !== id),
+      })),
+      removePersonalEventsForCalendar: (calendarId) => set(s => ({
+        personalEvents: s.personalEvents.filter(e => e.sourceCalendarId !== calendarId),
+      })),
+
+      // Move consultations from a given calendar into personalEvents (used when
+      // user switches a calendar's purpose to 'personal' and chooses "convert").
+      // Strips all clinical fields — these are no longer consultas.
+      convertConsultationsToPersonal: (calendarId) => set(s => {
+        const toMove = s.consultations.filter(c => c.sourceCalendarId === calendarId);
+        const converted = toMove.map(c => ({
+          id: generateId(),
+          googleEventId: c.googleEventId || null,
+          sourceCalendarId: c.sourceCalendarId,
+          title: c.googleSummary || c.clienteNombre || c.notasCliente || '(sin título)',
+          fecha: c.fecha,
+          hora: c.hora,
+          duracion: c.duracion,
+          allDay: false,
+          lastSyncedAt: c.lastSyncedAt || null,
+          remoteUpdated: c.remoteUpdated || null,
+          cancelled: c.estado === 'cancelada',
+        }));
+        return {
+          consultations: s.consultations.filter(c => c.sourceCalendarId !== calendarId),
+          personalEvents: [...s.personalEvents, ...converted],
+        };
+      }),
+
+      // ---- PATIENT SUGGESTIONS (Phase 2 — inbox for external-clinic detection) ----
+      patientSuggestions: [],
+
+      // Add or dedup a patient suggestion for an unrecognised external-clinic event.
+      // Dedup rule: if a PENDING suggestion already exists for the same
+      // (sourceCalendarId, normalizedName), increment its occurrences counter instead
+      // of creating a duplicate card in the inbox.
+      addPatientSuggestion: (suggestion) => {
+        const existing = get().patientSuggestions.find(sg =>
+          sg.status === 'pending' &&
+          sg.sourceCalendarId === suggestion.sourceCalendarId &&
+          sg.normalizedName === suggestion.normalizedName
+        );
+        if (existing) {
+          set(s => ({
+            patientSuggestions: s.patientSuggestions.map(sg =>
+              sg.id === existing.id
+                ? { ...sg, occurrences: (sg.occurrences || 1) + 1 }
+                : sg
+            ),
+          }));
+          return existing;
+        }
+        const newSg = {
+          status: 'pending',
+          occurrences: 1,
+          candidates: [],
+          linkedClienteId: null,
+          dismissedAt: null,
+          detectedAt: new Date().toISOString(),
+          ...suggestion,      // sourceCalendarId, rawSummary, normalizedName, etc.
+          id: generateId(),   // always a fresh ID regardless of suggestion payload
+        };
+        set(s => ({ patientSuggestions: [...s.patientSuggestions, newSg] }));
+        return newSg;
+      },
+
+      // Mark a suggestion as linked and backfill clienteId on every consultation
+      // that was imported with suggestedFromId pointing to this suggestion.
+      linkPatientSuggestion: (suggestionId, clienteId) => {
+        set(s => ({
+          patientSuggestions: s.patientSuggestions.map(sg =>
+            sg.id === suggestionId
+              ? { ...sg, status: 'linked', linkedClienteId: clienteId }
+              : sg
+          ),
+          consultations: s.consultations.map(c =>
+            c.suggestedFromId === suggestionId && !c.clienteId
+              ? { ...c, clienteId, suggestedFromId: undefined }
+              : c
+          ),
+        }));
+      },
+
+      // Create a brand-new client and immediately link the suggestion to it.
+      createClientFromSuggestion: (suggestionId, clientData) => {
+        const newClient = get().addClient(clientData);
+        get().linkPatientSuggestion(suggestionId, newClient.id);
+        return newClient;
+      },
+
+      // Dismiss a suggestion so it never reappears in the inbox for this patient name.
+      // _syncExternalClinic checks the dismissed set before creating new suggestions.
+      dismissPatientSuggestion: (suggestionId) => {
+        set(s => ({
+          patientSuggestions: s.patientSuggestions.map(sg =>
+            sg.id === suggestionId
+              ? { ...sg, status: 'dismissed', dismissedAt: new Date().toISOString() }
+              : sg
+          ),
+        }));
+      },
+
+      // ---- SYNC AUDIT (Phase 3 — mass-delete log, stats) ----
+      syncAudit: { lastFullSyncAt: null, lastSyncStats: {}, massDeleteEvents: [] },
+
+      // Mark a calendar as having a suspicious mass-delete pending review.
+      markCalendarMassDeletePending: (calendarId, { prevCount, newCount, drop }) => {
+        const detectedAt = new Date().toISOString();
+        set(s => {
+          const calendars = (s.config.googleCalendar?.calendars || []).map(c =>
+            c.id === calendarId
+              ? { ...c, massDeletePending: { detectedAt, prevCount, newCount, drop } }
+              : c
+          );
+          const entry = { calendarId, detectedAt, prevCount, newCount, drop };
+          const massDeleteEvents = [entry, ...(s.syncAudit.massDeleteEvents || [])].slice(0, 10);
+          return {
+            config: { ...s.config, googleCalendar: { ...s.config.googleCalendar, calendars } },
+            syncAudit: { ...s.syncAudit, massDeleteEvents },
+          };
+        });
+      },
+
+      // Accept pending mass-delete: clear the pending flag and let cancelled events
+      // flow through on the next sync. Does NOT modify consultations — the next sync
+      // will mark them 'cancelada' via the normal cancelled-events pipeline.
+      acceptMassDelete: (calendarId) => {
+        set(s => {
+          const calendars = (s.config.googleCalendar?.calendars || []).map(c =>
+            c.id === calendarId
+              ? { ...c, massDeletePending: null, lastKnownRemoteCount: null }
+              : c
+          );
+          return { config: { ...s.config, googleCalendar: { ...s.config.googleCalendar, calendars } } };
+        });
+      },
+
+      // Ignore mass-delete once: clear pending so the next sync runs normally,
+      // keeping the new (smaller) count as the new baseline.
+      ignoreMassDeleteOnce: (calendarId) => {
+        set(s => {
+          const calendars = (s.config.googleCalendar?.calendars || []).map(c =>
+            c.id === calendarId
+              ? { ...c, massDeletePending: null }
+              : c
+          );
+          return { config: { ...s.config, googleCalendar: { ...s.config.googleCalendar, calendars } } };
+        });
+      },
+
+      // Called at end of every successful sync to update the baseline event count
+      // used by detectMassDelete on the next cycle.
+      updateCalendarTracking: (calendarId, remoteCount) => {
+        set(s => {
+          const calendars = (s.config.googleCalendar?.calendars || []).map(c =>
+            c.id === calendarId
+              ? { ...c, lastKnownRemoteCount: remoteCount, lastKnownRemoteSyncAt: new Date().toISOString() }
+              : c
+          );
+          return { config: { ...s.config, googleCalendar: { ...s.config.googleCalendar, calendars } } };
+        });
+      },
 
       deleteConsultation: (id) => {
         const item = get().consultations.find(c => c.id === id);
@@ -985,6 +1247,9 @@ const useStore = create(
         clients: s.clients,
         measurements: s.measurements,
         consultations: s.consultations,
+        personalEvents: s.personalEvents,
+        patientSuggestions: s.patientSuggestions,
+        syncAudit: s.syncAudit,
         nutritionPlans: s.nutritionPlans,
         services: s.services,
         invoices: s.invoices,

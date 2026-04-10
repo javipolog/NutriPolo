@@ -15,6 +15,14 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const toast = useToast();
   const isEdit = !!consultation;
 
+  // Determine if the source calendar is read-only (external-clinic or personal).
+  // In that case, fecha/hora/duracion come from Google and must not be overwritten locally.
+  const sourceCal = useMemo(() =>
+    (config.googleCalendar?.calendars || []).find(c => c.id === consultation?.sourceCalendarId),
+    [config.googleCalendar?.calendars, consultation?.sourceCalendarId]
+  );
+  const isReadonly = isEdit && sourceCal?.syncMode === 'readonly';
+
   const [form, setForm] = useState({
     clienteId: defaultClientId || '',
     fecha: defaultDate || todayISO(),
@@ -82,6 +90,18 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   return (
     <Modal open onClose={onClose} title={isEdit ? 'Editar consulta' : t.new_consultation} size="lg">
       <div className="space-y-4">
+        {/* Readonly warning */}
+        {isReadonly && (
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-soft text-xs text-amber-800">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <span>
+              {t.consultation_readonly_warning
+                ? t.consultation_readonly_warning.replace('{cal}', sourceCal?.name || 'calendario externo')
+                : `Esta cita viene de "${sourceCal?.name || 'calendario externo'}" (solo lectura). Fecha, hora y duración no se pueden editar desde aquí.`}
+            </span>
+          </div>
+        )}
+
         {/* Client */}
         <div>
           <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_client} *</label>
@@ -102,15 +122,15 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-1">
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_date} *</label>
-            <Input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} error={errors.fecha} />
+            <Input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} error={errors.fecha} disabled={isReadonly} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_hour}</label>
-            <Input type="time" value={form.hora} onChange={e => set('hora', e.target.value)} />
+            <Input type="time" value={form.hora} onChange={e => set('hora', e.target.value)} disabled={isReadonly} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_duration}</label>
-            <Input type="number" value={form.duracion} onChange={e => set('duracion', e.target.value)} />
+            <Input type="number" value={form.duracion} onChange={e => set('duracion', e.target.value)} disabled={isReadonly} />
           </div>
         </div>
 
