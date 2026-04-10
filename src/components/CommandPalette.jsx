@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, UserPlus } from 'lucide-react';
 import useStore, { formatCurrency, formatDateShort } from '../stores/store';
+import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
 
 const highlight = (text, query) => {
@@ -21,8 +22,26 @@ export const CommandPalette = ({ open, onClose }) => {
   const consultations = useStore(s => s.consultations);
   const nutritionPlans = useStore(s => s.nutritionPlans);
   const invoices = useStore(s => s.invoices);
+  const patientSuggestions = useStore(s => s.patientSuggestions);
+  const config = useStore(s => s.config);
   const setCurrentView = useStore(s => s.setCurrentView);
   const setSelectedClientId = useStore(s => s.setSelectedClientId);
+
+  const pendingPatients = useMemo(
+    () => (patientSuggestions || []).filter(sg => sg.status === 'pending').length,
+    [patientSuggestions]
+  );
+
+  const [syncing, setSyncing] = useState(false);
+  const handleSyncCalendars = useCallback(async () => {
+    if (!config.googleCalendar?.connected || syncing) return;
+    setSyncing(true);
+    try {
+      await googleCalendar.syncAll(useStore.getState());
+    } finally {
+      setSyncing(false);
+    }
+  }, [config.googleCalendar?.connected, syncing]);
 
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
@@ -38,7 +57,13 @@ export const CommandPalette = ({ open, onClose }) => {
     { id: 'invoices',  label: t.nav_invoices,  icon: Receipt,       description: 'Facturación y pagos' },
     { id: 'services',  label: t.nav_services,  icon: Package,       description: 'Catálogo de servicios' },
     { id: 'settings',  label: t.nav_settings,  icon: Settings,      description: 'Configuración de la app' },
-  ], [t]);
+    ...(pendingPatients > 0
+      ? [{ id: 'inbox', label: t.nav_inbox || 'Pacientes', icon: UserPlus, description: `${pendingPatients} paciente${pendingPatients > 1 ? 's' : ''} por identificar` }]
+      : []),
+    ...(config.googleCalendar?.connected
+      ? [{ id: '__sync__', label: 'Sincronizar calendarios', icon: RefreshCw, description: 'Sincronizar con Google Calendar ahora', action: 'sync' }]
+      : []),
+  ], [t, pendingPatients, config.googleCalendar?.connected]);
 
   useEffect(() => {
     if (open) {
@@ -141,6 +166,11 @@ export const CommandPalette = ({ open, onClose }) => {
 
   const handleSelect = (item) => {
     if (item.type === 'section') {
+      if (item.action === 'sync') {
+        handleSyncCalendars();
+        onClose();
+        return;
+      }
       setCurrentView(item.id);
     } else if (item.type === 'client') {
       setSelectedClientId(item.id);

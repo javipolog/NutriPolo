@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Calendar, List, RefreshCw, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff } from 'lucide-react';
 import { Button, useToast, useConfirm } from './UI';
-import useStore, { formatDate, todayISO, filterVisibleConsultations } from '../stores/store';
+import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
 import { ConsultationModal } from './ConsultationModal';
@@ -62,7 +62,7 @@ const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8..20
 
 // ── Weekly View ────────────────────────────────────────────────────────────
 
-const WeekView = ({ weekStart, consultations, clients, config, calColorMap, onNewConsultation, onEditConsultation }) => {
+const WeekView = ({ weekStart, consultations, personalEvents, clients, config, calColorMap, onNewConsultation, onEditConsultation }) => {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const today = todayISO();
   const locationColors = {};
@@ -91,6 +91,21 @@ const WeekView = ({ weekStart, consultations, clients, config, calColorMap, onNe
     });
     return map;
   }, [consultations]);
+
+  // Parallel index for personal events — ballet, birthdays, etc.
+  // All-day events skipped here (they'd span the whole column); only time-bound render.
+  const personalByDayHour = useMemo(() => {
+    const map = {};
+    (personalEvents || []).forEach(e => {
+      if (e.allDay) return;
+      const h = e.hora ? parseInt(e.hora.split(':')[0]) : null;
+      if (h === null || Number.isNaN(h)) return;
+      const key = `${e.fecha}_${h}`;
+      if (!map[key]) map[key] = [];
+      map[key].push(e);
+    });
+    return map;
+  }, [personalEvents]);
 
   return (
     <div className="overflow-x-auto flex-1 flex flex-col min-h-0">
@@ -135,18 +150,43 @@ const WeekView = ({ weekStart, consultations, clients, config, calColorMap, onNe
                       const client = clients.find(x => x.id === c.clienteId);
                       const locColor = locationColors[c.locationId] || 'border-l-sage-400';
                       const cStyle = calStyle(c, calColorMap);
+                      // Unlinked: came from external-clinic with unknown patient
+                      const unlinked = !c.clienteId && c.suggestedFromId;
                       return (
                         <div
                           key={c.id}
                           onClick={e => { e.stopPropagation(); onEditConsultation(c); }}
-                          className={`text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 cursor-pointer truncate hover:opacity-80 ${cStyle ? 'border' : `${STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'} ${locColor}`}`}
-                          style={cStyle || undefined}
-                          title={`${client?.nombre || c.googleSummary || '?'} — ${c.tipo}`}
+                          className={`text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 cursor-pointer truncate hover:opacity-80 ${
+                            unlinked
+                              ? 'bg-orange-50 border-l-orange-400 text-orange-700'
+                              : cStyle
+                                ? 'border'
+                                : `${STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'} ${locColor}`
+                          }`}
+                          style={(!unlinked && cStyle) || undefined}
+                          title={unlinked
+                            ? `Sin identificar — ${c.googleSummary || '?'}`
+                            : `${client?.nombre || c.googleSummary || '?'} — ${c.tipo || ''}`
+                          }
                         >
-                          <span className="font-medium">{c.hora}</span> {client?.nombre?.split(' ')[0] || c.googleSummary || '?'}
+                          <span className="font-medium">{c.hora}</span>{' '}
+                          {unlinked
+                            ? <><AlertCircle size={8} className="inline mb-0.5 mr-0.5" />{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
+                            : (client?.nombre?.split(' ')[0] || c.googleSummary || '?')
+                          }
                         </div>
                       );
                     })}
+                    {(personalByDayHour[key] || []).map(e => (
+                      <div
+                        key={e.id}
+                        onClick={ev => ev.stopPropagation()}
+                        className="text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 border-l-sage-500 bg-sage-200/50 text-sage-700 italic truncate cursor-default"
+                        title={`[Personal] ${e.title}${e.duracion ? ` — ${e.duracion}min` : ''}`}
+                      >
+                        <span className="font-medium">{e.hora}</span> {e.title}
+                      </div>
+                    ))}
                   </div>
                 );
               })}
@@ -160,7 +200,7 @@ const WeekView = ({ weekStart, consultations, clients, config, calColorMap, onNe
 
 // ── Monthly View ───────────────────────────────────────────────────────────
 
-const MonthView = ({ monthStart, consultations, clients, calColorMap, onNewConsultation, onEditConsultation }) => {
+const MonthView = ({ monthStart, consultations, personalEvents, clients, calColorMap, onNewConsultation, onEditConsultation }) => {
   const today = todayISO();
   const year = monthStart.getFullYear();
   const month = monthStart.getMonth();
@@ -173,14 +213,27 @@ const MonthView = ({ monthStart, consultations, clients, calColorMap, onNewConsu
   // Build 6 weeks × 7 days
   const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
 
+  // Merge consultations + personal events by date, tagging origin so the
+  // renderer can distinguish clickable consults from read-only personal blocks.
   const byDate = useMemo(() => {
     const map = {};
     consultations.forEach(c => {
       if (!map[c.fecha]) map[c.fecha] = [];
-      map[c.fecha].push(c);
+      map[c.fecha].push({ ...c, __kind: 'consultation' });
+    });
+    (personalEvents || []).forEach(e => {
+      if (!map[e.fecha]) map[e.fecha] = [];
+      map[e.fecha].push({ ...e, __kind: 'personal' });
+    });
+    // Sort each day: consults first (by hora), then personal events (by hora)
+    Object.keys(map).forEach(k => {
+      map[k].sort((a, b) => {
+        if (a.__kind !== b.__kind) return a.__kind === 'consultation' ? -1 : 1;
+        return (a.hora || '').localeCompare(b.hora || '');
+      });
     });
     return map;
-  }, [consultations]);
+  }, [consultations, personalEvents]);
 
   return (
     <div className="flex-1 flex flex-col">
@@ -208,18 +261,43 @@ const MonthView = ({ monthStart, consultations, clients, calColorMap, onNewConsu
                 {d.getDate()}
               </p>
               <div className="space-y-0.5">
-                {dayConsults.slice(0, 3).map(c => {
+                {dayConsults.slice(0, 3).map(item => {
+                  if (item.__kind === 'personal') {
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={e => e.stopPropagation()}
+                        className="text-[10px] px-1 rounded truncate bg-sage-200/50 text-sage-700 italic cursor-default border border-sage-300"
+                        title={`[Personal] ${item.title}`}
+                      >
+                        {!item.allDay && item.hora && <span className="font-medium mr-0.5">{item.hora}</span>}
+                        {item.title}
+                      </div>
+                    );
+                  }
+                  const c = item;
                   const client = clients.find(x => x.id === c.clienteId);
                   const cStyle = calStyle(c, calColorMap);
+                  const unlinked = !c.clienteId && c.suggestedFromId;
                   return (
                     <div
                       key={c.id}
                       onClick={e => { e.stopPropagation(); onEditConsultation(c); }}
-                      className={`text-[10px] px-1 rounded truncate cursor-pointer hover:opacity-80 ${cStyle ? 'border border-l-2' : STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'}`}
-                      style={cStyle || undefined}
+                      className={`text-[10px] px-1 rounded truncate cursor-pointer hover:opacity-80 ${
+                        unlinked
+                          ? 'bg-orange-50 border border-orange-200 text-orange-700'
+                          : cStyle
+                            ? 'border border-l-2'
+                            : STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'
+                      }`}
+                      style={(!unlinked && cStyle) || undefined}
+                      title={unlinked ? `Sin identificar — ${c.googleSummary || '?'}` : undefined}
                     >
                       {c.hora && <span className="font-medium mr-0.5">{c.hora}</span>}
-                      {client?.nombre?.split(' ')[0] || c.googleSummary || '?'}
+                      {unlinked
+                        ? <><AlertCircle size={8} className="inline mb-0.5 mr-0.5" />{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
+                        : (client?.nombre?.split(' ')[0] || c.googleSummary || '?')
+                      }
                     </div>
                   );
                 })}
@@ -299,12 +377,32 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
 // ── Main CalendarView ──────────────────────────────────────────────────────
 
 export const CalendarView = () => {
-  const allConsultations = useStore(s => s.consultations);
+  const allConsultations  = useStore(s => s.consultations);
+  const allPersonalEvents = useStore(s => s.personalEvents);
+  const patientSuggestions = useStore(s => s.patientSuggestions);
   const clients = useStore(s => s.clients);
-  const config = useStore(s => s.config);
+  const config  = useStore(s => s.config);
+  const setCurrentView        = useStore(s => s.setCurrentView);
+  const acceptMassDelete      = useStore(s => s.acceptMassDelete);
+  const ignoreMassDeleteOnce  = useStore(s => s.ignoreMassDeleteOnce);
+  const updateConfig          = useStore(s => s.updateConfig);
+
+  // Calendars with pending mass-delete review
+  const massDeleteCalendars = useMemo(
+    () => (config.googleCalendar?.calendars || []).filter(c => c.massDeletePending != null),
+    [config.googleCalendar?.calendars]
+  );
   const consultations = useMemo(
     () => filterVisibleConsultations(allConsultations, config.googleCalendar),
     [allConsultations, config.googleCalendar]
+  );
+  const personalEvents = useMemo(
+    () => filterVisiblePersonalEvents(allPersonalEvents, config.googleCalendar).filter(e => !e.cancelled),
+    [allPersonalEvents, config.googleCalendar]
+  );
+  const pendingPatientCount = useMemo(
+    () => (patientSuggestions || []).filter(sg => sg.status === 'pending').length,
+    [patientSuggestions]
   );
   const t = useT();
 
@@ -329,6 +427,7 @@ export const CalendarView = () => {
   const [resetting, setResetting] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState(null);
   const [syncError, setSyncError] = useState(null);
+  const [showPersonalEvents, setShowPersonalEvents] = useState(true);
 
   const handleSync = useCallback(async () => {
     if (syncing) return;
@@ -342,6 +441,9 @@ export const CalendarView = () => {
       if (stats.updated) parts.push(`${stats.updated} actualizados`);
       if (stats.errors > 0) parts.push(`${stats.errors} errores`);
       toast.success(`Sincronizado${parts.length ? ' — ' + parts.join(', ') : ''}`);
+      if (stats.conflicts > 0) {
+        toast.info(`${stats.conflicts} conflicto${stats.conflicts > 1 ? 's' : ''} resuelto${stats.conflicts > 1 ? 's' : ''} — la versión más reciente se conservó`);
+      }
       setLastSyncTime(new Date());
     } catch (e) {
       setSyncError(e?.message || String(e));
@@ -409,6 +511,25 @@ export const CalendarView = () => {
     const to = toISO(addDays(cursor, 30));
     return consultations.filter(c => c.fecha >= from && c.fecha <= to);
   }, [consultations, viewMode, cursor, weekStart, monthStart]);
+
+  // Parallel filter for personal events — same date window as visibleConsults.
+  // Respects the showPersonalEvents toggle (returns empty when hidden).
+  const visiblePersonal = useMemo(() => {
+    if (!showPersonalEvents) return [];
+    if (viewMode === 'week') {
+      const from = toISO(weekStart);
+      const to = toISO(addDays(weekStart, 6));
+      return personalEvents.filter(e => e.fecha >= from && e.fecha <= to);
+    }
+    if (viewMode === 'month') {
+      const from = toISO(startOfWeek(monthStart));
+      const to = toISO(addDays(startOfWeek(monthStart), 41));
+      return personalEvents.filter(e => e.fecha >= from && e.fecha <= to);
+    }
+    const from = toISO(cursor);
+    const to = toISO(addDays(cursor, 30));
+    return personalEvents.filter(e => e.fecha >= from && e.fecha <= to);
+  }, [personalEvents, showPersonalEvents, viewMode, cursor, weekStart, monthStart]);
 
   const navigate = (dir) => {
     setCursor(prev => {
@@ -501,21 +622,96 @@ export const CalendarView = () => {
           <span className="text-sm font-medium text-sage-800 ml-1">{headerLabel()}</span>
         </div>
 
-        {/* View toggle */}
-        <div className="flex gap-1 bg-sage-100 p-1 rounded-button">
-          {[['week', Calendar, 'Semana'], ['month', Calendar, 'Mes'], ['list', List, 'Lista']].map(([id, Icon, label]) => (
+        <div className="flex items-center gap-2">
+          {/* Personal events toggle */}
+          {allPersonalEvents.filter(e => !e.cancelled).length > 0 && (
             <button
-              key={id}
-              onClick={() => setViewMode(id)}
-              className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-colors ${
-                viewMode === id ? 'bg-white text-sage-800 shadow-sm' : 'text-sage-500 hover:text-sage-700'
+              onClick={() => setShowPersonalEvents(v => !v)}
+              title={showPersonalEvents ? 'Ocultar eventos personales' : 'Mostrar eventos personales'}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-button border transition-colors ${
+                showPersonalEvents
+                  ? 'bg-sage-100 border-sage-300 text-sage-600 hover:bg-sage-200'
+                  : 'bg-white border-sage-200 text-sage-400 hover:bg-sage-50'
               }`}
             >
-              {label}
+              <EyeOff size={13} />
+              Personal
             </button>
-          ))}
+          )}
+
+          {/* View toggle */}
+          <div className="flex gap-1 bg-sage-100 p-1 rounded-button">
+            {[['week', Calendar, 'Semana'], ['month', Calendar, 'Mes'], ['list', List, 'Lista']].map(([id, Icon, label]) => (
+              <button
+                key={id}
+                onClick={() => setViewMode(id)}
+                className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-colors ${
+                  viewMode === id ? 'bg-white text-sage-800 shadow-sm' : 'text-sage-500 hover:text-sage-700'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {/* Mass-delete banners — one per suspended calendar */}
+      {massDeleteCalendars.map(cal => (
+        <div key={cal.id} className="flex items-start gap-3 px-4 py-3 bg-red-50 border border-red-300 rounded-soft text-sm">
+          <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-red-800">
+              Posible borrado masivo en "{cal.name || cal.id}"
+            </p>
+            <p className="text-red-700 text-xs mt-0.5">
+              {cal.massDeletePending.prevCount} eventos → {cal.massDeletePending.newCount} ({cal.massDeletePending.drop} eliminados en Google). La sincronización está en pausa. Revisa Google Calendar y elige una acción.
+            </p>
+          </div>
+          <div className="flex gap-1.5 flex-shrink-0">
+            <button
+              onClick={() => ignoreMassDeleteOnce(cal.id)}
+              className="px-2.5 py-1 text-xs font-medium bg-white border border-red-300 text-red-700 rounded-button hover:bg-red-50 transition-colors"
+            >
+              Ignorar y reanudar
+            </button>
+            <button
+              onClick={() => acceptMassDelete(cal.id)}
+              className="px-2.5 py-1 text-xs font-medium bg-red-500 text-white rounded-button hover:bg-red-600 transition-colors"
+            >
+              Aceptar borrados
+            </button>
+            <button
+              onClick={() => {
+                const cals = (config.googleCalendar?.calendars || []).map(c =>
+                  c.id === cal.id ? { ...c, massDeletePending: null, syncMode: 'disabled' } : c
+                );
+                updateConfig({ googleCalendar: { ...config.googleCalendar, calendars: cals } });
+              }}
+              className="px-2.5 py-1 text-xs text-red-500 hover:text-red-700 transition-colors"
+            >
+              Desactivar
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* New-patients banner — shown when external-clinic sync detected unlinked patients */}
+      {pendingPatientCount > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-orange-50 border border-orange-200 rounded-soft text-sm">
+          <AlertCircle size={16} className="text-orange-500 shrink-0" />
+          <span className="flex-1 text-orange-800">
+            <strong>{pendingPatientCount}</strong>{' '}
+            {pendingPatientCount === 1 ? 'paciente nuevo detectado' : 'pacientes nuevos detectados'} en la clínica externa — identifícalos para vincular sus citas.
+          </span>
+          <button
+            onClick={() => setCurrentView('inbox')}
+            className="px-3 py-1 text-xs font-medium bg-orange-400 text-white rounded-button hover:bg-orange-500 transition-colors whitespace-nowrap"
+          >
+            Revisar →
+          </button>
+        </div>
+      )}
 
       {/* Calendar grid */}
       <div className="bg-white border border-sage-200 rounded-soft shadow-card overflow-hidden flex-1 min-h-0 flex flex-col">
@@ -523,6 +719,7 @@ export const CalendarView = () => {
           <WeekView
             weekStart={weekStart}
             consultations={visibleConsults}
+            personalEvents={visiblePersonal}
             clients={clients}
             config={config}
             calColorMap={calColorMap}
@@ -534,6 +731,7 @@ export const CalendarView = () => {
           <MonthView
             monthStart={monthStart}
             consultations={visibleConsults}
+            personalEvents={visiblePersonal}
             clients={clients}
             calColorMap={calColorMap}
             onNewConsultation={openNew}
