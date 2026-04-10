@@ -145,7 +145,7 @@ const DEFAULT_SERVICES = [
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 6;
+const STORE_VERSION = 7;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -237,6 +237,13 @@ function migrateStore(persistedState, version) {
         cfg.smtp = cfg.smtpConfig;
       }
       delete cfg.smtpConfig;
+    }
+  }
+  if (version < 7) {
+    // v6 → v7: invoice counter is now derived from invoices[] on demand.
+    // Drop the stale persisted field so it can't desync from reality again.
+    if (persistedState.state && 'invoiceCounter' in persistedState.state) {
+      delete persistedState.state.invoiceCounter;
     }
   }
   return persistedState;
@@ -555,16 +562,32 @@ const useStore = create(
 
       // ---- INVOICES ----
       invoices: [],
-      invoiceCounter: 0,
 
+      // Derives the next invoice number from the current invoices list for the
+      // active year. Self-healing: tolerates deletions, imports, and year
+      // rollovers without needing a persisted counter to stay in sync.
       generateInvoiceNumber: () => {
-        const counter = (get().invoiceCounter || 0) + 1;
         const year = new Date().getFullYear();
-        return `NP-${year}-${String(counter).padStart(3, '0')}`;
+        const prefix = `NP-${year}-`;
+        const invoices = get().invoices || [];
+        const maxSeq = invoices.reduce((max, inv) => {
+          if (!inv?.numero || !inv.numero.startsWith(prefix)) return max;
+          const match = inv.numero.match(/-(\d+)$/);
+          if (!match) return max;
+          const n = parseInt(match[1], 10);
+          return Number.isFinite(n) && n > max ? n : max;
+        }, 0);
+        return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
       },
 
       addInvoice: (invoice) => {
-        const numero = invoice.numero || get().generateInvoiceNumber();
+        let numero = invoice.numero || get().generateInvoiceNumber();
+        // Defensive: if the caller supplied a number that collides with an
+        // existing invoice (e.g. manual edit), regenerate to avoid duplicates.
+        if (get().invoices.some(i => i.numero === numero)) {
+          console.warn(`[addInvoice] Duplicate invoice number "${numero}" detected, regenerating`);
+          numero = get().generateInvoiceNumber();
+        }
         const items = invoice.items || [];
         const ivaPct = invoice.ivaPct ?? 0;
         const irpfPct = invoice.irpfPct ?? 0;
@@ -582,10 +605,7 @@ const useStore = create(
           concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
           importe: totals.total,
         };
-        const match = numero.match(/(\d+)$/);
-        const usedCounter = match ? parseInt(match[1], 10) : get().invoiceCounter + 1;
-        const newCounter = Math.max(get().invoiceCounter + 1, usedCounter);
-        set(s => ({ invoices: [...s.invoices, newI], invoiceCounter: newCounter }));
+        set(s => ({ invoices: [...s.invoices, newI] }));
         return newI;
       },
       updateInvoice: (id, data) => {
@@ -602,15 +622,7 @@ const useStore = create(
           concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
           importe: totals.total,
         };
-        const stateUpdate = { invoices: get().invoices.map(i => i.id === id ? updated : i) };
-        if (data.numero && data.numero !== existing.numero) {
-          const match = data.numero.match(/(\d+)$/);
-          if (match) {
-            const usedCounter = parseInt(match[1], 10);
-            if (usedCounter > get().invoiceCounter) stateUpdate.invoiceCounter = usedCounter;
-          }
-        }
-        set(s => ({ ...stateUpdate }));
+        set(s => ({ invoices: get().invoices.map(i => i.id === id ? updated : i) }));
       },
       deleteInvoice: (id) => {
         const item = get().invoices.find(i => i.id === id);
@@ -729,11 +741,11 @@ const useStore = create(
       runAutoBackup: async () => {
         const today = todayISO();
         if (get().lastBackupDate === today) return;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates } = get();
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates } = get();
         const backup = {
           version: STORE_VERSION,
           date: new Date().toISOString(),
-          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates },
+          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
         };
         try {
           const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
@@ -767,7 +779,6 @@ const useStore = create(
           nutritionPlans: d.nutritionPlans || [],
           services:       d.services       || DEFAULT_SERVICES,
           invoices:       d.invoices       || [],
-          invoiceCounter: d.invoiceCounter || 0,
           clientDocuments:d.clientDocuments || [],
           emailTemplates: d.emailTemplates || null,
           config: d.config ? { ...get().config, ...d.config } : get().config,
@@ -776,11 +787,11 @@ const useStore = create(
 
       exportDataToZip: async (onProgress) => {
         const JSZip = (await import('jszip')).default;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates } = get();
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates } = get();
         const payload = {
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates },
+          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
         };
 
         const zip = new JSZip();
@@ -843,7 +854,6 @@ const useStore = create(
             nutritionPlans: d.nutritionPlans || [],
             services:       d.services       || DEFAULT_SERVICES,
             invoices:       d.invoices       || [],
-            invoiceCounter: d.invoiceCounter || 0,
             clientDocuments:d.clientDocuments || [],
             emailTemplates: d.emailTemplates || null,
             config: d.config ? { ...get().config, ...d.config } : get().config,
@@ -894,7 +904,6 @@ const useStore = create(
           nutritionPlans: d.nutritionPlans || [],
           services:       d.services       || DEFAULT_SERVICES,
           invoices:       d.invoices       || [],
-          invoiceCounter: d.invoiceCounter || 0,
           clientDocuments:d.clientDocuments || [],
           emailTemplates: d.emailTemplates || null,
           config: d.config ? { ...get().config, ...d.config } : get().config,
@@ -905,11 +914,11 @@ const useStore = create(
 
       // Legacy — kept for backwards compatibility
       exportDataToJSON: async () => {
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates } = get();
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates } = get();
         const data = JSON.stringify({
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, invoiceCounter, clientDocuments, emailTemplates },
+          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
         }, null, 2);
         try {
           const { save } = await import('@tauri-apps/api/dialog');
@@ -947,7 +956,6 @@ const useStore = create(
               nutritionPlans: d.nutritionPlans || [],
               services:       d.services       || DEFAULT_SERVICES,
               invoices:       d.invoices       || [],
-              invoiceCounter: d.invoiceCounter || 0,
               clientDocuments:d.clientDocuments || [],
               emailTemplates: d.emailTemplates || null,
               config: d.config ? { ...get().config, ...d.config } : get().config,
@@ -980,7 +988,6 @@ const useStore = create(
         nutritionPlans: s.nutritionPlans,
         services: s.services,
         invoices: s.invoices,
-        invoiceCounter: s.invoiceCounter,
         clientDocuments: s.clientDocuments,
         emailTemplates: s.emailTemplates,
         lastBackupDate: s.lastBackupDate,
