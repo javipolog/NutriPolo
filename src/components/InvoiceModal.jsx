@@ -201,6 +201,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
     } catch (pdfErr) {
       if (import.meta.env.DEV) console.error('PDF generation failed:', pdfErr);
       toast.success(isEdit ? 'Factura actualizada' : 'Factura creada');
+      toast.error(`Error generando PDF: ${pdfErr?.message || 'error desconocido'}`);
     }
 
     onClose();

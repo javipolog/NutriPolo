@@ -4,14 +4,15 @@ import {
   Eye, EyeOff, RotateCcw, Send, Loader2, X, Plus, Edit2,
   Trash2, MapPin, ClipboardList, Languages, Calendar, RefreshCw,
   LogOut, Wifi, Palette, Image, Type, ChevronDown, ChevronUp, FileText,
-  Archive, HardDriveDownload, History, ShieldCheck, Clock, AlertTriangle, Settings2
+  Archive, HardDriveDownload, History, ShieldCheck, Clock, AlertTriangle, Settings2, AlertCircle, Lock
 } from 'lucide-react';
-import { Button, Input, Textarea, useToast, useConfirm } from './UI';
+import { Button, Input, Textarea, Modal, useToast, useConfirm } from './UI';
 import useStore, { generateId, DEFAULT_INVOICE_DESIGN, inferCalendarPurpose } from '../stores/store';
 import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
 import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
+import { invoke } from '@tauri-apps/api/tauri';
 
 // ── Inline editable list (for locations & consultation types) ──────────────
 
@@ -293,16 +294,45 @@ const SmtpSection = () => {
   const toast = useToast();
   const [showPw, setShowPw] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  // Reflects whether a password is present in the OS credential store.
+  // We never expose the plaintext password — only its presence.
+  const [keyringHas, setKeyringHas] = useState(false);
 
   const smtp = config.smtp || {};
   const set = (k, v) => updateConfig({ smtp: { ...smtp, [k]: v } });
+
+  // On mount, check the OS credential store. If a password is present,
+  // load it into the session-only `smtpPassword` so the user can
+  // immediately send/test without re-entering it.
+  useEffect(() => {
+    (async () => {
+      try {
+        const present = await invoke('has_smtp_password');
+        setKeyringHas(!!present);
+        if (present && !smtpPassword) {
+          try {
+            const pw = await invoke('get_smtp_password');
+            if (pw) setSmtpPassword(pw);
+          } catch { /* ignore — user may have revoked access */ }
+        }
+      } catch { /* ignore — keyring may be unavailable */ }
+    })();
+    // Intentionally run only on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const testConnection = async () => {
     setTesting(true);
     try {
       const result = await testSmtpConnection({
-        host: smtp.host, port: smtp.port || 587,
-        user: smtp.user, password: smtpPassword, secure: smtp.secure !== false,
+        host:      smtp.host,
+        port:      smtp.port || 587,
+        username:  smtp.user || '',
+        password:  smtpPassword,
+        fromName:  config.nombre || '',
+        fromEmail: smtp.user || '',
+        useTls:    smtp.secure !== false,
       });
       if (result.success) toast.success('Conexión SMTP correcta');
       else toast.error(result.error || 'Error de conexión');
@@ -310,6 +340,34 @@ const SmtpSection = () => {
       toast.error(e.message);
     } finally {
       setTesting(false);
+    }
+  };
+
+  const savePasswordToKeyring = async () => {
+    if (!smtpPassword) {
+      toast.error('Introduce una contraseña antes de guardarla');
+      return;
+    }
+    setSaving(true);
+    try {
+      await invoke('store_smtp_password', { password: smtpPassword });
+      setKeyringHas(true);
+      toast.success('Contraseña guardada en el almacén de credenciales de Windows');
+    } catch (e) {
+      toast.error('No se pudo guardar: ' + (e?.toString() || 'keyring_error'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const clearPasswordFromKeyring = async () => {
+    try {
+      await invoke('clear_smtp_password');
+      setKeyringHas(false);
+      setSmtpPassword('');
+      toast.success('Contraseña eliminada del almacén de credenciales');
+    } catch (e) {
+      toast.error('No se pudo eliminar: ' + (e?.toString() || 'keyring_error'));
     }
   };
 
@@ -330,13 +388,16 @@ const SmtpSection = () => {
         <Input type="email" value={smtp.user || ''} onChange={e => set('user', e.target.value)} placeholder="nutripoloraquel@gmail.com" />
       </div>
       <div>
-        <label className="block text-xs font-medium text-sage-600 mb-1">Contraseña / App Password</label>
+        <label className="block text-xs font-medium text-sage-600 mb-1">
+          Contraseña / App Password
+          {keyringHas && <span className="ml-2 text-wellness-600">✓ guardada</span>}
+        </label>
         <div className="relative">
           <Input
             type={showPw ? 'text' : 'password'}
             value={smtpPassword}
             onChange={e => setSmtpPassword(e.target.value)}
-            placeholder="No se guarda en disco"
+            placeholder={keyringHas ? 'Contraseña guardada de forma segura' : 'Se guarda en el almacén de Windows'}
           />
           <button
             type="button"
@@ -346,10 +407,23 @@ const SmtpSection = () => {
             {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         </div>
+        <p className="text-xs text-sage-500 mt-1">
+          La contraseña se guarda en el Administrador de credenciales de Windows, nunca en disco.
+        </p>
       </div>
-      <Button variant="ghost" size="sm" icon={testing ? Loader2 : Send} onClick={testConnection} disabled={testing}>
-        {testing ? 'Probando...' : 'Probar conexión'}
-      </Button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="ghost" size="sm" icon={testing ? Loader2 : Send} onClick={testConnection} disabled={testing}>
+          {testing ? 'Probando...' : 'Probar conexión'}
+        </Button>
+        <Button variant="ghost" size="sm" icon={saving ? Loader2 : ShieldCheck} onClick={savePasswordToKeyring} disabled={saving || !smtpPassword}>
+          {saving ? 'Guardando...' : 'Guardar contraseña'}
+        </Button>
+        {keyringHas && (
+          <Button variant="ghost" size="sm" icon={Trash2} onClick={clearPasswordFromKeyring}>
+            Eliminar guardada
+          </Button>
+        )}
+      </div>
     </div>
   );
 };
@@ -406,10 +480,11 @@ const GoogleCalendarSection = () => {
       const authResult = await googleCalendar.startAuth(clientId.trim(), clientSecret.trim());
       const code = authResult.code;
       const redirectUri = authResult.redirect_uri || 'urn:ietf:wg:oauth:2.0:oob';
+      const codeVerifier = authResult.code_verifier;
 
-      // Step 2: exchange code for tokens
+      // Step 2: exchange code for tokens (with PKCE verifier)
       const tokenResult = await googleCalendar.exchangeToken(
-        clientId.trim(), clientSecret.trim(), code, redirectUri
+        clientId.trim(), clientSecret.trim(), code, redirectUri, codeVerifier
       );
       const accessToken = tokenResult.access_token;
       const expiresAt = Date.now() + (tokenResult.expires_in * 1000);
@@ -984,6 +1059,287 @@ const GoogleCalendarSection = () => {
   );
 };
 
+// ── Security Section (at-rest encryption) ─────────────────────────────────
+const SecuritySection = () => {
+  const config = useStore(s => s.config);
+  const updateConfig = useStore(s => s.updateConfig);
+  const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
+  const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [changeOpen, setChangeOpen] = useState(false);
+
+  // Setup form state
+  const [newPw, setNewPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
+  const [ackLoss, setAckLoss] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // Change password form state
+  const [oldPw, setOldPw] = useState('');
+  const [changeNewPw, setChangeNewPw] = useState('');
+  const [changeConfirmPw, setChangeConfirmPw] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const e = await invoke('encryption_is_enabled');
+        setEnabled(!!e);
+      } catch {}
+      setLoading(false);
+    })();
+  }, []);
+
+  const handleEnable = async () => {
+    if (newPw.length < 8) {
+      toast.error('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+    if (newPw !== confirmPw) {
+      toast.error('Las contraseñas no coinciden');
+      return;
+    }
+    if (!ackLoss) {
+      toast.error('Debes confirmar que entiendes las consecuencias');
+      return;
+    }
+    setBusy(true);
+    try {
+      await invoke('encryption_setup', { password: newPw });
+      toast.success('Cifrado activado correctamente');
+      setEnabled(true);
+      setSetupOpen(false);
+      setNewPw(''); setConfirmPw(''); setAckLoss(false);
+    } catch (e) {
+      toast.error('Error al activar el cifrado: ' + String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChange = async () => {
+    if (changeNewPw.length < 8) {
+      toast.error('La nueva contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+    if (changeNewPw !== changeConfirmPw) {
+      toast.error('Las contraseñas no coinciden');
+      return;
+    }
+    setBusy(true);
+    try {
+      await invoke('encryption_change_password', {
+        oldPassword: oldPw,
+        newPassword: changeNewPw,
+      });
+      toast.success('Contraseña cambiada');
+      setChangeOpen(false);
+      setOldPw(''); setChangeNewPw(''); setChangeConfirmPw('');
+    } catch (e) {
+      const code = String(e || '');
+      if (code.includes('wrong_password')) {
+        toast.error('La contraseña actual no es correcta');
+      } else {
+        toast.error('Error al cambiar la contraseña: ' + code);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLock = async () => {
+    const ok = await confirm({
+      title: 'Bloquear ahora',
+      message: 'Se bloqueará el acceso a los datos y la aplicación se recargará. Necesitarás introducir tu contraseña maestra para volver a entrar.',
+      confirmText: 'Bloquear',
+      variant: 'warning',
+    });
+    if (!ok) return;
+    try {
+      await invoke('encryption_lock');
+      // Force a reload so the EncryptionGate re-checks state
+      window.location.reload();
+    } catch (e) {
+      toast.error('Error al bloquear: ' + String(e));
+    }
+  };
+
+  if (loading) {
+    return <p className="text-xs text-sage-400">Comprobando estado...</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-3 p-3 bg-sage-50 border border-sage-200 rounded-button">
+        <ShieldCheck
+          size={18}
+          className={enabled ? 'text-success mt-0.5 shrink-0' : 'text-sage-400 mt-0.5 shrink-0'}
+        />
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-sage-900">
+            {enabled ? 'Cifrado activo' : 'Cifrado inactivo'}
+          </p>
+          <p className="text-xs text-sage-500 mt-0.5">
+            {enabled
+              ? 'Tus datos y documentos se almacenan cifrados con AES-256-GCM. Se necesita tu contraseña maestra para desbloquearlos.'
+              : 'Tus datos se guardan en texto plano. Puedes activar el cifrado AES-256 para protegerlos con una contraseña maestra.'}
+          </p>
+        </div>
+      </div>
+
+      {!enabled ? (
+        <Button variant="primary" icon={Lock} onClick={() => setSetupOpen(true)}>
+          Activar cifrado
+        </Button>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="ghost" icon={RotateCcw} onClick={() => setChangeOpen(true)}>
+              Cambiar contraseña
+            </Button>
+            <Button variant="ghost" icon={Lock} onClick={handleLock}>
+              Bloquear ahora
+            </Button>
+          </div>
+
+          <div className="pt-3 border-t border-sage-100">
+            <label className="block text-xs font-medium text-sage-600 mb-1.5">
+              Bloqueo automático por inactividad
+            </label>
+            <select
+              value={Number(config.autoLockMinutes) || 0}
+              onChange={(e) =>
+                updateConfig({ autoLockMinutes: Number(e.target.value) || 0 })
+              }
+              className="w-full max-w-xs px-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white focus:border-wellness-400 focus:outline-none focus:ring-1 focus:ring-wellness-400"
+            >
+              <option value={0}>Nunca</option>
+              <option value={5}>5 minutos</option>
+              <option value={15}>15 minutos</option>
+              <option value={30}>30 minutos</option>
+              <option value={60}>1 hora</option>
+            </select>
+            <p className="text-xs text-sage-400 mt-1">
+              Bloquea la app y exige tu contraseña maestra tras el tiempo seleccionado sin interacción.
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Setup modal */}
+      <Modal open={setupOpen} onClose={() => setSetupOpen(false)} title="Activar cifrado AES-256" size="sm">
+        <div className="space-y-4">
+          <div className="flex items-start gap-2 p-3 bg-warning-light border border-warning/30 rounded-button">
+            <AlertTriangle size={16} className="text-warning shrink-0 mt-0.5" />
+            <p className="text-xs text-warning-dark">
+              Elige una contraseña segura. <strong>Si la olvidas, tus datos serán irrecuperables</strong> —
+              no hay forma de restaurarlos sin ella.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">
+              Contraseña maestra
+            </label>
+            <Input
+              type="password"
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              placeholder="Mínimo 8 caracteres"
+              autoComplete="new-password"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">
+              Confirmar contraseña
+            </label>
+            <Input
+              type="password"
+              value={confirmPw}
+              onChange={(e) => setConfirmPw(e.target.value)}
+              placeholder="Repite la contraseña"
+              autoComplete="new-password"
+            />
+          </div>
+
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={ackLoss}
+              onChange={(e) => setAckLoss(e.target.checked)}
+              className="mt-0.5 shrink-0"
+            />
+            <span className="text-xs text-sage-600">
+              Entiendo que si olvido esta contraseña perderé permanentemente el acceso a mis clientes,
+              consultas, facturas y documentos.
+            </span>
+          </label>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setSetupOpen(false)} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button variant="primary" onClick={handleEnable} disabled={busy}>
+              {busy ? 'Activando...' : 'Activar cifrado'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Change password modal */}
+      <Modal open={changeOpen} onClose={() => setChangeOpen(false)} title="Cambiar contraseña maestra" size="sm">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">
+              Contraseña actual
+            </label>
+            <Input
+              type="password"
+              value={oldPw}
+              onChange={(e) => setOldPw(e.target.value)}
+              autoComplete="current-password"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">
+              Nueva contraseña
+            </label>
+            <Input
+              type="password"
+              value={changeNewPw}
+              onChange={(e) => setChangeNewPw(e.target.value)}
+              placeholder="Mínimo 8 caracteres"
+              autoComplete="new-password"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-sage-600 mb-1">
+              Confirmar nueva contraseña
+            </label>
+            <Input
+              type="password"
+              value={changeConfirmPw}
+              onChange={(e) => setChangeConfirmPw(e.target.value)}
+              autoComplete="new-password"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setChangeOpen(false)} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button variant="primary" onClick={handleChange} disabled={busy}>
+              {busy ? 'Cambiando...' : 'Cambiar contraseña'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {ConfirmDialog}
+    </div>
+  );
+};
+
 // ── Main SettingsView ──────────────────────────────────────────────────────
 
 // ── Invoice Design Section ─────────────────────────────────────────────────
@@ -1313,6 +1669,8 @@ export const SettingsView = () => {
   const importDataFromZip = useStore(s => s.importDataFromZip);
   const getAutoBackupInfo = useStore(s => s.getAutoBackupInfo);
   const restoreFromAutoBackup = useStore(s => s.restoreFromAutoBackup);
+  const lastError = useStore(s => s.lastError);
+  const clearLastError = useStore(s => s.clearLastError);
   const t = useT();
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
@@ -1611,6 +1969,53 @@ export const SettingsView = () => {
         </div>
 
         <p className="text-xs text-sage-400 border-t border-sage-100 pt-3">{t.backup_data_hint}</p>
+      </Section>
+
+      {/* Seguridad (cifrado AES-256) */}
+      <Section title="Seguridad">
+        <SecuritySection />
+      </Section>
+
+      {/* Diagnóstico */}
+      <Section title="Diagnóstico">
+        {lastError ? (
+          <div className="space-y-3">
+            <div className="bg-danger-light border border-danger/30 rounded-card p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle size={16} className="text-danger shrink-0 mt-0.5" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-danger">
+                    Último error capturado
+                  </p>
+                  <p className="text-xs text-sage-500 mt-0.5">
+                    {new Date(lastError.timestamp).toLocaleString('es-ES')}
+                  </p>
+                </div>
+              </div>
+              <pre className="mt-2 text-xs font-mono text-sage-800 whitespace-pre-wrap break-words bg-white/60 rounded-button p-2 max-h-40 overflow-auto">
+                {lastError.message}
+              </pre>
+              {lastError.stack && (
+                <details className="mt-2">
+                  <summary className="text-xs text-sage-500 cursor-pointer hover:text-sage-700">
+                    Ver stack trace
+                  </summary>
+                  <pre className="mt-1 text-xs font-mono text-sage-600 whitespace-pre-wrap break-words bg-white/60 rounded-button p-2 max-h-60 overflow-auto">
+                    {lastError.stack}
+                    {lastError.componentStack && '\n\nComponent stack:' + lastError.componentStack}
+                  </pre>
+                </details>
+              )}
+            </div>
+            <Button variant="ghost" size="sm" onClick={clearLastError}>
+              Limpiar diagnóstico
+            </Button>
+          </div>
+        ) : (
+          <p className="text-xs text-sage-400">
+            No se ha capturado ningún error reciente.
+          </p>
+        )}
       </Section>
 
       {ConfirmDialog}

@@ -11,14 +11,20 @@ edition = "2021"
 tauri-build = { version = "1.5", features = [] }
 
 [dependencies]
-tauri = { version = "1.5", features = [ "updater", "process-relaunch", "dialog-open", "dialog-save", "fs-all", "path-all", "shell-open"] }
+tauri = { version = "1.5", features = [ "updater", "process-relaunch", "dialog-open", "dialog-save", "fs-read-file", "fs-write-file", "fs-create-dir", "path-all", "shell-open"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "native-tls", "builder", "hostname"] }
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "rustls-tls", "builder", "hostname"] }
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 urlencoding = "2"
 tokio = { version = "1", features = ["net", "macros"] }
+rand = "0.8"
+sha2 = "0.10"
+keyring = "2.3"
+aes-gcm = "0.10"
+argon2 = "0.5"
+zeroize = { version = "1.8", features = ["derive"] }
 
 [features]
 default = ["custom-protocol"]

@@ -24,8 +24,8 @@ export const googleCalendar = {
     return await invoke('gcal_start_auth', { clientId, clientSecret });
   },
 
-  async exchangeToken(clientId, clientSecret, code, redirectUri) {
-    return await invoke('gcal_exchange_token', { clientId, clientSecret, code, redirectUri });
+  async exchangeToken(clientId, clientSecret, code, redirectUri, codeVerifier) {
+    return await invoke('gcal_exchange_token', { clientId, clientSecret, code, redirectUri, codeVerifier });
   },
 
   async refreshToken(clientId, clientSecret, refreshToken) {

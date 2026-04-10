@@ -19,7 +19,15 @@ const tauriStorage = {
   getItem: async (name) => {
     try {
       return await invoke('load_data', { key: name });
-    } catch {
+    } catch (err) {
+      const msg = String(err || '');
+      // If the vault is locked we must NOT fall back to localStorage;
+      // that would clobber the real data with empty defaults the next
+      // time the user saves. Return null so Zustand keeps its defaults
+      // and let App.jsx re-trigger rehydration after unlock.
+      if (msg.includes('not_unlocked')) {
+        return null;
+      }
       return localStorage.getItem(name);
     }
   },
@@ -53,7 +61,14 @@ if (typeof window !== 'undefined') {
 // UTILITIES
 // ============================================
 export function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2);
+  // Prefer crypto.randomUUID (available in Tauri's Chrome ≥92 webview).
+  // Collision-free even under heavy batch inserts (e.g. import of
+  // hundreds of clients inside the same millisecond).
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback — should not be reached in the Tauri runtime.
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 
 export function formatCurrency(num) {
@@ -155,19 +170,24 @@ export function inferCalendarPurpose(cal) {
 // INVOICE TOTALS COMPUTATION
 // ============================================
 export function computeInvoiceTotals(items = [], ivaPct = 0, irpfPct = 0) {
-  const baseImponible = items.reduce((sum, item) => {
-    const qty = parseFloat(item.cantidad) || 0;
-    const price = parseFloat(item.precioUnitario) || 0;
-    return sum + qty * price;
+  // All arithmetic in integer cents to avoid IEEE-754 drift when
+  // summing many line items with 21% IVA. ivaPct and irpfPct are
+  // percentages (e.g. 21 = 21%), NOT ratios.
+  const iva = Number(ivaPct) || 0;
+  const irpf = Number(irpfPct) || 0;
+  const baseCents = items.reduce((sum, item) => {
+    const qty = Number(item.cantidad) || 0;
+    const price = Number(item.precioUnitario) || 0;
+    return sum + Math.round(qty * price * 100);
   }, 0);
-  const ivaImporte = Math.round(baseImponible * ivaPct) / 100;
-  const irpfImporte = Math.round(baseImponible * irpfPct) / 100;
-  const total = baseImponible + ivaImporte - irpfImporte;
+  const ivaCents  = Math.round(baseCents * iva  / 100);
+  const irpfCents = Math.round(baseCents * irpf / 100);
+  const totalCents = baseCents + ivaCents - irpfCents;
   return {
-    baseImponible: Math.round(baseImponible * 100) / 100,
-    ivaImporte: Math.round(ivaImporte * 100) / 100,
-    irpfImporte: Math.round(irpfImporte * 100) / 100,
-    total: Math.round(total * 100) / 100,
+    baseImponible: baseCents  / 100,
+    ivaImporte:    ivaCents   / 100,
+    irpfImporte:   irpfCents  / 100,
+    total:         totalCents / 100,
   };
 }
 
@@ -472,6 +492,7 @@ const useStore = create(
         },
         blockedHours: [],
         // Each entry: { id, dayOfWeek: 0-6 (0=Lun), startHour: 8-20, endHour: 8-20, label?: string }
+        autoLockMinutes: 0, // 0 = disabled; otherwise lock the vault after N min of inactivity
       },
       updateConfig: (updates) => set(s => ({ config: { ...s.config, ...updates } })),
 
@@ -1104,7 +1125,19 @@ const useStore = create(
       updateInvoice: (id, data) => {
         const existing = get().invoices.find(i => i.id === id);
         if (!existing) return;
-        const merged = { ...existing, ...data };
+        // Duplicate numero check: reject a change that would collide
+        // with another invoice's number (fiscal audit integrity).
+        let safeData = data;
+        if (data.numero && data.numero !== existing.numero) {
+          const dup = get().invoices.some(i => i.id !== id && i.numero === data.numero);
+          if (dup) {
+            if (import.meta.env.DEV) {
+              console.warn(`[updateInvoice] Duplicate numero "${data.numero}" — keeping previous "${existing.numero}"`);
+            }
+            safeData = { ...data, numero: existing.numero };
+          }
+        }
+        const merged = { ...existing, ...safeData };
         const items = merged.items || [];
         const ivaPct = merged.ivaPct ?? 0;
         const irpfPct = merged.irpfPct ?? 0;
@@ -1115,7 +1148,7 @@ const useStore = create(
           concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
           importe: totals.total,
         };
-        set(s => ({ invoices: get().invoices.map(i => i.id === id ? updated : i) }));
+        set(s => ({ invoices: s.invoices.map(i => i.id === id ? updated : i) }));
       },
       deleteInvoice: (id) => {
         const item = get().invoices.find(i => i.id === id);
@@ -1171,24 +1204,45 @@ const useStore = create(
         const history = get()._history;
         if (!history.length) return;
         const [last, ...rest] = history;
-        set(s => ({ _future: [last, ...s._future].slice(0, 20), _history: rest }));
-        if (last.type === 'delete_client')       set(s => ({ clients:         [last.item, ...s.clients] }));
-        if (last.type === 'delete_consultation') set(s => ({ consultations:  [last.item, ...s.consultations] }));
-        if (last.type === 'delete_plan')         set(s => ({ nutritionPlans: [last.item, ...s.nutritionPlans] }));
-        if (last.type === 'delete_invoice')      set(s => ({ invoices:       [last.item, ...s.invoices] }));
-        if (last.type === 'delete_document')     set(s => ({ clientDocuments:[last.item, ...s.clientDocuments] }));
+        // Single set() so every consumer sees a consistent snapshot —
+        // previously this fired 2 separate updates and components could
+        // observe the item list mutated before the history bookkeeping.
+        set(s => {
+          const next = {
+            _future: [last, ...s._future].slice(0, 20),
+            _history: rest,
+          };
+          if (last.type === 'delete_client')       next.clients         = [last.item, ...s.clients];
+          if (last.type === 'delete_consultation') next.consultations   = [last.item, ...s.consultations];
+          if (last.type === 'delete_plan')         next.nutritionPlans  = [last.item, ...s.nutritionPlans];
+          if (last.type === 'delete_invoice')      next.invoices        = [last.item, ...s.invoices];
+          if (last.type === 'delete_document')     next.clientDocuments = [last.item, ...s.clientDocuments];
+          return next;
+        });
       },
       redo: () => {
         const future = get()._future;
         if (!future.length) return;
         const [next, ...rest] = future;
-        set(s => ({ _history: [next, ...s._history].slice(0, 20), _future: rest }));
-        if (next.type === 'delete_client')       set(s => ({ clients:         s.clients.filter(c => c.id !== next.item.id) }));
-        if (next.type === 'delete_consultation') set(s => ({ consultations:  s.consultations.filter(c => c.id !== next.item.id) }));
-        if (next.type === 'delete_plan')         set(s => ({ nutritionPlans: s.nutritionPlans.filter(p => p.id !== next.item.id) }));
-        if (next.type === 'delete_invoice')      set(s => ({ invoices:       s.invoices.filter(i => i.id !== next.item.id) }));
-        if (next.type === 'delete_document')     set(s => ({ clientDocuments:s.clientDocuments.filter(d => d.id !== next.item.id) }));
+        set(s => {
+          const update = {
+            _history: [next, ...s._history].slice(0, 20),
+            _future: rest,
+          };
+          if (next.type === 'delete_client')       update.clients         = s.clients.filter(c => c.id !== next.item.id);
+          if (next.type === 'delete_consultation') update.consultations   = s.consultations.filter(c => c.id !== next.item.id);
+          if (next.type === 'delete_plan')         update.nutritionPlans  = s.nutritionPlans.filter(p => p.id !== next.item.id);
+          if (next.type === 'delete_invoice')      update.invoices        = s.invoices.filter(i => i.id !== next.item.id);
+          if (next.type === 'delete_document')     update.clientDocuments = s.clientDocuments.filter(d => d.id !== next.item.id);
+          return update;
+        });
       },
+
+      // ---- DIAGNOSTICS ----
+      // Last captured runtime error (from ErrorBoundary). Not persisted.
+      lastError: null,
+      setLastError: (err) => set({ lastError: err }),
+      clearLastError: () => set({ lastError: null }),
 
       // ---- DATA INTEGRITY ----
       integrityWarnings: [],
@@ -1472,26 +1526,42 @@ const useStore = create(
       name: 'nutripolo-storage',
       storage: createJSONStorage(() => tauriStorage),
       version: STORE_VERSION,
+      // Skip automatic hydration at module load. App.jsx explicitly calls
+      // `useStore.persist.rehydrate()` after it has determined whether
+      // at-rest encryption is enabled and, if so, once the user has
+      // unlocked the vault. Without this the store would fire `getItem`
+      // synchronously against a locked encrypted backend, fail silently,
+      // and then hydrate with the real data *after* the user has
+      // already interacted with the empty default state.
+      skipHydration: true,
       migrate: migrateStore,
-      partialize: (s) => ({
-        config: s.config,
-        clients: s.clients,
-        measurements: s.measurements,
-        consultations: s.consultations,
-        personalEvents: s.personalEvents,
-        patientSuggestions: s.patientSuggestions,
-        syncAudit: s.syncAudit,
-        nutritionPlans: s.nutritionPlans,
-        services: s.services,
-        invoices: s.invoices,
-        clientDocuments: s.clientDocuments,
-        emailTemplates: s.emailTemplates,
-        lastBackupDate: s.lastBackupDate,
-        sidebarCollapsed: s.sidebarCollapsed,
-        appTheme: s.appTheme,
-        clientFilters: s.clientFilters,
-        consultationFilters: s.consultationFilters,
-      }),
+      partialize: (s) => {
+        // NEVER persist the SMTP password — it lives only in the OS
+        // credential store (see store_smtp_password / get_smtp_password).
+        // Strip it defensively before Zustand serializes the config.
+        const safeConfig = s.config
+          ? { ...s.config, smtp: s.config.smtp ? { ...s.config.smtp, password: '' } : s.config.smtp }
+          : s.config;
+        return {
+          config: safeConfig,
+          clients: s.clients,
+          measurements: s.measurements,
+          consultations: s.consultations,
+          personalEvents: s.personalEvents,
+          patientSuggestions: s.patientSuggestions,
+          syncAudit: s.syncAudit,
+          nutritionPlans: s.nutritionPlans,
+          services: s.services,
+          invoices: s.invoices,
+          clientDocuments: s.clientDocuments,
+          emailTemplates: s.emailTemplates,
+          lastBackupDate: s.lastBackupDate,
+          sidebarCollapsed: s.sidebarCollapsed,
+          appTheme: s.appTheme,
+          clientFilters: s.clientFilters,
+          consultationFilters: s.consultationFilters,
+        };
+      },
       onRehydrateStorage: () => (state) => {
         if (state) {
           state.isLoading = false;

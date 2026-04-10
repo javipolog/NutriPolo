@@ -1,7 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/tauri';
 import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles, Download, RefreshCw } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
+import { UnlockScreen } from './components/UnlockScreen';
 import useStore from './stores/store';
 import { useT } from './i18n';
 
@@ -322,6 +324,52 @@ function AppContent() {
     }
   }, [runAutoBackup, validateDataIntegrity]);
 
+  // Auto-lock on inactivity. Only active when at-rest encryption is enabled.
+  // Timeout is configurable in Settings via `config.autoLockMinutes`:
+  //   0 or undefined → disabled
+  //   N > 0          → lock after N minutes of no input events
+  useEffect(() => {
+    const minutes = Number(config.autoLockMinutes) || 0;
+    if (minutes <= 0) return;
+
+    let cancelled = false;
+    let timer = null;
+
+    const checkAndArm = async () => {
+      try {
+        const enabled = await invoke('encryption_is_enabled');
+        if (!enabled || cancelled) return;
+      } catch {
+        return;
+      }
+      const resetTimer = () => {
+        clearTimeout(timer);
+        timer = setTimeout(async () => {
+          try {
+            await invoke('encryption_lock');
+          } catch {}
+          window.location.reload();
+        }, minutes * 60 * 1000);
+      };
+      const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+      events.forEach((ev) => window.addEventListener(ev, resetTimer, { passive: true }));
+      resetTimer();
+      // Cleanup on unmount or config change
+      return () => {
+        clearTimeout(timer);
+        events.forEach((ev) => window.removeEventListener(ev, resetTimer));
+      };
+    };
+
+    let cleanup;
+    checkAndArm().then((c) => { cleanup = c; });
+    return () => {
+      cancelled = true;
+      cleanup?.();
+      clearTimeout(timer);
+    };
+  }, [config.autoLockMinutes]);
+
   const navItems = [
     { id: 'dashboard', icon: Home,          label: t.nav_dashboard, shortcut: '1' },
     { id: 'agenda',    icon: Calendar,      label: t.nav_agenda,    shortcut: '2' },
@@ -510,10 +558,86 @@ function AppContent() {
   );
 }
 
+/**
+ * EncryptionGate — determines on launch whether at-rest encryption is
+ * enabled, renders the UnlockScreen when locked, and only hydrates the
+ * Zustand store (decrypting everything via the Rust backend) once the
+ * vault is unlocked.
+ *
+ * State machine:
+ *   checking       → asking the backend whether encryption.json exists
+ *   unlocking      → encryption enabled, waiting for user to unlock
+ *   hydrating      → unlocked (or no encryption), triggering persist.rehydrate()
+ *   ready          → store is hydrated, render the main app
+ */
+function EncryptionGate() {
+  const [phase, setPhase] = useState('checking');
+
+  // Phase 1 — check encryption state on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const enabled = await invoke('encryption_is_enabled');
+        if (cancelled) return;
+        if (!enabled) {
+          setPhase('hydrating');
+          return;
+        }
+        const unlocked = await invoke('encryption_is_unlocked');
+        if (cancelled) return;
+        setPhase(unlocked ? 'hydrating' : 'unlocking');
+      } catch {
+        // If the IPC call fails (shouldn't happen in Tauri), default
+        // to no-encryption so the app can still boot.
+        if (!cancelled) setPhase('hydrating');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Phase 2 — rehydrate the store once we know the vault is accessible
+  useEffect(() => {
+    if (phase !== 'hydrating') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        await useStore.persist.rehydrate();
+      } catch {
+        // Rehydration errors are logged inside the store; fall through
+        // so the UI isn't permanently stuck on a loading spinner.
+      }
+      if (!cancelled) setPhase('ready');
+    })();
+    return () => { cancelled = true; };
+  }, [phase]);
+
+  const handleUnlocked = useCallback(() => setPhase('hydrating'), []);
+
+  if (phase === 'checking' || phase === 'hydrating') {
+    return (
+      <div className="min-h-screen bg-sage-50 flex items-center justify-center">
+        <div className="text-center">
+          <Spinner size="lg" />
+          <p className="text-sage-600 mt-4 text-sm">
+            {phase === 'checking' ? 'Comprobando seguridad...' : 'Descifrando datos...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === 'unlocking') {
+    return <UnlockScreen onUnlocked={handleUnlocked} />;
+  }
+
+  return <AppContent />;
+}
+
 export default function App() {
   return (
     <ToastProvider>
-      <AppContent />
+      <EncryptionGate />
     </ToastProvider>
   );
 }

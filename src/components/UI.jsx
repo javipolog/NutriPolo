@@ -105,6 +105,21 @@ export class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     if (import.meta.env.DEV) console.error('ErrorBoundary caught error:', error, errorInfo);
+    // Persist last error to the store so SettingsView > Diagnóstico can show it.
+    // Lazy import to avoid a circular dependency with the store module.
+    try {
+      import('../stores/store').then(({ default: useStore }) => {
+        const setLastError = useStore.getState().setLastError;
+        if (typeof setLastError === 'function') {
+          setLastError({
+            message: error?.message || String(error),
+            stack: error?.stack || null,
+            componentStack: errorInfo?.componentStack || null,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      }).catch(() => {});
+    } catch {}
   }
 
   render() {

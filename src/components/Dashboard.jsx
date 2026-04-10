@@ -157,6 +157,12 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
     const t = useT();
     const toast = useToast();
 
+    const clientsById = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
+    const locationsById = useMemo(
+        () => new Map((locations || []).map(l => [l.id, l])),
+        [locations]
+    );
+
     const locationName = (id) => config.locations?.find(l => l.id === id)?.name || id || '';
 
     const handleWhatsAppReminder = (consultation, client) => {
@@ -190,8 +196,8 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
             ) : (
                 <div className="space-y-0 divide-y divide-sage-100">
                     {consultations.map(c => {
-                        const client = clients.find(cl => cl.id === c.clienteId);
-                        const location = locations?.find(l => l.id === c.localizacion);
+                        const client = clientsById.get(c.clienteId);
+                        const location = locationsById.get(c.localizacion);
                         const dotColor = CONSULTATION_STATUS_DOT[c.estado] || 'bg-sage-300';
                         return (
                             <div key={c.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
@@ -442,6 +448,7 @@ const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark
    ============================================ */
 
 const RecentInvoices = ({ invoices, clients, onNavigate }) => {
+    const clientsById = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
     const recent = [...invoices]
         .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''))
         .slice(0, 5);
@@ -481,7 +488,7 @@ const RecentInvoices = ({ invoices, clients, onNavigate }) => {
                         </thead>
                         <tbody className="divide-y divide-sage-100">
                             {recent.map(inv => {
-                                const client = clients.find(c => c.id === inv.clienteId);
+                                const client = clientsById.get(inv.clienteId);
                                 return (
                                     <tr key={inv.id} className="hover:bg-sage-50 transition-colors">
                                         <td className="py-3 px-6 font-mono text-sm text-sage-700">{inv.numero}</td>

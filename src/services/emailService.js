@@ -319,17 +319,49 @@ const uint8ArrayToBase64 = (bytes) => {
   return btoa(binary);
 };
 
+// Strip CR/LF/NUL from any value destined for an SMTP header or a
+// filename sent to the backend. Prevents header injection attacks
+// (e.g. a malicious client name inserting `Bcc:` or a new message body).
+const sanitizeHeader = (s) => (s == null ? '' : String(s).replace(/[\r\n\0]/g, ' ').trim());
+
 export const sendEmailSMTP = async ({ to, toName, subject, body, pdfBytes, pdfFilename, smtpConfig }) => {
   const pdfBase64 = pdfBytes ? uint8ArrayToBase64(pdfBytes) : null;
+
+  // Fetch the SMTP password from the OS credential store. It is never
+  // persisted inside the Zustand config, so we must look it up here
+  // at send-time. If the user has not saved a password (e.g. typing
+  // one into the "test" modal), honor the one on the passed config.
+  let password = smtpConfig?.password || '';
+  if (!password) {
+    try {
+      password = await invoke('get_smtp_password');
+    } catch {
+      return { success: false, error: 'smtp_password_not_configured' };
+    }
+  }
+
+  // Field names are camelCase — the Rust SmtpConfig uses
+  // #[serde(rename_all = "camelCase")] so fromName/fromEmail/useTls
+  // map to from_name/from_email/use_tls in Rust.
+  const safeSmtp = {
+    host:      sanitizeHeader(smtpConfig?.host),
+    port:      Number(smtpConfig?.port) || 587,
+    username:  smtpConfig?.username || '',
+    password,
+    fromName:  sanitizeHeader(smtpConfig?.fromName),
+    fromEmail: sanitizeHeader(smtpConfig?.fromEmail),
+    useTls:    !!smtpConfig?.useTls,
+  };
+
   try {
     const result = await invoke('send_email_smtp', {
-      toEmail: to,
-      toName: toName || null,
-      subject,
-      bodyText: body,
+      toEmail:     sanitizeHeader(to),
+      toName:      toName ? sanitizeHeader(toName) : null,
+      subject:     sanitizeHeader(subject),
+      bodyText:    body,
       pdfBase64,
-      pdfFilename: pdfFilename || 'documento.pdf',
-      smtpConfig,
+      pdfFilename: sanitizeHeader(pdfFilename || 'documento.pdf'),
+      smtpConfig:  safeSmtp,
     });
     return result;
   } catch (e) {
@@ -338,8 +370,19 @@ export const sendEmailSMTP = async ({ to, toName, subject, body, pdfBytes, pdfFi
 };
 
 export const testSmtpConnection = async (smtpConfig) => {
+  // The test modal passes a freshly-typed password; don't consult the
+  // keyring here, and sanitize header fields defensively.
+  const safeSmtp = {
+    host:      sanitizeHeader(smtpConfig?.host),
+    port:      Number(smtpConfig?.port) || 587,
+    username:  smtpConfig?.username || '',
+    password:  smtpConfig?.password || '',
+    fromName:  sanitizeHeader(smtpConfig?.fromName),
+    fromEmail: sanitizeHeader(smtpConfig?.fromEmail),
+    useTls:    !!smtpConfig?.useTls,
+  };
   try {
-    const result = await invoke('test_smtp_connection', { smtpConfig });
+    const result = await invoke('test_smtp_connection', { smtpConfig: safeSmtp });
     return result;
   } catch (e) {
     return { success: false, error: String(e) };

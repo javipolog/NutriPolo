@@ -6,6 +6,29 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
+use rand::Rng;
+use sha2::{Digest, Sha256};
+use base64::Engine as _;
+
+/// Generate a URL-safe random string of the given length from the
+/// unreserved alphabet `[A-Za-z0-9]`. Used for OAuth `state` and for
+/// the PKCE `code_verifier`.
+fn random_url_safe(len: usize) -> String {
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
+    (0..len)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
+/// PKCE S256 challenge: base64url(sha256(verifier)) without padding.
+fn pkce_s256_challenge(verifier: &str) -> String {
+    let digest = Sha256::digest(verifier.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest)
+}
 
 // ---------------------------------------------------------------------------
 // Shared data structures
@@ -47,6 +70,10 @@ pub struct CalendarListEntry {
 pub struct AuthResult {
     pub code: String,
     pub redirect_uri: String,
+    /// PKCE code_verifier generated for this auth flow. The caller must
+    /// pass it back to `gcal_exchange_token` so Google can verify the
+    /// S256 challenge sent in the authorization URL.
+    pub code_verifier: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -169,13 +196,18 @@ fn url_encode(s: &str) -> String {
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Start the OAuth2 authorization flow:
+/// Start the OAuth2 authorization flow with CSRF protection (state) and PKCE.
+///
 /// 1. Find a free local port and build the redirect URI.
-/// 2. Build the Google OAuth consent URL.
-/// 3. Open it in the default browser.
-/// 4. Spin up a temporary TCP server on that port and wait (up to 120 s)
+/// 2. Generate a random `state` (CSRF token) and a PKCE `code_verifier`;
+///    derive the S256 challenge from the verifier.
+/// 3. Build the Google OAuth consent URL with `state` + `code_challenge`.
+/// 4. Open it in the default browser.
+/// 5. Spin up a temporary TCP server on that port and wait (up to 120 s)
 ///    for Google to redirect back with the authorization code.
-/// 5. Return the code.
+/// 6. Verify that the returned `state` matches what we sent — reject otherwise.
+/// 7. Return the code and verifier; the caller must pass the verifier to
+///    `gcal_exchange_token` so Google can verify the PKCE challenge.
 #[tauri::command]
 pub async fn gcal_start_auth(
     client_id: String,
@@ -185,6 +217,10 @@ pub async fn gcal_start_auth(
     let port = find_free_port()?;
     let redirect_uri = format!("http://localhost:{}", port);
 
+    let state = random_url_safe(32);
+    let code_verifier = random_url_safe(64);
+    let code_challenge = pkce_s256_challenge(&code_verifier);
+
     let scope = "https://www.googleapis.com/auth/calendar";
     let auth_url = format!(
         "https://accounts.google.com/o/oauth2/v2/auth\
@@ -193,17 +229,23 @@ pub async fn gcal_start_auth(
          &response_type=code\
          &scope={scope}\
          &access_type=offline\
-         &prompt=consent",
+         &prompt=consent\
+         &state={state}\
+         &code_challenge={code_challenge}\
+         &code_challenge_method=S256",
         client_id = url_encode(&client_id),
         redirect_uri = url_encode(&redirect_uri),
         scope = url_encode(scope),
+        state = url_encode(&state),
+        code_challenge = url_encode(&code_challenge),
     );
 
     tauri::api::shell::open(&app_handle.shell_scope(), &auth_url, None)
         .map_err(|e| format!("Failed to open browser: {}", e))?;
 
-    // Use an mpsc channel + a dedicated thread so we can implement a 120-second
-    // timeout without raw socket options (which differ between OSes).
+    // Move the expected state into the callback thread. The received
+    // value must match exactly or the response is treated as hostile.
+    let expected_state = state.clone();
     let (tx, rx) = mpsc::channel::<Result<String, String>>();
 
     thread::spawn(move || {
@@ -234,6 +276,18 @@ pub async fn gcal_start_auth(
                     return;
                 }
 
+                // CSRF protection: reject the callback unless `state` matches
+                // exactly. A malicious tab on localhost cannot forge this.
+                let received_state = extract_query_param(first_line, "state").unwrap_or_default();
+                if received_state != expected_state {
+                    let html = "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
+                                <html><body><h1>Authorization failed</h1>\
+                                <p>State mismatch. You can close this tab.</p></body></html>";
+                    let _ = stream.write_all(html.as_bytes());
+                    let _ = tx.send(Err("oauth_state_mismatch".to_string()));
+                    return;
+                }
+
                 match extract_query_param(first_line, "code") {
                     None => {
                         let _ = tx.send(Err(
@@ -259,16 +313,18 @@ pub async fn gcal_start_auth(
         .map_err(|_| "Timed out waiting for Google authorization (120 s)".to_string())
         .and_then(|r| r)?;
 
-    Ok(AuthResult { code, redirect_uri })
+    Ok(AuthResult { code, redirect_uri, code_verifier })
 }
 
 /// Exchange an authorization code for access + refresh tokens.
+/// Requires the PKCE `code_verifier` produced by `gcal_start_auth`.
 #[tauri::command]
 pub async fn gcal_exchange_token(
     client_id: String,
     client_secret: String,
     code: String,
     redirect_uri: String,
+    code_verifier: String,
 ) -> Result<TokenResponse, String> {
     let client = reqwest::Client::new();
     let params = [
@@ -277,6 +333,7 @@ pub async fn gcal_exchange_token(
         ("code", code.as_str()),
         ("redirect_uri", redirect_uri.as_str()),
         ("grant_type", "authorization_code"),
+        ("code_verifier", code_verifier.as_str()),
     ];
 
     let resp = client
@@ -284,20 +341,18 @@ pub async fn gcal_exchange_token(
         .form(&params)
         .send()
         .await
-        .map_err(|e| format!("Network error exchanging token: {}", e))?;
+        .map_err(|_| "oauth_network_error".to_string())?;
 
     let status = resp.status();
     let body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("Error parsing token response: {}", e))?;
+        .map_err(|_| "oauth_parse_error".to_string())?;
 
     if !status.is_success() {
-        let err_msg = body["error_description"]
-            .as_str()
-            .or_else(|| body["error"].as_str())
-            .unwrap_or("Unknown error");
-        return Err(format!("Token exchange failed ({}): {}", status, err_msg));
+        #[cfg(debug_assertions)]
+        eprintln!("[gcal_exchange_token] status={} body={:?}", status, body);
+        return Err("oauth_token_exchange_failed".to_string());
     }
 
     Ok(TokenResponse {
@@ -334,20 +389,18 @@ pub async fn gcal_refresh_token(
         .form(&params)
         .send()
         .await
-        .map_err(|e| format!("Network error refreshing token: {}", e))?;
+        .map_err(|_| "oauth_network_error".to_string())?;
 
     let status = resp.status();
     let body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("Error parsing refresh response: {}", e))?;
+        .map_err(|_| "oauth_parse_error".to_string())?;
 
     if !status.is_success() {
-        let err_msg = body["error_description"]
-            .as_str()
-            .or_else(|| body["error"].as_str())
-            .unwrap_or("Unknown error");
-        return Err(format!("Token refresh failed ({}): {}", status, err_msg));
+        #[cfg(debug_assertions)]
+        eprintln!("[gcal_refresh_token] status={} body={:?}", status, body);
+        return Err("oauth_token_refresh_failed".to_string());
     }
 
     Ok(TokenResponse {

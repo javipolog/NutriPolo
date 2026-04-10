@@ -7,7 +7,7 @@
   },
   "package": {
     "productName": "NutriPolo",
-    "version": "1.7.0"
+    "version": "1.8.0"
   },
   "tauri": {
     "allowlist": {
@@ -18,7 +18,16 @@
         "open": true
       },
       "fs": {
-        "all": true,
+        "all": false,
+        "readFile": true,
+        "writeFile": true,
+        "createDir": true,
+        "readDir": false,
+        "copyFile": false,
+        "removeDir": false,
+        "removeFile": false,
+        "renameFile": false,
+        "exists": false,
         "scope": [
           "$APP/**",
           "$HOME/**",

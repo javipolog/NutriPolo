@@ -410,7 +410,7 @@ export const PatientSuggestionsInbox = () => {
 
   return (
     <div className="flex flex-col gap-6 animate-fadeIn">
-      <ConfirmDialog />
+      {ConfirmDialog}
 
       {/* Header */}
       <div>
