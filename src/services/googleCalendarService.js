@@ -477,19 +477,95 @@ export const googleCalendar = {
   },
 
   /**
+   * Run fuzzy matching for a patient name and create/update the appropriate
+   * patientSuggestion in the store. Shared between the new-event import path
+   * and the orphan-backfill path inside _syncExternalClinic so both behave
+   * identically and the logic lives in one place.
+   *
+   * @param {string}  rawName           Extracted name (from extractPatientName)
+   * @param {string}  normalizedName    Normalized form of rawName
+   * @param {Set}     dismissedNames    Set of normNames the user dismissed for this cal
+   * @param {string}  calId             Source calendar ID
+   * @param {string}  rawSummary        Original event summary (for inbox display)
+   * @param {string|null} fecha         Date of the first occurrence
+   * @param {string|null} hora          Time of the first occurrence
+   * @param {number}  autoThreshold     Score ≥ this → pending-confirm
+   * @param {number}  suggestThreshold  Score ≥ this → pending review
+   * @returns {{ matchStatus, suggestedFromId, suggestedClienteId, matchScore }}
+   */
+  _buildSuggestionForName(rawName, normalizedName, dismissedNames, calId, rawSummary,
+                          fecha, hora, autoThreshold, suggestThreshold) {
+    if (!normalizedName) {
+      return { matchStatus: 'unknown', suggestedFromId: null, suggestedClienteId: null, matchScore: null };
+    }
+    if (dismissedNames.has(normalizedName)) {
+      return { matchStatus: 'dismissed', suggestedFromId: null, suggestedClienteId: null, matchScore: null };
+    }
+    const store = useStore.getState();
+    const { auto, candidates } = findBestMatches(
+      rawName, store.clients, { autoThreshold, suggestThreshold }
+    );
+    const base = {
+      sourceCalendarId: calId,
+      rawSummary,
+      normalizedName,
+      firstSeenFecha: fecha || null,
+      firstSeenHora:  hora  || null,
+    };
+    if (auto) {
+      const sg = store.addPatientSuggestion({
+        ...base,
+        candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
+        suggestedClienteId: auto.clienteId,
+        topScore: auto.score,
+        status: 'pending-confirm',
+      });
+      return {
+        matchStatus: 'auto-pending-review',
+        suggestedFromId: sg?.id || null,
+        suggestedClienteId: auto.clienteId,
+        matchScore: auto.score,
+      };
+    }
+    if (candidates.length > 0) {
+      const sg = store.addPatientSuggestion({
+        ...base,
+        candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
+        topScore: candidates[0].score,
+      });
+      return {
+        matchStatus: 'suggested',
+        suggestedFromId: sg?.id || null,
+        suggestedClienteId: null,
+        matchScore: candidates[0].score,
+      };
+    }
+    // No candidates — new unknown patient
+    const sg = store.addPatientSuggestion({ ...base, candidates: [] });
+    return {
+      matchStatus: 'unknown',
+      suggestedFromId: sg?.id || null,
+      suggestedClienteId: null,
+      matchScore: null,
+    };
+  },
+
+  /**
    * Sync an external-clinic calendar (e.g. Sinergia receptionist agenda).
    * Pull-only: never pushes back to Google.
    *
    * For each new event:
    *   1. Extract a clean patient name via extractPatientName().
    *   2. Try exact name match against known clients.
-   *   3. If no exact match, run fuzzy matching:
-   *      - score ≥ fuzzyAutoThreshold (0.92) → auto-link silently (fuzzyAutoLinked: true)
-   *      - score ≥ fuzzySuggestThreshold (0.75) → add to patientSuggestions inbox
-   *      - score < 0.75 → add as unknown-patient suggestion (no candidates)
+   *   3. If no exact match, run fuzzy matching via _buildSuggestionForName:
+   *      - score ≥ fuzzyAutoThreshold (0.92) → pending-confirm suggestion
+   *      - score ≥ fuzzySuggestThreshold (0.75) → pending suggestion
+   *      - score < 0.75 → unknown-patient suggestion (no candidates)
    *   4. Dismissed suggestions skip re-creation for that normalizedName + calendar.
    *   5. Imports the consultation with optional suggestedFromId so linkPatientSuggestion
    *      can back-fill clienteId on every affected consultation in one shot.
+   *   6. On re-sync: orphaned existing consultations (matchStatus='unknown', no live
+   *      suggestion) are back-filled with a new suggestion automatically.
    */
   async _syncExternalClinic(store, token, calendarConfig) {
     const calId = calendarConfig.id;
@@ -591,6 +667,46 @@ export const googleCalendar = {
           }
           stats.updated++;
         }
+
+        // ── Backfill orphan suggestion on re-sync ─────────────────────────────
+        // Covers consultations imported pre-v1.7 (or any row whose suggestion was
+        // never created / was dropped) that still have matchStatus='unknown' and
+        // no live suggestedFromId. Idempotent: once a live suggestion exists the
+        // isOrphan check resolves false and this block is skipped on next sync.
+        // Never touches user-confirmed rows (exact / manual / dismissed).
+        const isUserLinked =
+          existing.matchedBy === 'user' ||
+          existing.matchStatus === 'manual' ||
+          existing.matchStatus === 'exact' ||
+          existing.matchStatus === 'dismissed';
+        if (!isUserLinked) {
+          const activeSg = existing.suggestedFromId
+            ? useStore.getState().patientSuggestions.find(sg =>
+                sg.id === existing.suggestedFromId &&
+                (sg.status === 'pending' || sg.status === 'pending-confirm'))
+            : null;
+          const isOrphan = !activeSg;
+          if (isOrphan) {
+            const backRaw  = extractPatientName(existing.googleSummary || ev.summary || '');
+            const backNorm = _normalize(backRaw);
+            const result = this._buildSuggestionForName(
+              backRaw, backNorm, dismissedNames, calId,
+              existing.googleSummary || ev.summary || '',
+              existing.fecha, existing.hora, autoThreshold, suggestThreshold,
+            );
+            useStore.getState().updateConsultation(existing.id, {
+              matchStatus:        result.matchStatus,
+              matchedBy:          'system',
+              matchedAt:          new Date().toISOString(),
+              suggestedFromId:    result.suggestedFromId    || undefined,
+              suggestedClienteId: result.suggestedClienteId || undefined,
+              matchScore:         result.matchScore         ?? undefined,
+            });
+            if (result.suggestedFromId) {
+              useStore.getState().attachConsultationToSuggestion(result.suggestedFromId, existing.id);
+            }
+          }
+        }
         continue;
       }
 
@@ -610,66 +726,16 @@ export const googleCalendar = {
       if (clienteId) {
         // Exact match found by eventToConsultation
         matchStatus = 'exact';
-      } else if (normalizedName) {
-        // Exact match by normalizedName didn't fire in eventToConsultation;
-        // try the richer extractPatientName variant through fuzzy engine
-        const latestStore = useStore.getState();
-        const { auto, candidates } = findBestMatches(
-          rawName,
-          latestStore.clients,
-          { autoThreshold, suggestThreshold },
-        );
-
-        if (dismissedNames.has(normalizedName)) {
-          // User dismissed this name — import as dismissed record (no inbox card)
-          matchStatus = 'dismissed';
-        } else if (auto) {
-          // High-confidence fuzzy match — pre-select but require 1-click confirmation
-          matchStatus = 'auto-pending-review';
-          suggestedClienteId = auto.clienteId;
-          matchScore = auto.score;
-          const sg = latestStore.addPatientSuggestion({
-            sourceCalendarId: calId,
-            rawSummary: ev.summary || '',
-            normalizedName,
-            firstSeenFecha: partial.fecha || null,
-            firstSeenHora:  partial.hora  || null,
-            candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
-            suggestedClienteId: auto.clienteId,
-            topScore: auto.score,
-            status: 'pending-confirm',
-          });
-          suggestedFromId = sg?.id;
-        } else if (candidates.length > 0) {
-          // Ambiguous — create review suggestion
-          matchStatus = 'suggested';
-          matchScore = candidates[0].score;
-          const sg = latestStore.addPatientSuggestion({
-            sourceCalendarId: calId,
-            rawSummary: ev.summary || '',
-            normalizedName,
-            firstSeenFecha: partial.fecha || null,
-            firstSeenHora:  partial.hora  || null,
-            candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
-            topScore: candidates[0].score,
-          });
-          suggestedFromId = sg?.id;
-        } else {
-          // No candidates — new unknown patient
-          matchStatus = 'unknown';
-          const sg = latestStore.addPatientSuggestion({
-            sourceCalendarId: calId,
-            rawSummary: ev.summary || '',
-            normalizedName,
-            firstSeenFecha: partial.fecha || null,
-            firstSeenHora:  partial.hora  || null,
-            candidates: [],
-          });
-          suggestedFromId = sg?.id;
-        }
       } else {
-        // No extractable name — import without matching
-        matchStatus = 'unknown';
+        // No exact match — run fuzzy pipeline (handles empty normalizedName gracefully)
+        const result = this._buildSuggestionForName(
+          rawName, normalizedName, dismissedNames, calId, ev.summary || '',
+          partial.fecha, partial.hora, autoThreshold, suggestThreshold,
+        );
+        matchStatus        = result.matchStatus;
+        suggestedFromId    = result.suggestedFromId;
+        suggestedClienteId = result.suggestedClienteId;
+        matchScore         = result.matchScore;
       }
 
       const newC = useStore.getState().addConsultation({

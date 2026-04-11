@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
+import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 
 // ============================================
 // TAURI STORAGE — Write queue amb debounce
@@ -211,7 +212,7 @@ const DEFAULT_SERVICES = [
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 9;
+const STORE_VERSION = 10;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -443,6 +444,156 @@ function migrateStore(persistedState, version) {
         }
 
         return next;
+      });
+    }
+  }
+  if (version < 10) {
+    // v9 → v10: Backfill patientSuggestion for orphaned 'unknown' external-clinic
+    // consultations. v8→v9 only created suggestions for auto-pending-review rows;
+    // pure 'unknown' rows (no clienteId, no suggestedFromId) were left orphaned
+    // and never showed up in the inbox. This migration groups them by
+    // (sourceCalendarId, normalizedName) and creates one suggestion per group,
+    // re-running fuzzy matching against the current client list.
+    const s = persistedState.state;
+    if (s) {
+      const externalClinicIds = new Set(
+        (s.config?.googleCalendar?.calendars || [])
+          .filter(c => c.purpose === 'external-clinic')
+          .map(c => c.id)
+      );
+      const clients = s.clients || [];
+      const existingSuggestions = s.patientSuggestions || [];
+
+      const dismissedKeys = new Set(
+        existingSuggestions
+          .filter(sg => sg.status === 'dismissed')
+          .map(sg => `${sg.sourceCalendarId}||${sg.normalizedName}`)
+      );
+      // Index active suggestions so orphans can attach to them instead of duplicating
+      const activeByKey = new Map();
+      for (const sg of existingSuggestions) {
+        if (sg.status === 'pending' || sg.status === 'pending-confirm') {
+          activeByKey.set(`${sg.sourceCalendarId}||${sg.normalizedName}`, sg);
+        }
+      }
+
+      // Group orphan consultations by (calId, normName)
+      const groups = new Map();
+      const attachments = []; // { consultationId, suggestionId } for existing-active cases
+
+      for (const c of (s.consultations || [])) {
+        if (!externalClinicIds.has(c.sourceCalendarId)) continue;
+        if (c.matchStatus !== 'unknown') continue;
+        if (c.suggestedFromId) continue;
+
+        const rawName  = extractPatientName(c.googleSummary || '');
+        const normName = fuzzyNormalize(rawName);
+        if (!normName) continue; // no extractable name — leave as-is
+        const key = `${c.sourceCalendarId}||${normName}`;
+        if (dismissedKeys.has(key)) continue;
+
+        const activeSg = activeByKey.get(key);
+        if (activeSg) {
+          // Attach to existing active suggestion instead of creating a duplicate
+          attachments.push({ consultationId: c.id, suggestionId: activeSg.id });
+          continue;
+        }
+
+        if (!groups.has(key)) {
+          groups.set(key, {
+            rawName, normName, calId: c.sourceCalendarId,
+            consultationIds: [], fechas: [], horas: [],
+            firstSummary: c.googleSummary || '',
+          });
+        }
+        const g = groups.get(key);
+        g.consultationIds.push(c.id);
+        if (c.fecha) g.fechas.push(c.fecha);
+        if (c.hora)  g.horas.push(c.hora);
+      }
+
+      // Build new suggestions from groups using fresh fuzzy matching
+      const now = new Date().toISOString();
+      const newSuggestions = [];
+      const perConsultationPatch = new Map(); // consultationId → patch object
+
+      for (const g of groups.values()) {
+        const { auto, candidates } = findBestMatches(
+          g.rawName, clients, { autoThreshold: 0.92, suggestThreshold: 0.75 }
+        );
+        g.fechas.sort();
+        g.horas.sort();
+
+        let status = 'pending';
+        let suggestedClienteId = null;
+        let topScore = null;
+        let rowMatchStatus = 'unknown';
+        if (auto) {
+          status = 'pending-confirm';
+          suggestedClienteId = auto.clienteId;
+          topScore = auto.score;
+          rowMatchStatus = 'auto-pending-review';
+        } else if (candidates.length > 0) {
+          topScore = candidates[0].score;
+          rowMatchStatus = 'suggested';
+        }
+
+        const sgId = `mig10-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        newSuggestions.push({
+          id: sgId,
+          status,
+          occurrences: g.consultationIds.length,
+          candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
+          suggestedClienteId,
+          topScore,
+          linkedClienteId: null,
+          dismissedAt: null,
+          detectedAt: now,
+          sourceCalendarId: g.calId,
+          rawSummary: g.firstSummary,
+          normalizedName: g.normName,
+          firstSeenFecha: g.fechas[0] || null,
+          firstSeenHora:  g.horas[0]  || null,
+          consultationIds: [...g.consultationIds],
+        });
+        for (const cid of g.consultationIds) {
+          perConsultationPatch.set(cid, {
+            suggestedFromId: sgId,
+            suggestedClienteId: suggestedClienteId || undefined,
+            matchScore: topScore ?? undefined,
+            matchStatus: rowMatchStatus,
+            matchedBy: 'system',
+          });
+        }
+      }
+
+      // Build attachMap for consultations that link to existing active suggestions
+      const attachMap = new Map(); // suggestionId → Set<consultationId>
+      for (const { consultationId, suggestionId } of attachments) {
+        if (!attachMap.has(suggestionId)) attachMap.set(suggestionId, new Set());
+        attachMap.get(suggestionId).add(consultationId);
+        perConsultationPatch.set(consultationId, {
+          suggestedFromId: suggestionId,
+          matchedBy: 'system',
+        });
+      }
+
+      // Single immutable pass: append new suggestions + patch attach targets
+      s.patientSuggestions = [
+        ...existingSuggestions.map(sg => {
+          const extra = attachMap.get(sg.id);
+          if (!extra) return sg;
+          const mergedIds = Array.from(new Set([...(sg.consultationIds || []), ...extra]));
+          return { ...sg, consultationIds: mergedIds, occurrences: mergedIds.length };
+        }),
+        ...newSuggestions,
+      ];
+
+      // Single immutable pass over consultations: apply patches
+      s.consultations = (s.consultations || []).map(c => {
+        const patch = perConsultationPatch.get(c.id);
+        if (!patch) return c;
+        return { ...c, ...patch, matchedAt: c.matchedAt || now };
       });
     }
   }

@@ -53,7 +53,16 @@ export function extractPatientName(summary) {
   // Strip room / box references
   s = s.replace(/\b(sala|box|room|consulta)\s*\d+\b/gi, '');
 
-  // Strip trailing digits and punctuation
+  // Strip price tokens — common in receptionist summaries (prefix or suffix)
+  // Handles: "35€", "40 €", "35.50€", "35,00 €", "$25", "€25", "María Plaza €"
+  const CURRENCY = '[€$£¥₽₩₹]';
+  s = s.replace(new RegExp(`\\s*\\d+(?:[.,]\\d+)?\\s*${CURRENCY}\\s*$`, 'u'), '');
+  s = s.replace(new RegExp(`\\s*${CURRENCY}\\s*\\d+(?:[.,]\\d+)?\\s*$`, 'u'), '');
+  s = s.replace(new RegExp(`^\\s*\\d+(?:[.,]\\d+)?\\s*${CURRENCY}\\s*`, 'u'), '');
+  s = s.replace(new RegExp(`^\\s*${CURRENCY}\\s*\\d+(?:[.,]\\d+)?\\s*`, 'u'), '');
+  s = s.replace(new RegExp(`\\s*${CURRENCY}\\s*$`, 'u'), '');  // bare trailing symbol
+
+  // Strip trailing digits and punctuation (cleans up residue after currency strip)
   s = s.replace(/[\d.,:;!?]+$/g, '');
 
   return s.replace(/\s+/g, ' ').trim();
