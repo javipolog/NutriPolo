@@ -10,7 +10,7 @@ import { useT } from './i18n';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.9.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -29,19 +29,29 @@ const WhatsNewModal = () => {
   };
 
   return (
-    <Modal open={open} onClose={handleClose} title="Novedades en NutriPolo" size="sm">
+    <Modal open={open} onClose={handleClose} title="Novedades en NutriPolo v1.9.0" size="sm">
       <div className="space-y-4">
         <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
           <Sparkles size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">Google Calendar bidireccional</p>
+            <p className="text-sm font-semibold text-sage-800">Detección automática de nuevos pacientes</p>
             <p className="text-xs text-sage-600 mt-1">
-              El calendario <strong>"NutriPolo App"</strong> ahora se sincroniza en ambas direcciones.
-              Las consultas que crees o edites en la app se enviarán automáticamente a Google Calendar.
+              Cuando la clínica externa registre una consulta con un nombre desconocido,
+              la app lo detectará y lo mostrará en <strong>"Nuevos pacientes detectados"</strong>
+              para que puedas crear su ficha o vincularlo a un cliente existente.
             </p>
             <p className="text-xs text-sage-500 mt-1.5">
-              Los demás calendarios siguen en solo lectura. Puedes cambiar el modo de cada calendario
-              en Ajustes &gt; Google Calendar.
+              Las consultas pendientes de versiones anteriores se han recuperado automáticamente.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 p-3 bg-sand-50 border border-sand-200 rounded-soft">
+          <RefreshCw size={18} className="text-sand-500 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-sage-800">Nombres de pacientes más limpios</p>
+            <p className="text-xs text-sage-600 mt-1">
+              Los precios en el nombre del evento (ej. <em>"María García 35€"</em>) ya no
+              interfieren con la detección ni con el nombre sugerido al crear la ficha.
             </p>
           </div>
         </div>
