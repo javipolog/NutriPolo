@@ -363,6 +363,8 @@ export const InvoiceModal = ({ invoice, onClose }) => {
                     <button
                       type="button"
                       onClick={() => removeItem(item.id)}
+                      aria-label={t.invoice_remove_item}
+                      title={t.invoice_remove_item}
                       className="p-1 text-sage-300 hover:text-danger transition-colors"
                     >
                       <Trash2 size={13} />

@@ -189,19 +189,24 @@ export const Invoices = () => {
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => handleDownloadPDF(inv)}
-                          title="Descargar PDF"
+                          title={t.download_pdf}
+                          aria-label={`${t.download_pdf}: ${inv.numero}`}
                           className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
                         >
                           <FileDown size={13} />
                         </button>
                         <button
                           onClick={() => { setEditInvoice(inv); setShowModal(true); }}
+                          title={t.edit}
+                          aria-label={`${t.edit}: ${inv.numero}`}
                           className="p-1.5 rounded-button text-sage-400 hover:text-sage-700 hover:bg-sage-100 transition-colors"
                         >
                           <Edit2 size={13} />
                         </button>
                         <button
                           onClick={() => handleDelete(inv)}
+                          title={t.delete}
+                          aria-label={`${t.delete}: ${inv.numero}`}
                           className="p-1.5 rounded-button text-sage-400 hover:text-danger hover:bg-danger-light transition-colors"
                         >
                           <Trash2 size={13} />

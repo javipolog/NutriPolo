@@ -133,10 +133,26 @@ export const ClientDetailView = ({ clientId, onBack }) => {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-sage-200">
+      <div
+        className="flex gap-1 border-b border-sage-200"
+        role="tablist"
+        onKeyDown={e => {
+          // Arrow keys move between tabs (WAI-ARIA tabs pattern)
+          if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+          const i = TABS.findIndex(tb => tb.id === tab);
+          const next = TABS[(i + (e.key === 'ArrowRight' ? 1 : TABS.length - 1)) % TABS.length];
+          setTab(next.id);
+          document.getElementById(`client-tab-${next.id}`)?.focus();
+        }}
+      >
         {TABS.map(tb => (
           <button
             key={tb.id}
+            id={`client-tab-${tb.id}`}
+            role="tab"
+            aria-selected={tab === tb.id}
+            aria-controls="client-tabpanel"
+            tabIndex={tab === tb.id ? 0 : -1}
             onClick={() => setTab(tb.id)}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
               tab === tb.id
@@ -150,7 +166,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
       </div>
 
       {/* Tab content */}
-      <div className="animate-fadeIn">
+      <div className="animate-fadeIn" id="client-tabpanel" role="tabpanel" aria-labelledby={`client-tab-${tab}`}>
         {tab === 'profile' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="bg-white border border-sage-200 rounded-soft p-4">
@@ -206,6 +222,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                     <button
                       onClick={() => sendWhatsApp(c, client)}
                       title={t.whatsapp_reminder}
+                      aria-label={t.whatsapp_reminder}
                       className="p-1.5 rounded-button text-sage-400 hover:text-success hover:bg-success-light transition-colors shrink-0"
                     >
                       <MessageCircle size={14} className={c.reminders?.whatsapp ? 'text-success' : ''} />

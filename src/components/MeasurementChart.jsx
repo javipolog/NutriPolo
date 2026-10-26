@@ -195,6 +195,8 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
                 </div>
                 <button
                   onClick={() => handleDelete(m.id)}
+                  aria-label={t.delete}
+                  title={t.delete}
                   className="p-1.5 text-sage-300 hover:text-danger transition-colors"
                 >
                   <Trash2 size={13} />

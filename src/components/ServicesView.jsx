@@ -117,14 +117,17 @@ export const ServicesView = () => {
                 <button
                   onClick={() => updateService(svc.id, { activo: !svc.activo })}
                   className="p-2 rounded-button text-sage-400 hover:text-sage-700 transition-colors"
-                  title={svc.activo ? 'Desactivar' : 'Activar'}
+                  title={svc.activo ? t.deactivate : t.activate}
+                  role="switch"
+                  aria-checked={!!svc.activo}
+                  aria-label={`${t.service_active}: ${svc.nombre}`}
                 >
                   {svc.activo ? <ToggleRight size={16} className="text-wellness-400" /> : <ToggleLeft size={16} />}
                 </button>
-                <button onClick={() => { setEditService(svc); setShowModal(true); }} className="p-2 rounded-button text-sage-400 hover:text-sage-700 transition-colors">
+                <button onClick={() => { setEditService(svc); setShowModal(true); }} title={t.edit} aria-label={`${t.edit}: ${svc.nombre}`} className="p-2 rounded-button text-sage-400 hover:text-sage-700 transition-colors">
                   <Edit2 size={15} />
                 </button>
-                <button onClick={() => handleDelete(svc)} className="p-2 rounded-button text-sage-400 hover:text-danger transition-colors">
+                <button onClick={() => handleDelete(svc)} title={t.delete} aria-label={`${t.delete}: ${svc.nombre}`} className="p-2 rounded-button text-sage-400 hover:text-danger transition-colors">
                   <Trash2 size={15} />
                 </button>
               </div>

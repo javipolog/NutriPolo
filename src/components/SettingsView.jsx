@@ -11,7 +11,7 @@ import useStore, { generateId, inferCalendarPurpose, flushAllPending, errMsg } f
 import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
 import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar } from '../services/googleCalendarService';
-import { useT } from '../i18n';
+import { useT, useLocale, plural } from '../i18n';
 import { RemindersSection } from './settings/RemindersSection';
 import { invoke } from '@tauri-apps/api/tauri';
 
@@ -21,6 +21,7 @@ const LocationsManager = () => {
   const config = useStore(s => s.config);
   const updateConfig = useStore(s => s.updateConfig);
   const toast = useToast();
+  const t = useT();
   const [editId, setEditId] = useState(null);
   const [draft, setDraft] = useState({ name: '', address: '', type: 'presencial' });
 
@@ -34,12 +35,12 @@ const LocationsManager = () => {
       updateConfig({ locations: locations.map(l => l.id === editId ? { ...l, ...draft } : l) });
     }
     setEditId(null);
-    toast.success('Guardado');
+    toast.success(t.saved);
   };
 
   const remove = (id) => {
     updateConfig({ locations: locations.filter(l => l.id !== id) });
-    toast.success('Eliminado');
+    toast.success(t.deleted);
   };
 
   const startAdd = () => {
@@ -60,27 +61,30 @@ const LocationsManager = () => {
         <Input
           value={draft.name}
           onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-          placeholder="Nombre (ej. Centro Synergia)"
+          placeholder={t.settings_location_name_placeholder}
+          aria-label={t.settings_location_name}
           className="text-sm"
         />
         <select
           value={draft.type}
           onChange={e => setDraft(d => ({ ...d, type: e.target.value }))}
+          aria-label={t.settings_location_type}
           className="px-3 py-2 text-sm border border-sage-300 rounded-button bg-white focus:outline-none focus:border-wellness-400"
         >
-          <option value="presencial">Presencial</option>
-          <option value="online">Online</option>
+          <option value="presencial">{t.settings_location_presencial}</option>
+          <option value="online">{t.settings_location_online}</option>
         </select>
       </div>
       <Input
         value={draft.address}
         onChange={e => setDraft(d => ({ ...d, address: e.target.value }))}
-        placeholder="Dirección"
+        placeholder={t.settings_location_addr}
+        aria-label={t.settings_location_addr}
         className="text-sm"
       />
       <div className="flex gap-2 justify-end">
-        <Button variant="ghost" size="sm" onClick={() => setEditId(null)}>Cancelar</Button>
-        <Button variant="primary" size="sm" onClick={save}>Guardar</Button>
+        <Button variant="ghost" size="sm" onClick={() => setEditId(null)}>{t.cancel}</Button>
+        <Button variant="primary" size="sm" onClick={save}>{t.save}</Button>
       </div>
     </div>
   );
@@ -96,16 +100,16 @@ const LocationsManager = () => {
                 <p className="text-sm font-medium text-sage-800">{loc.name}</p>
                 {loc.address && <p className="text-xs text-sage-400 truncate">{loc.address}</p>}
               </div>
-              <span className="text-xs text-sage-400">{loc.type}</span>
-              <button onClick={() => startEdit(loc)} className="p-1 text-sage-400 hover:text-sage-700"><Edit2 size={13} /></button>
-              <button onClick={() => remove(loc.id)} className="p-1 text-sage-400 hover:text-danger"><Trash2 size={13} /></button>
+              <span className="text-xs text-sage-400">{t[`settings_location_${loc.type}`] || loc.type}</span>
+              <button onClick={() => startEdit(loc)} aria-label={`${t.edit}: ${loc.name}`} title={t.edit} className="p-1 text-sage-400 hover:text-sage-700"><Edit2 size={13} /></button>
+              <button onClick={() => remove(loc.id)} aria-label={`${t.delete}: ${loc.name}`} title={t.delete} className="p-1 text-sage-400 hover:text-danger"><Trash2 size={13} /></button>
             </div>
           )}
         </div>
       ))}
       {editId === 'new' && form}
       {editId !== 'new' && (
-        <Button variant="ghost" size="sm" icon={Plus} onClick={startAdd}>Añadir ubicación</Button>
+        <Button variant="ghost" size="sm" icon={Plus} onClick={startAdd}>{t.settings_add_location}</Button>
       )}
     </div>
   );
@@ -117,6 +121,7 @@ const ConsultationTypesManager = () => {
   const config = useStore(s => s.config);
   const updateConfig = useStore(s => s.updateConfig);
   const toast = useToast();
+  const t = useT();
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
 
@@ -128,11 +133,11 @@ const ConsultationTypesManager = () => {
     updateConfig({ consultationTypes: [...types, draft.trim()] });
     setDraft('');
     setAdding(false);
-    toast.success('Tipo añadido');
+    toast.success(t.settings_type_added);
   };
 
   const remove = (type) => {
-    updateConfig({ consultationTypes: types.filter(t => t !== type) });
+    updateConfig({ consultationTypes: types.filter(x => x !== type) });
   };
 
   return (
@@ -141,7 +146,7 @@ const ConsultationTypesManager = () => {
         {types.map(type => (
           <div key={type} className="flex items-center gap-1 px-2.5 py-1 bg-sage-100 text-sage-700 rounded-badge text-xs">
             <span>{type}</span>
-            <button onClick={() => remove(type)} className="text-sage-400 hover:text-danger ml-0.5"><X size={11} /></button>
+            <button onClick={() => remove(type)} aria-label={`${t.delete}: ${type}`} title={t.delete} className="text-sage-400 hover:text-danger ml-0.5"><X size={11} /></button>
           </div>
         ))}
       </div>
@@ -151,16 +156,17 @@ const ConsultationTypesManager = () => {
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') add(); if (e.key === 'Escape') setAdding(false); }}
-            placeholder="Tipo de consulta..."
+            placeholder={`${t.consultation_type}...`}
+            aria-label={t.consultation_type}
             className="text-sm"
             autoFocus
           />
-          <Button variant="primary" size="sm" onClick={add}>Añadir</Button>
-          <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>Cancelar</Button>
+          <Button variant="primary" size="sm" onClick={add}>{t.add}</Button>
+          <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>{t.cancel}</Button>
         </div>
       ) : (
         <Button variant="ghost" size="sm" icon={Plus} onClick={() => { setDraft(''); setAdding(true); }}>
-          Añadir tipo
+          {t.settings_add_type}
         </Button>
       )}
     </div>
@@ -187,12 +193,12 @@ const BlockedHoursManager = () => {
     updateConfig({ blockedHours: [...blocked, { id: generateId(), ...draft }] });
     setDraft({ dayOfWeek: 0, startHour: 14, endHour: 16, label: '' });
     setAdding(false);
-    toast.success(t.save);
+    toast.success(t.saved);
   };
 
   const remove = (id) => {
     updateConfig({ blockedHours: blocked.filter(b => b.id !== id) });
-    toast.success(t.delete);
+    toast.success(t.deleted);
   };
 
   return (
@@ -202,19 +208,20 @@ const BlockedHoursManager = () => {
           <Clock size={13} className="text-sage-400 shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-medium text-sage-800">
-              {t[DAY_KEYS[b.dayOfWeek]] || DAY_KEYS[b.dayOfWeek]} — {b.startHour}:00 a {b.endHour}:00
+              {t[DAY_KEYS[b.dayOfWeek]] || DAY_KEYS[b.dayOfWeek]} — {t.blocked_hours_range.replace('{from}', b.startHour).replace('{to}', b.endHour)}
             </p>
             {b.label && <p className="text-xs text-sage-400">{b.label}</p>}
           </div>
-          <button onClick={() => remove(b.id)} className="p-1 text-sage-400 hover:text-danger"><Trash2 size={13} /></button>
+          <button onClick={() => remove(b.id)} aria-label={t.delete} title={t.delete} className="p-1 text-sage-400 hover:text-danger"><Trash2 size={13} /></button>
         </div>
       ))}
       {adding ? (
         <div className="border border-wellness-200 rounded-soft p-3 bg-wellness-50 space-y-2">
           <div className="grid grid-cols-3 gap-2">
             <div>
-              <label className="block text-xs text-sage-500 mb-1">{t.blocked_hours_day}</label>
+              <label htmlFor="blocked-day" className="block text-xs text-sage-500 mb-1">{t.blocked_hours_day}</label>
               <select
+                id="blocked-day"
                 value={draft.dayOfWeek}
                 onChange={e => setDraft(d => ({ ...d, dayOfWeek: parseInt(e.target.value) }))}
                 className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white focus:outline-none focus:border-wellness-400"
@@ -223,8 +230,9 @@ const BlockedHoursManager = () => {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-sage-500 mb-1">{t.blocked_hours_from}</label>
+              <label htmlFor="blocked-from" className="block text-xs text-sage-500 mb-1">{t.blocked_hours_from}</label>
               <select
+                id="blocked-from"
                 value={draft.startHour}
                 onChange={e => setDraft(d => ({ ...d, startHour: parseInt(e.target.value) }))}
                 className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white focus:outline-none focus:border-wellness-400"
@@ -233,8 +241,9 @@ const BlockedHoursManager = () => {
               </select>
             </div>
             <div>
-              <label className="block text-xs text-sage-500 mb-1">{t.blocked_hours_to}</label>
+              <label htmlFor="blocked-to" className="block text-xs text-sage-500 mb-1">{t.blocked_hours_to}</label>
               <select
+                id="blocked-to"
                 value={draft.endHour}
                 onChange={e => setDraft(d => ({ ...d, endHour: parseInt(e.target.value) }))}
                 className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white focus:outline-none focus:border-wellness-400"
@@ -247,6 +256,7 @@ const BlockedHoursManager = () => {
             value={draft.label}
             onChange={e => setDraft(d => ({ ...d, label: e.target.value }))}
             placeholder={`${t.blocked_hours_label} (${t.optional})`}
+            aria-label={t.blocked_hours_label}
             className="text-sm"
           />
           <div className="flex gap-2 justify-end">
@@ -271,6 +281,7 @@ const SmtpSection = () => {
   const updateConfig = useStore(s => s.updateConfig);
   const setSmtpPassword = useStore(s => s.setSmtpPassword);
   const toast = useToast();
+  const t = useT();
   const [showPw, setShowPw] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -313,8 +324,8 @@ const SmtpSection = () => {
         fromEmail: smtp.user || '',
         useTls:    smtp.secure !== false,
       });
-      if (result.success) toast.success('Conexión SMTP correcta');
-      else toast.error(result.error || 'Error de conexión');
+      if (result.success) toast.success(t.smtp_test_ok);
+      else toast.error(result.error || t.smtp_test_fail);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -324,16 +335,16 @@ const SmtpSection = () => {
 
   const savePasswordToKeyring = async () => {
     if (!smtpPassword) {
-      toast.error('Introduce una contraseña antes de guardarla');
+      toast.error(t.smtp_password_required);
       return;
     }
     setSaving(true);
     try {
       await invoke('store_smtp_password', { password: smtpPassword });
       setKeyringHas(true);
-      toast.success('Contraseña guardada en el almacén de credenciales de Windows');
+      toast.success(t.smtp_password_saved);
     } catch (e) {
-      toast.error('No se pudo guardar: ' + (e?.toString() || 'keyring_error'));
+      toast.error(t.smtp_password_save_error.replace('{error}', e?.toString() || 'keyring_error'));
     } finally {
       setSaving(false);
     }
@@ -344,9 +355,9 @@ const SmtpSection = () => {
       await invoke('clear_smtp_password');
       setKeyringHas(false);
       setSmtpPassword('');
-      toast.success('Contraseña eliminada del almacén de credenciales');
+      toast.success(t.smtp_password_cleared);
     } catch (e) {
-      toast.error('No se pudo eliminar: ' + (e?.toString() || 'keyring_error'));
+      toast.error(t.smtp_password_clear_error.replace('{error}', e?.toString() || 'keyring_error'));
     }
   };
 
@@ -354,52 +365,55 @@ const SmtpSection = () => {
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2">
-          <label className="block text-xs font-medium text-sage-600 mb-1">Servidor SMTP</label>
-          <Input value={smtp.host || ''} onChange={e => set('host', e.target.value)} placeholder="smtp.gmail.com" />
+          <label htmlFor="smtp-host" className="block text-xs font-medium text-sage-600 mb-1">{t.smtp_host}</label>
+          <Input id="smtp-host" value={smtp.host || ''} onChange={e => set('host', e.target.value)} placeholder="smtp.gmail.com" />
         </div>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Puerto</label>
-          <Input type="number" value={smtp.port || 587} onChange={e => set('port', parseInt(e.target.value))} />
+          <label htmlFor="smtp-port" className="block text-xs font-medium text-sage-600 mb-1">{t.smtp_port}</label>
+          <Input id="smtp-port" type="number" value={smtp.port || 587} onChange={e => set('port', parseInt(e.target.value))} />
         </div>
       </div>
       <div>
-        <label className="block text-xs font-medium text-sage-600 mb-1">Usuario</label>
-        <Input type="email" value={smtp.user || ''} onChange={e => set('user', e.target.value)} placeholder="nutripoloraquel@gmail.com" />
+        <label htmlFor="smtp-user" className="block text-xs font-medium text-sage-600 mb-1">{t.smtp_user}</label>
+        <Input id="smtp-user" type="email" value={smtp.user || ''} onChange={e => set('user', e.target.value)} placeholder="nutripoloraquel@gmail.com" />
       </div>
       <div>
-        <label className="block text-xs font-medium text-sage-600 mb-1">
-          Contraseña / App Password
-          {keyringHas && <span className="ml-2 text-wellness-600">✓ guardada</span>}
+        <label htmlFor="smtp-password" className="block text-xs font-medium text-sage-600 mb-1">
+          {t.smtp_password_label}
+          {keyringHas && <span className="ml-2 text-wellness-600">✓ {t.smtp_password_stored_badge}</span>}
         </label>
         <div className="relative">
           <Input
+            id="smtp-password"
             type={showPw ? 'text' : 'password'}
             value={smtpPassword}
             onChange={e => setSmtpPassword(e.target.value)}
-            placeholder={keyringHas ? 'Contraseña guardada de forma segura' : 'Se guarda en el almacén de Windows'}
+            placeholder={keyringHas ? t.smtp_password_placeholder_saved : t.smtp_password_placeholder}
           />
           <button
             type="button"
             onClick={() => setShowPw(s => !s)}
+            aria-label={showPw ? t.hide_password : t.show_password}
+            title={showPw ? t.hide_password : t.show_password}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-sage-400 hover:text-sage-600"
           >
             {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
           </button>
         </div>
         <p className="text-xs text-sage-500 mt-1">
-          La contraseña se guarda en el Administrador de credenciales de Windows, nunca en disco.
+          {t.smtp_password_hint}
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button variant="ghost" size="sm" icon={testing ? Loader2 : Send} onClick={testConnection} disabled={testing}>
-          {testing ? 'Probando...' : 'Probar conexión'}
+          {testing ? t.smtp_testing : t.smtp_test}
         </Button>
         <Button variant="ghost" size="sm" icon={saving ? Loader2 : ShieldCheck} onClick={savePasswordToKeyring} disabled={saving || !smtpPassword}>
-          {saving ? 'Guardando...' : 'Guardar contraseña'}
+          {saving ? t.saving : t.smtp_save_password}
         </Button>
         {keyringHas && (
           <Button variant="ghost" size="sm" icon={Trash2} onClick={clearPasswordFromKeyring}>
-            Eliminar guardada
+            {t.smtp_clear_password}
           </Button>
         )}
       </div>
@@ -420,6 +434,7 @@ const GoogleCalendarSection = () => {
   const acceptMassDelete = useStore(s => s.acceptMassDelete);
   const ignoreMassDeleteOnce = useStore(s => s.ignoreMassDeleteOnce);
   const toast = useToast();
+  const t = useT();
 
   // 3-option migration dialog state (convert / hide / cancel) — useConfirm
   // only supports yes/no, so we roll a tiny inline modal for this case.
@@ -454,7 +469,7 @@ const GoogleCalendarSection = () => {
 
   const handleConnect = async () => {
     if (!clientId.trim() || !clientSecret.trim()) {
-      toast.error('Introduce el Client ID y el Client Secret');
+      toast.error(t.gcal_missing_credentials);
       return;
     }
     setLoading(true);
@@ -510,7 +525,7 @@ const GoogleCalendarSection = () => {
           accessToken, refreshToken, expiresAt,
           calendars: merged, defaultPushCalendarId: keepDefault, userEmail,
         });
-        toast.success('Google Calendar reconectado');
+        toast.success(t.gcal_reconnected);
         return;
       }
 
@@ -541,13 +556,13 @@ const GoogleCalendarSection = () => {
       });
 
       if (nutripoloIdx !== -1) {
-        const mode = defaultPushCalendarId ? 'bidireccional' : 'solo lectura';
-        toast.success(`Conectado — "${newCalendars[nutripoloIdx].name}" activado en ${mode}`);
+        const mode = (defaultPushCalendarId ? t.gcal_bidirectional : t.gcal_readonly).toLowerCase();
+        toast.success(t.gcal_connected_auto.replace('{name}', newCalendars[nutripoloIdx].name).replace('{mode}', mode));
       } else {
-        toast.success('Google Calendar conectado — selecciona un calendario');
+        toast.success(t.gcal_connected_pick);
       }
     } catch (e) {
-      toast.error('Error al conectar: ' + (e?.message || String(e)));
+      toast.error(t.gcal_connect_error.replace('{error}', e?.message || String(e)));
     } finally {
       setLoading(false);
     }
@@ -559,7 +574,7 @@ const GoogleCalendarSection = () => {
       const calList = await googleCalendar.listCalendars(token);
       setCalendars(calList);
     } catch (e) {
-      toast.error('No se pudieron cargar los calendarios: ' + String(e?.message || e));
+      toast.error(t.gcal_load_error.replace('{error}', String(e?.message || e)));
     }
   };
 
@@ -568,12 +583,12 @@ const GoogleCalendarSection = () => {
     try {
       const stats = await googleCalendar.syncAll(useStore.getState());
       const parts = [];
-      if (stats.pushed) parts.push(`${stats.pushed} enviados`);
-      if (stats.pulled) parts.push(`${stats.pulled} recibidos`);
-      if (stats.updated) parts.push(`${stats.updated} actualizados`);
-      toast.success(`Sincronizado${parts.length ? ' — ' + parts.join(', ') : ''}`);
+      if (stats.pushed) parts.push(`${stats.pushed} ${t.gcal_sync_pushed}`);
+      if (stats.pulled) parts.push(`${stats.pulled} ${t.gcal_sync_pulled}`);
+      if (stats.updated) parts.push(`${stats.updated} ${t.gcal_sync_updated}`);
+      toast.success(`${t.gcal_synced}${parts.length ? ' — ' + parts.join(', ') : ''}`);
     } catch (e) {
-      toast.error('Error al sincronizar: ' + (e?.message || String(e)));
+      toast.error(t.gcal_sync_error_detail.replace('{error}', e?.message || String(e)));
     } finally {
       setSyncing(false);
     }
@@ -590,7 +605,7 @@ const GoogleCalendarSection = () => {
     // Atomic store reset
     clearGoogleCalendarData();
     setCalendars([]);
-    toast.success('Google Calendar desconectado');
+    toast.success(t.gcal_disconnected);
   };
 
   const isHolidayCalendar = (cal) => {
@@ -657,7 +672,7 @@ const GoogleCalendarSection = () => {
     let newSyncMode;
     if (newPurpose === 'primary') {
       if (!canWrite) {
-        toast.error('No se puede marcar como principal un calendario de solo lectura');
+        toast.error(t.purpose_primary_reader_error);
         return;
       }
       newSyncMode = 'bidirectional';
@@ -721,7 +736,7 @@ const GoogleCalendarSection = () => {
     convertConsultationsToPersonal(cal.id);
     applyPurposeChange(cal, 'personal');
     setMigrationPrompt(null);
-    toast.success(`${count} citas convertidas a eventos personales`);
+    toast.success(t.gcal_converted_personal.replace('{n}', count));
   };
 
   const handleMigrationHide = () => {
@@ -739,7 +754,7 @@ const GoogleCalendarSection = () => {
     }
     setGcal(patch);
     setMigrationPrompt(null);
-    toast.success('Calendario desactivado — las citas quedan ocultas');
+    toast.success(t.gcal_hidden_done);
   };
 
   const handleMigrationCancel = () => setMigrationPrompt(null);
@@ -751,20 +766,20 @@ const GoogleCalendarSection = () => {
         <div className="flex items-center gap-2">
           <span className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 text-green-700 rounded-badge text-xs font-medium">
             <Wifi size={12} />
-            Conectado como {gcal.userEmail || 'Google Calendar'}
+            {t.gcal_connected_as.replace('{email}', gcal.userEmail || 'Google Calendar')}
           </span>
         </div>
 
         {/* Calendar list with sync modes */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="block text-xs font-medium text-sage-600">Calendarios</label>
+            <p className="block text-xs font-medium text-sage-600">{t.gcal_calendars}</p>
             <button onClick={handleLoadCalendars} className="text-xs text-wellness-500 hover:text-wellness-600">
-              Actualizar lista
+              {t.gcal_refresh_list}
             </button>
           </div>
           {calendars.length === 0 ? (
-            <p className="text-xs text-sage-400">Cargando calendarios...</p>
+            <p className="text-xs text-sage-400">{t.gcal_loading_calendars}</p>
           ) : (
             <div className="space-y-2">
               {calendars.map(cal => {
@@ -773,10 +788,10 @@ const GoogleCalendarSection = () => {
                 const purpose = stored?.purpose || inferCalendarPurpose({ id: cal.id, name: cal.summary, syncMode });
                 const isReader = cal.access_role === 'reader';
                 const purposeBadge = {
-                  primary:           { label: 'principal', cls: 'bg-green-100 text-green-700' },
-                  'external-clinic': { label: 'clínica',   cls: 'bg-purple-100 text-purple-700' },
-                  personal:          { label: 'personal',  cls: 'bg-sage-200 text-sage-700' },
-                  holidays:          { label: 'festivos',  cls: 'bg-amber-100 text-amber-600' },
+                  primary:           { label: t.gcal_badge_primary,  cls: 'bg-green-100 text-green-700' },
+                  'external-clinic': { label: t.gcal_badge_clinic,   cls: 'bg-purple-100 text-purple-700' },
+                  personal:          { label: t.gcal_badge_personal, cls: 'bg-sage-200 text-sage-700' },
+                  holidays:          { label: t.gcal_badge_holidays, cls: 'bg-amber-100 text-amber-600' },
                   other:             { label: '',          cls: '' },
                 }[purpose] || { label: '', cls: '' };
                 return (
@@ -794,34 +809,36 @@ const GoogleCalendarSection = () => {
                         </span>
                       )}
                       {isReader && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-badge whitespace-nowrap">solo lectura</span>
+                        <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-badge whitespace-nowrap">{t.gcal_badge_readonly}</span>
                       )}
                       {gcal.defaultPushCalendarId === cal.id && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-wellness-100 text-wellness-600 rounded-badge whitespace-nowrap">destino</span>
+                        <span className="text-[10px] px-1.5 py-0.5 bg-wellness-100 text-wellness-600 rounded-badge whitespace-nowrap">{t.gcal_badge_target}</span>
                       )}
                     </div>
                     {/* Bottom row: purpose + sync mode selectors */}
                     <div className="flex items-center gap-2 pl-5">
-                      <label className="text-[10px] text-sage-500 whitespace-nowrap">Tipo:</label>
+                      <label htmlFor={`cal-purpose-${cal.id}`} className="text-[10px] text-sage-500 whitespace-nowrap">{t.purpose_label}:</label>
                       <select
+                        id={`cal-purpose-${cal.id}`}
                         value={purpose}
                         onChange={e => handleCalendarPurpose(cal, e.target.value)}
                         className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 flex-1"
                       >
-                        {!isReader && <option value="primary">Principal (NutriPolo)</option>}
-                        <option value="external-clinic">Clínica externa</option>
-                        <option value="personal">Personal</option>
-                        <option value="holidays">Festivos</option>
-                        <option value="other">Otro</option>
+                        {!isReader && <option value="primary">{t.purpose_primary}</option>}
+                        <option value="external-clinic">{t.purpose_external_clinic}</option>
+                        <option value="personal">{t.purpose_personal}</option>
+                        <option value="holidays">{t.purpose_holidays}</option>
+                        <option value="other">{t.purpose_other}</option>
                       </select>
                       <select
                         value={syncMode}
                         onChange={e => handleCalendarSyncMode(cal, e.target.value)}
+                        aria-label={t.gcal_sync_mode}
                         className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
                       >
-                        {!isReader && <option value="bidirectional">↔ Bidireccional</option>}
-                        <option value="readonly">← Solo lectura</option>
-                        <option value="disabled">✗ Desactivado</option>
+                        {!isReader && <option value="bidirectional">↔ {t.gcal_bidirectional}</option>}
+                        <option value="readonly">← {t.gcal_readonly}</option>
+                        <option value="disabled">✗ {t.gcal_disabled}</option>
                       </select>
                     </div>
 
@@ -831,27 +848,31 @@ const GoogleCalendarSection = () => {
                         <div className="flex items-start gap-2">
                           <AlertTriangle size={13} className="text-red-500 shrink-0 mt-0.5" />
                           <p className="text-xs text-red-800 leading-snug">
-                            <strong>Posible borrado masivo:</strong> {stored.massDeletePending.prevCount} → {stored.massDeletePending.newCount} eventos ({stored.massDeletePending.drop} eliminados en Google). Sincronización pausada.
+                            <strong>{t.gcal_mass_delete_label}</strong>{' '}
+                            {t.gcal_mass_delete_detail
+                              .replace('{prev}', stored.massDeletePending.prevCount)
+                              .replace('{new}', stored.massDeletePending.newCount)
+                              .replace('{drop}', stored.massDeletePending.drop)}
                           </p>
                         </div>
                         <div className="flex gap-1.5 flex-wrap">
                           <button
-                            onClick={() => { ignoreMassDeleteOnce(stored.id); toast.info('Sincronización reanudada'); }}
+                            onClick={() => { ignoreMassDeleteOnce(stored.id); toast.info(t.gcal_sync_resumed); }}
                             className="px-2 py-1 text-[11px] font-medium bg-white border border-red-300 text-red-700 rounded-button hover:bg-red-50 transition-colors"
                           >
-                            Ignorar y reanudar
+                            {t.mass_delete_ignore}
                           </button>
                           <button
-                            onClick={() => { acceptMassDelete(stored.id); toast.success('Borrados aceptados — próxima sync aplicará los cambios'); }}
+                            onClick={() => { acceptMassDelete(stored.id); toast.success(t.gcal_deletes_accepted); }}
                             className="px-2 py-1 text-[11px] font-medium bg-red-500 text-white rounded-button hover:bg-red-600 transition-colors"
                           >
-                            Aceptar borrados
+                            {t.mass_delete_accept}
                           </button>
                           <button
                             onClick={() => handleCalendarSyncMode(cal, 'disabled')}
                             className="px-2 py-1 text-[11px] text-red-500 hover:text-red-700 transition-colors"
                           >
-                            Desactivar calendario
+                            {t.mass_delete_suspend}
                           </button>
                         </div>
                       </div>
@@ -864,30 +885,28 @@ const GoogleCalendarSection = () => {
         </div>
 
         {/* Migration dialog (purpose → personal with existing consultations) */}
-        {migrationPrompt && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={handleMigrationCancel}>
-            <div className="bg-white rounded-card max-w-md w-full p-5 space-y-3" onClick={e => e.stopPropagation()}>
-              <h3 className="text-lg font-semibold text-sage-700">Cambiar a calendario personal</h3>
+        <Modal open={!!migrationPrompt} onClose={handleMigrationCancel} title={t.purpose_migrate_title} size="sm">
+          {migrationPrompt && (
+            <div className="space-y-3">
               <p className="text-sm text-sage-600">
-                Este calendario tiene <strong>{migrationPrompt.count}</strong> cita{migrationPrompt.count === 1 ? '' : 's'} registrada{migrationPrompt.count === 1 ? '' : 's'} como consulta.
-                Al cambiar el tipo a <em>Personal</em>, estas ya no serán consultas clínicas. ¿Qué prefieres hacer con ellas?
+                {plural(t, 'gcal_migrate_body', migrationPrompt.count)}
               </p>
               <div className="space-y-2 pt-2">
                 <Button variant="primary" className="w-full justify-start" onClick={handleMigrationConvert}>
-                  Convertir en eventos personales
-                  <span className="block text-xs opacity-80 mt-0.5">Se moverán fuera de facturación, estadísticas y agenda clínica.</span>
+                  {t.purpose_migrate_convert}
+                  <span className="block text-xs opacity-80 mt-0.5">{t.purpose_migrate_convert_hint}</span>
                 </Button>
                 <Button variant="secondary" className="w-full justify-start" onClick={handleMigrationHide}>
-                  Desactivar el calendario
-                  <span className="block text-xs opacity-80 mt-0.5">Las consultas permanecen guardadas pero ocultas hasta que reactives el calendario.</span>
+                  {t.purpose_migrate_hide}
+                  <span className="block text-xs opacity-80 mt-0.5">{t.purpose_migrate_hide_hint}</span>
                 </Button>
                 <Button variant="ghost" className="w-full" onClick={handleMigrationCancel}>
-                  Cancelar
+                  {t.cancel}
                 </Button>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </Modal>
 
         {/* Purpose summary card */}
         {(gcal.calendars || []).length > 0 && (() => {
@@ -897,11 +916,11 @@ const GoogleCalendarSection = () => {
             counts[c.purpose || 'other'] = (counts[c.purpose || 'other'] || 0) + 1;
           }
           const parts = [
-            counts.primary && `${counts.primary} principal`,
-            counts['external-clinic'] && `${counts['external-clinic']} clínica`,
-            counts.personal && `${counts.personal} personal`,
-            counts.holidays && `${counts.holidays} festivos`,
-            counts.disabled && `${counts.disabled} desactivado${counts.disabled > 1 ? 's' : ''}`,
+            counts.primary && `${counts.primary} ${t.gcal_badge_primary}`,
+            counts['external-clinic'] && `${counts['external-clinic']} ${t.gcal_badge_clinic}`,
+            counts.personal && `${counts.personal} ${t.gcal_badge_personal}`,
+            counts.holidays && `${counts.holidays} ${t.gcal_badge_holidays}`,
+            counts.disabled && plural(t, 'gcal_summary_disabled', counts.disabled),
           ].filter(Boolean);
           return parts.length ? (
             <div className="px-3 py-2 bg-sage-50 border border-sage-200 rounded-soft text-xs text-sage-500">
@@ -915,13 +934,13 @@ const GoogleCalendarSection = () => {
           const pushCal = (gcal.calendars || []).find(c => c.id === gcal.defaultPushCalendarId);
           return pushCal ? (
             <div className="flex items-center gap-2 px-3 py-2 bg-wellness-50 border border-wellness-200 rounded-soft text-xs text-wellness-700">
-              <span className="font-medium">Calendario de destino:</span>
+              <span className="font-medium">{t.gcal_push_calendar}:</span>
               <span
                 className="w-2.5 h-2.5 rounded-full shrink-0"
                 style={{ backgroundColor: pushCal.color || '#4285f4' }}
               />
               <span>{pushCal.name}</span>
-              <span className="text-wellness-400">— las consultas nuevas se enviarán aquí</span>
+              <span className="text-wellness-400">— {t.gcal_push_hint}</span>
             </div>
           ) : null;
         })()}
@@ -931,11 +950,12 @@ const GoogleCalendarSection = () => {
           <div className="border border-sage-200 rounded-soft overflow-hidden">
             <button
               onClick={() => setShowAdvancedFuzzy(v => !v)}
+              aria-expanded={showAdvancedFuzzy}
               className="w-full flex items-center justify-between px-3 py-2 bg-sage-50 text-xs text-sage-600 hover:bg-sage-100 transition-colors"
             >
               <span className="flex items-center gap-1.5">
                 <Settings2 size={12} />
-                Configuración avanzada — detección de pacientes
+                {t.gcal_advanced_fuzzy}
               </span>
               {showAdvancedFuzzy ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </button>
@@ -946,28 +966,30 @@ const GoogleCalendarSection = () => {
                     <p className="text-[11px] font-medium text-sage-600">{c.name}</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[10px] text-sage-500 mb-1">
-                          Umbral auto-link ({Math.round((c.fuzzyAutoThreshold ?? 0.92) * 100)}%)
+                        <label htmlFor={`fuzzy-auto-${c.id}`} className="block text-[10px] text-sage-500 mb-1">
+                          {t.gcal_auto_threshold.replace('{p}', Math.round((c.fuzzyAutoThreshold ?? 0.92) * 100))}
                         </label>
                         <input
+                          id={`fuzzy-auto-${c.id}`}
                           type="range" min="70" max="99" step="1"
                           value={Math.round((c.fuzzyAutoThreshold ?? 0.92) * 100)}
                           onChange={e => updateStoredCal(c.id, { fuzzyAutoThreshold: parseInt(e.target.value) / 100 })}
                           className="w-full accent-wellness-400"
                         />
-                        <p className="text-[10px] text-sage-400 mt-0.5">Mínimo para vincular automáticamente</p>
+                        <p className="text-[10px] text-sage-400 mt-0.5">{t.gcal_auto_threshold_hint}</p>
                       </div>
                       <div>
-                        <label className="block text-[10px] text-sage-500 mb-1">
-                          Umbral sugerencia ({Math.round((c.fuzzySuggestThreshold ?? 0.75) * 100)}%)
+                        <label htmlFor={`fuzzy-suggest-${c.id}`} className="block text-[10px] text-sage-500 mb-1">
+                          {t.gcal_suggest_threshold.replace('{p}', Math.round((c.fuzzySuggestThreshold ?? 0.75) * 100))}
                         </label>
                         <input
+                          id={`fuzzy-suggest-${c.id}`}
                           type="range" min="50" max="90" step="1"
                           value={Math.round((c.fuzzySuggestThreshold ?? 0.75) * 100)}
                           onChange={e => updateStoredCal(c.id, { fuzzySuggestThreshold: parseInt(e.target.value) / 100 })}
                           className="w-full accent-wellness-400"
                         />
-                        <p className="text-[10px] text-sage-400 mt-0.5">Mínimo para proponer en el buzón</p>
+                        <p className="text-[10px] text-sage-400 mt-0.5">{t.gcal_suggest_threshold_hint}</p>
                       </div>
                     </div>
                   </div>
@@ -980,11 +1002,14 @@ const GoogleCalendarSection = () => {
         {/* Auto-sync toggle */}
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm font-medium text-sage-700">Sincronizar automáticamente</p>
-            <p className="text-xs text-sage-400">Al abrir el calendario se sincronizará con Google</p>
+            <p className="text-sm font-medium text-sage-700">{t.gcal_auto_sync}</p>
+            <p className="text-xs text-sage-400">{t.gcal_auto_sync_hint}</p>
           </div>
           <button
             onClick={() => setGcal({ autoSync: !gcal.autoSync })}
+            role="switch"
+            aria-checked={!!gcal.autoSync}
+            aria-label={t.gcal_auto_sync}
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
               gcal.autoSync ? 'bg-wellness-400' : 'bg-sage-200'
             }`}
@@ -1006,7 +1031,7 @@ const GoogleCalendarSection = () => {
             onClick={handleSyncNow}
             disabled={syncing}
           >
-            {syncing ? 'Sincronizando...' : 'Sincronizar ahora'}
+            {syncing ? t.gcal_syncing : t.gcal_sync_now}
           </Button>
           <Button
             variant="ghost"
@@ -1014,7 +1039,7 @@ const GoogleCalendarSection = () => {
             icon={LogOut}
             onClick={handleDisconnect}
           >
-            Desconectar
+            {t.gcal_disconnect}
           </Button>
         </div>
       </div>
@@ -1027,28 +1052,26 @@ const GoogleCalendarSection = () => {
         <div className="flex items-start gap-2 px-3 py-2 bg-warning-light border border-warning/30 rounded-button">
           <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
           <p className="text-xs text-warning-dark">
-            La sesión con Google ha caducado o se ha revocado. Vuelve a conectar para reanudar la sincronización;
-            tu configuración de calendarios se conservará.
+            {t.gcal_reauth_notice}
           </p>
         </div>
       )}
       <p className="text-xs text-sage-500">
-        Conecta tu Google Calendar para sincronizar consultas automáticamente.
-        Necesitas un proyecto en{' '}
-        <span className="font-medium text-sage-700">Google Cloud Console</span>{' '}
-        con la API de Google Calendar habilitada.
+        {t.gcal_intro}
       </p>
       <div>
-        <label className="block text-xs font-medium text-sage-600 mb-1">Client ID</label>
+        <label htmlFor="gcal-client-id" className="block text-xs font-medium text-sage-600 mb-1">Client ID</label>
         <Input
+          id="gcal-client-id"
           value={clientId}
           onChange={e => setClientId(e.target.value)}
           placeholder="xxxxxxxx.apps.googleusercontent.com"
         />
       </div>
       <div>
-        <label className="block text-xs font-medium text-sage-600 mb-1">Client Secret</label>
+        <label htmlFor="gcal-client-secret" className="block text-xs font-medium text-sage-600 mb-1">Client Secret</label>
         <Input
+          id="gcal-client-secret"
           type="password"
           value={clientSecret}
           onChange={e => setClientSecret(e.target.value)}
@@ -1062,7 +1085,7 @@ const GoogleCalendarSection = () => {
         onClick={handleConnect}
         disabled={loading}
       >
-        {loading ? 'Conectando...' : 'Conectar con Google'}
+        {loading ? t.gcal_connecting : t.gcal_connect}
       </Button>
     </div>
   );
@@ -1073,6 +1096,7 @@ const SecuritySection = () => {
   const config = useStore(s => s.config);
   const updateConfig = useStore(s => s.updateConfig);
   const toast = useToast();
+  const t = useT();
   const { confirm, ConfirmDialog } = useConfirm();
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(false);
@@ -1102,26 +1126,26 @@ const SecuritySection = () => {
 
   const handleEnable = async () => {
     if (newPw.length < 8) {
-      toast.error('La contraseña debe tener al menos 8 caracteres');
+      toast.error(t.security_pw_min);
       return;
     }
     if (newPw !== confirmPw) {
-      toast.error('Las contraseñas no coinciden');
+      toast.error(t.security_pw_mismatch);
       return;
     }
     if (!ackLoss) {
-      toast.error('Debes confirmar que entiendes las consecuencias');
+      toast.error(t.security_ack_required);
       return;
     }
     setBusy(true);
     try {
       await invoke('encryption_setup', { password: newPw });
-      toast.success('Cifrado activado correctamente');
+      toast.success(t.security_enabled_ok);
       setEnabled(true);
       setSetupOpen(false);
       setNewPw(''); setConfirmPw(''); setAckLoss(false);
     } catch (e) {
-      toast.error('Error al activar el cifrado: ' + String(e));
+      toast.error(t.security_enable_error.replace('{error}', String(e)));
     } finally {
       setBusy(false);
     }
@@ -1129,11 +1153,11 @@ const SecuritySection = () => {
 
   const handleChange = async () => {
     if (changeNewPw.length < 8) {
-      toast.error('La nueva contraseña debe tener al menos 8 caracteres');
+      toast.error(t.security_pw_new_min);
       return;
     }
     if (changeNewPw !== changeConfirmPw) {
-      toast.error('Las contraseñas no coinciden');
+      toast.error(t.security_pw_mismatch);
       return;
     }
     setBusy(true);
@@ -1142,15 +1166,15 @@ const SecuritySection = () => {
         oldPassword: oldPw,
         newPassword: changeNewPw,
       });
-      toast.success('Contraseña cambiada');
+      toast.success(t.security_pw_changed);
       setChangeOpen(false);
       setOldPw(''); setChangeNewPw(''); setChangeConfirmPw('');
     } catch (e) {
       const code = String(e || '');
       if (code.includes('wrong_password')) {
-        toast.error('La contraseña actual no es correcta');
+        toast.error(t.security_wrong_password);
       } else {
-        toast.error('Error al cambiar la contraseña: ' + code);
+        toast.error(t.security_change_error.replace('{error}', code));
       }
     } finally {
       setBusy(false);
@@ -1159,10 +1183,8 @@ const SecuritySection = () => {
 
   const handleLock = async () => {
     const ok = await confirm({
-      title: 'Bloquear ahora',
-      message: 'Se bloqueará el acceso a los datos y la aplicación se recargará. Necesitarás introducir tu contraseña maestra para volver a entrar.',
-      confirmText: 'Bloquear',
-      variant: 'warning',
+      title: t.security_lock_now,
+      message: t.security_lock_message,
     });
     if (!ok) return;
     try {
@@ -1172,12 +1194,12 @@ const SecuritySection = () => {
       // Force a reload so the EncryptionGate re-checks state
       window.location.reload();
     } catch (e) {
-      toast.error('Error al bloquear: ' + String(e));
+      toast.error(t.security_lock_error.replace('{error}', String(e)));
     }
   };
 
   if (loading) {
-    return <p className="text-xs text-sage-400">Comprobando estado...</p>;
+    return <p className="text-xs text-sage-400">{t.security_checking}</p>;
   }
 
   return (
@@ -1189,87 +1211,87 @@ const SecuritySection = () => {
         />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-sage-900">
-            {enabled ? 'Cifrado activo' : 'Cifrado inactivo'}
+            {enabled ? t.security_on : t.security_off}
           </p>
           <p className="text-xs text-sage-500 mt-0.5">
-            {enabled
-              ? 'Tus datos y documentos se almacenan cifrados con AES-256-GCM. Se necesita tu contraseña maestra para desbloquearlos.'
-              : 'Tus datos se guardan en texto plano. Puedes activar el cifrado AES-256 para protegerlos con una contraseña maestra.'}
+            {enabled ? t.security_on_desc : t.security_off_desc}
           </p>
         </div>
       </div>
 
       {!enabled ? (
         <Button variant="primary" icon={Lock} onClick={() => setSetupOpen(true)}>
-          Activar cifrado
+          {t.security_enable}
         </Button>
       ) : (
         <>
           <div className="flex flex-wrap gap-2">
             <Button variant="ghost" icon={RotateCcw} onClick={() => setChangeOpen(true)}>
-              Cambiar contraseña
+              {t.security_change_password}
             </Button>
             <Button variant="ghost" icon={Lock} onClick={handleLock}>
-              Bloquear ahora
+              {t.security_lock_now}
             </Button>
           </div>
 
           <div className="pt-3 border-t border-sage-100">
-            <label className="block text-xs font-medium text-sage-600 mb-1.5">
-              Bloqueo automático por inactividad
+            <label htmlFor="auto-lock" className="block text-xs font-medium text-sage-600 mb-1.5">
+              {t.security_auto_lock}
             </label>
             <select
+              id="auto-lock"
               value={Number(config.autoLockMinutes) || 0}
               onChange={(e) =>
                 updateConfig({ autoLockMinutes: Number(e.target.value) || 0 })
               }
               className="w-full max-w-xs px-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white focus:border-wellness-400 focus:outline-none focus:ring-1 focus:ring-wellness-400"
             >
-              <option value={0}>Nunca</option>
-              <option value={5}>5 minutos</option>
-              <option value={15}>15 minutos</option>
-              <option value={30}>30 minutos</option>
-              <option value={60}>1 hora</option>
+              <option value={0}>{t.security_never}</option>
+              <option value={5}>{t.security_minutes.replace('{n}', 5)}</option>
+              <option value={15}>{t.security_minutes.replace('{n}', 15)}</option>
+              <option value={30}>{t.security_minutes.replace('{n}', 30)}</option>
+              <option value={60}>{t.security_one_hour}</option>
             </select>
             <p className="text-xs text-sage-400 mt-1">
-              Bloquea la app y exige tu contraseña maestra tras el tiempo seleccionado sin interacción.
+              {t.security_auto_lock_hint}
             </p>
           </div>
         </>
       )}
 
       {/* Setup modal */}
-      <Modal open={setupOpen} onClose={() => setSetupOpen(false)} title="Activar cifrado AES-256" size="sm">
+      <Modal open={setupOpen} onClose={() => setSetupOpen(false)} title={t.security_setup_title} size="sm">
         <div className="space-y-4">
           <div className="flex items-start gap-2 p-3 bg-warning-light border border-warning/30 rounded-button">
             <AlertTriangle size={16} className="text-warning shrink-0 mt-0.5" />
             <p className="text-xs text-warning-dark">
-              Elige una contraseña segura. <strong>Si la olvidas, tus datos serán irrecuperables</strong> —
-              no hay forma de restaurarlos sin ella.
+              {t.security_setup_warning} <strong>{t.security_setup_warning_strong}</strong>
             </p>
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">
-              Contraseña maestra
+            <label htmlFor="enc-new-pw" className="block text-xs font-medium text-sage-600 mb-1">
+              {t.security_master_password}
             </label>
             <Input
+              id="enc-new-pw"
               type="password"
               value={newPw}
               onChange={(e) => setNewPw(e.target.value)}
-              placeholder="Mínimo 8 caracteres"
+              placeholder={t.security_pw_placeholder}
               autoComplete="new-password"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">
-              Confirmar contraseña
+            <label htmlFor="enc-confirm-pw" className="block text-xs font-medium text-sage-600 mb-1">
+              {t.security_confirm_password}
             </label>
             <Input
+              id="enc-confirm-pw"
               type="password"
               value={confirmPw}
               onChange={(e) => setConfirmPw(e.target.value)}
-              placeholder="Repite la contraseña"
+              placeholder={t.security_repeat_password}
               autoComplete="new-password"
             />
           </div>
@@ -1282,30 +1304,30 @@ const SecuritySection = () => {
               className="mt-0.5 shrink-0"
             />
             <span className="text-xs text-sage-600">
-              Entiendo que si olvido esta contraseña perderé permanentemente el acceso a mis clientes,
-              consultas, facturas y documentos.
+              {t.security_ack}
             </span>
           </label>
 
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setSetupOpen(false)} disabled={busy}>
-              Cancelar
+              {t.cancel}
             </Button>
             <Button variant="primary" onClick={handleEnable} disabled={busy}>
-              {busy ? 'Activando...' : 'Activar cifrado'}
+              {busy ? t.security_enabling : t.security_enable}
             </Button>
           </div>
         </div>
       </Modal>
 
       {/* Change password modal */}
-      <Modal open={changeOpen} onClose={() => setChangeOpen(false)} title="Cambiar contraseña maestra" size="sm">
+      <Modal open={changeOpen} onClose={() => setChangeOpen(false)} title={t.security_change_title} size="sm">
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">
-              Contraseña actual
+            <label htmlFor="enc-old-pw" className="block text-xs font-medium text-sage-600 mb-1">
+              {t.security_current_password}
             </label>
             <Input
+              id="enc-old-pw"
               type="password"
               value={oldPw}
               onChange={(e) => setOldPw(e.target.value)}
@@ -1313,22 +1335,24 @@ const SecuritySection = () => {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">
-              Nueva contraseña
+            <label htmlFor="enc-change-new-pw" className="block text-xs font-medium text-sage-600 mb-1">
+              {t.security_new_password}
             </label>
             <Input
+              id="enc-change-new-pw"
               type="password"
               value={changeNewPw}
               onChange={(e) => setChangeNewPw(e.target.value)}
-              placeholder="Mínimo 8 caracteres"
+              placeholder={t.security_pw_placeholder}
               autoComplete="new-password"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">
-              Confirmar nueva contraseña
+            <label htmlFor="enc-change-confirm-pw" className="block text-xs font-medium text-sage-600 mb-1">
+              {t.security_confirm_new}
             </label>
             <Input
+              id="enc-change-confirm-pw"
               type="password"
               value={changeConfirmPw}
               onChange={(e) => setChangeConfirmPw(e.target.value)}
@@ -1337,10 +1361,10 @@ const SecuritySection = () => {
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button variant="ghost" onClick={() => setChangeOpen(false)} disabled={busy}>
-              Cancelar
+              {t.cancel}
             </Button>
             <Button variant="primary" onClick={handleChange} disabled={busy}>
-              {busy ? 'Cambiando...' : 'Cambiar contraseña'}
+              {busy ? t.security_changing : t.security_change_password}
             </Button>
           </div>
         </div>
@@ -1383,7 +1407,7 @@ const InvoiceDesignSection = () => {
 
       const bytes = await readBinaryFile(filePath);
       if (bytes.length > 2 * 1024 * 1024) {
-        toast.error(t.design_logo_too_large || 'Imagen demasiado grande (max 2MB)');
+        toast.error(t.design_logo_too_large);
         return;
       }
 
@@ -1410,7 +1434,7 @@ const InvoiceDesignSection = () => {
           const dataUrl = canvas.toDataURL(mimeType, 0.9);
           URL.revokeObjectURL(url);
           setDesign({ logo: { data: dataUrl, type, width, height } });
-          toast.success('Logo actualizado');
+          toast.success(t.design_logo_updated);
           resolve();
         };
         img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Imagen invalida')); };
@@ -1418,13 +1442,13 @@ const InvoiceDesignSection = () => {
       });
     } catch (err) {
       if (import.meta.env.DEV && err.message !== 'Imagen invalida') console.error(err);
-      toast.error('Error al cargar el logo');
+      toast.error(t.design_logo_error);
     }
   };
 
   const removeLogo = () => {
     setDesign({ logo: null });
-    toast.success('Logo eliminado');
+    toast.success(t.design_logo_removed);
   };
 
   // Render helpers (not components) so inputs keep their identity across
@@ -1437,6 +1461,7 @@ const InvoiceDesignSection = () => {
       <button
         key={id}
         onClick={() => setDesign({ preset: id, colors: getPresetColors(id) })}
+        aria-pressed={isActive}
         className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-soft border-2 transition-all ${
           isActive
             ? 'border-wellness-400 bg-wellness-50 shadow-sm'
@@ -1460,6 +1485,7 @@ const InvoiceDesignSection = () => {
         type="color"
         value={design.colors[colorKey]}
         onChange={(e) => setColor(colorKey, e.target.value)}
+        aria-label={label}
         className="w-8 h-8 rounded border border-sage-200 cursor-pointer p-0.5"
       />
       <span className="text-xs text-sage-600 flex-1">{label}</span>
@@ -1546,11 +1572,12 @@ const InvoiceDesignSection = () => {
       <div>
         <label className="block text-xs font-medium text-sage-600 mb-2">
           <Image size={13} className="inline mr-1" />
-          {t.design_logo || 'Logotipo'}
+          {t.design_logo}
         </label>
         <div className="flex items-center gap-4">
           <button
             onClick={handleLogoUpload}
+            aria-label={t.design_upload_logo}
             className="flex items-center justify-center border-2 border-dashed border-sage-300 rounded-soft hover:border-wellness-400 transition-colors cursor-pointer"
             style={{ width: 160, height: 64 }}
           >
@@ -1559,13 +1586,13 @@ const InvoiceDesignSection = () => {
             ) : (
               <span className="text-xs text-sage-400 flex items-center gap-1">
                 <Upload size={14} />
-                {t.design_upload_logo || 'Subir logotipo'}
+                {t.design_upload_logo}
               </span>
             )}
           </button>
           {design.logo && (
             <Button variant="ghost" size="sm" icon={Trash2} onClick={removeLogo}>
-              {t.design_remove_logo || 'Eliminar'}
+              {t.design_remove_logo}
             </Button>
           )}
         </div>
@@ -1575,7 +1602,7 @@ const InvoiceDesignSection = () => {
       <div>
         <label className="block text-xs font-medium text-sage-600 mb-2">
           <Palette size={13} className="inline mr-1" />
-          {t.design_preset || 'Paleta de colores'}
+          {t.design_preset}
         </label>
         <div className="flex flex-wrap gap-2">
           {Object.entries(PRESETS).map(([id, preset]) => (
@@ -1588,7 +1615,7 @@ const InvoiceDesignSection = () => {
                   <span key={i} className="w-4 h-4 rounded-full border border-sage-200" style={{ backgroundColor: c }} />
                 ))}
               </div>
-              <span className="text-[10px] font-medium text-sage-600">{t.design_preset_custom || 'Personalizado'}</span>
+              <span className="text-[10px] font-medium text-sage-600">{t.design_preset_custom}</span>
             </div>
           )}
         </div>
@@ -1598,32 +1625,34 @@ const InvoiceDesignSection = () => {
       <div>
         <button
           onClick={() => setColorsOpen(!colorsOpen)}
+          aria-expanded={colorsOpen}
           className="flex items-center gap-1.5 text-xs font-medium text-sage-500 hover:text-sage-700 transition-colors"
         >
           {colorsOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          {t.design_colors || 'Personalizar colores'}
+          {t.design_colors}
         </button>
         {colorsOpen && (
           <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-sage-50 rounded-soft border border-sage-200">
-            {colorRow(t.design_accent || 'Color principal', 'accent')}
-            {colorRow("Color oscuro", 'accentDark')}
-            {colorRow("Color claro", 'accentLight')}
-            {colorRow("Color medio", 'accentMid')}
-            {colorRow("Texto principal", 'primary')}
-            {colorRow("Texto secundario", 'secondary')}
-            {colorRow("Labels", 'muted')}
-            {colorRow("Fondo alterno", 'cardBg')}
+            {colorRow(t.design_accent, 'accent')}
+            {colorRow(t.design_color_dark, 'accentDark')}
+            {colorRow(t.design_color_light, 'accentLight')}
+            {colorRow(t.design_color_mid, 'accentMid')}
+            {colorRow(t.design_text_primary, 'primary')}
+            {colorRow(t.design_text_secondary, 'secondary')}
+            {colorRow(t.design_labels, 'muted')}
+            {colorRow(t.design_alt_bg, 'cardBg')}
           </div>
         )}
       </div>
 
       {/* Font selector */}
       <div>
-        <label className="block text-xs font-medium text-sage-600 mb-2">
+        <label htmlFor="design-font" className="block text-xs font-medium text-sage-600 mb-2">
           <Type size={13} className="inline mr-1" />
-          {t.design_font || 'Tipografia del PDF'}
+          {t.design_font}
         </label>
         <select
+          id="design-font"
           value={design.fontFamily}
           onChange={(e) => setDesign({ fontFamily: e.target.value })}
           className="px-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
@@ -1643,14 +1672,15 @@ const InvoiceDesignSection = () => {
             onChange={(e) => setDesign({ showTagline: e.target.checked })}
             className="rounded border-sage-300 text-wellness-400 focus:ring-wellness-400"
           />
-          {t.design_show_tagline || 'Mostrar subtitulo'}
+          {t.design_show_tagline}
         </label>
         {design.showTagline && (
           <Input
             value={design.taglineText}
             onChange={(e) => setDesign({ taglineText: e.target.value })}
             className="flex-1 text-xs"
-            placeholder="Nutricion Clinica"
+            aria-label={t.design_tagline}
+            placeholder={t.design_tagline_placeholder}
           />
         )}
       </div>
@@ -1659,7 +1689,7 @@ const InvoiceDesignSection = () => {
       <div>
         <label className="block text-xs font-medium text-sage-600 mb-2">
           <FileText size={13} className="inline mr-1" />
-          {t.design_preview || 'Vista previa'}
+          {t.design_preview}
         </label>
         {preview()}
       </div>
@@ -1686,6 +1716,7 @@ export const SettingsView = () => {
   const lastError = useStore(s => s.lastError);
   const clearLastError = useStore(s => s.clearLastError);
   const t = useT();
+  const locale = useLocale();
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
 
@@ -1758,9 +1789,9 @@ export const SettingsView = () => {
   };
 
   const THEMES = [
-    { id: 'light', icon: Sun, label: 'Claro' },
-    { id: 'dark', icon: Moon, label: 'Oscuro' },
-    { id: 'auto', icon: Monitor, label: 'Sistema' },
+    { id: 'light', icon: Sun, label: t.settings_theme_light },
+    { id: 'dark', icon: Moon, label: t.settings_theme_dark },
+    { id: 'auto', icon: Monitor, label: t.settings_theme_auto },
   ];
 
   const LANGS = [
@@ -1777,49 +1808,50 @@ export const SettingsView = () => {
       <Section title={t.settings_personal}>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Nombre completo</label>
-            <Input value={config.nombre || ''} onChange={e => set('nombre', e.target.value)} />
+            <label htmlFor="cfg-nombre" className="block text-xs font-medium text-sage-600 mb-1">{t.client_name}</label>
+            <Input id="cfg-nombre" value={config.nombre || ''} onChange={e => set('nombre', e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">NIF</label>
-            <Input value={config.nif || ''} onChange={e => set('nif', e.target.value)} />
+            <label htmlFor="cfg-nif" className="block text-xs font-medium text-sage-600 mb-1">NIF</label>
+            <Input id="cfg-nif" value={config.nif || ''} onChange={e => set('nif', e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Nº Colegiada</label>
-            <Input value={config.numColegiada || ''} onChange={e => set('numColegiada', e.target.value)} placeholder="CV01944" />
+            <label htmlFor="cfg-colegiada" className="block text-xs font-medium text-sage-600 mb-1">{t.settings_num_colegiada}</label>
+            <Input id="cfg-colegiada" value={config.numColegiada || ''} onChange={e => set('numColegiada', e.target.value)} placeholder="CV01944" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Email</label>
-            <Input type="email" value={config.email || ''} onChange={e => set('email', e.target.value)} />
+            <label htmlFor="cfg-email" className="block text-xs font-medium text-sage-600 mb-1">{t.email}</label>
+            <Input id="cfg-email" type="email" value={config.email || ''} onChange={e => set('email', e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Teléfono</label>
-            <Input value={config.telefono || ''} onChange={e => set('telefono', e.target.value)} />
+            <label htmlFor="cfg-telefono" className="block text-xs font-medium text-sage-600 mb-1">{t.phone}</label>
+            <Input id="cfg-telefono" value={config.telefono || ''} onChange={e => set('telefono', e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Web</label>
-            <Input value={config.web || ''} onChange={e => set('web', e.target.value)} placeholder="nutripoloraquel.com" />
+            <label htmlFor="cfg-web" className="block text-xs font-medium text-sage-600 mb-1">Web</label>
+            <Input id="cfg-web" value={config.web || ''} onChange={e => set('web', e.target.value)} placeholder="nutripoloraquel.com" />
           </div>
         </div>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Dirección</label>
-          <Textarea value={config.direccion || ''} onChange={e => set('direccion', e.target.value)} rows={2} />
+          <label htmlFor="cfg-direccion" className="block text-xs font-medium text-sage-600 mb-1">{t.client_street}</label>
+          <Textarea id="cfg-direccion" value={config.direccion || ''} onChange={e => set('direccion', e.target.value)} rows={2} />
         </div>
       </Section>
 
       {/* Clinic config */}
-      <Section title="Configuración de consulta">
+      <Section title={t.settings_profile}>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-2">Ubicaciones</label>
+          <p className="block text-xs font-medium text-sage-600 mb-2">{t.settings_locations}</p>
           <LocationsManager />
         </div>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-2">Tipos de consulta</label>
+          <p className="block text-xs font-medium text-sage-600 mb-2">{t.settings_consultation_types}</p>
           <ConsultationTypesManager />
         </div>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Duración por defecto (min)</label>
+          <label htmlFor="cfg-duration" className="block text-xs font-medium text-sage-600 mb-1">{t.settings_default_duration}</label>
           <Input
+            id="cfg-duration"
             type="number"
             value={config.defaultConsultationDuration || 45}
             onChange={e => set('defaultConsultationDuration', parseInt(e.target.value))}
@@ -1827,7 +1859,7 @@ export const SettingsView = () => {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-2">{t.settings_blocked_hours}</label>
+          <p className="block text-xs font-medium text-sage-600 mb-2">{t.settings_blocked_hours}</p>
           <BlockedHoursManager />
         </div>
       </Section>
@@ -1847,12 +1879,13 @@ export const SettingsView = () => {
       {/* Appearance */}
       <Section title={t.settings_appearance}>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-2">Tema</label>
-          <div className="flex gap-2">
+          <p className="block text-xs font-medium text-sage-600 mb-2">{t.settings_theme}</p>
+          <div className="flex gap-2" role="group" aria-label={t.settings_theme}>
             {THEMES.map(({ id, icon: Icon, label }) => (
               <button
                 key={id}
                 onClick={() => setAppTheme(id)}
+                aria-pressed={appTheme === id}
                 className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-button border transition-colors ${
                   appTheme === id
                     ? 'bg-wellness-400 text-white border-wellness-400'
@@ -1866,15 +1899,17 @@ export const SettingsView = () => {
           </div>
         </div>
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-2">
+          <p className="block text-xs font-medium text-sage-600 mb-2">
             <Languages size={13} className="inline mr-1" />
-            Idioma
-          </label>
-          <div className="flex gap-2">
+            {t.settings_language}
+          </p>
+          <div className="flex gap-2" role="group" aria-label={t.settings_language}>
             {LANGS.map(({ id, label }) => (
               <button
                 key={id}
                 onClick={() => set('appLang', id)}
+                aria-pressed={config.appLang === id}
+                lang={id}
                 className={`px-3 py-1.5 text-xs rounded-button border transition-colors ${
                   config.appLang === id
                     ? 'bg-wellness-400 text-white border-wellness-400'
@@ -1892,7 +1927,7 @@ export const SettingsView = () => {
       <Section title={
         <span className="flex items-center gap-1.5">
           <Palette size={14} />
-          {t.settings_invoice_design || 'Diseno de documentos'}
+          {t.settings_invoice_design}
         </span>
       }>
         <InvoiceDesignSection />
@@ -1931,6 +1966,7 @@ export const SettingsView = () => {
               <select
                 value={selectedBackupDate}
                 onChange={e => setSelectedBackupDate(e.target.value)}
+                aria-label={t.backup_auto_select}
                 className="text-xs border border-sage-300 rounded-button px-2 py-1.5 bg-white text-sage-700 focus:border-wellness-400 focus:ring-1 focus:ring-wellness-400 outline-none"
               >
                 {backupInfo.dates.map(d => (
@@ -1980,12 +2016,12 @@ export const SettingsView = () => {
       </Section>
 
       {/* Seguridad (cifrado AES-256) */}
-      <Section title="Seguridad">
+      <Section title={t.settings_security}>
         <SecuritySection />
       </Section>
 
       {/* Diagnóstico */}
-      <Section title="Diagnóstico">
+      <Section title={t.settings_diagnostics}>
         {lastError ? (
           <div className="space-y-3">
             <div className="bg-danger-light border border-danger/30 rounded-card p-3">
@@ -1993,10 +2029,10 @@ export const SettingsView = () => {
                 <AlertCircle size={16} className="text-danger shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-danger">
-                    Último error capturado
+                    {t.diag_last_error}
                   </p>
                   <p className="text-xs text-sage-500 mt-0.5">
-                    {new Date(lastError.timestamp).toLocaleString('es-ES')}
+                    {new Date(lastError.timestamp).toLocaleString(locale)}
                   </p>
                 </div>
               </div>
@@ -2006,7 +2042,7 @@ export const SettingsView = () => {
               {lastError.stack && (
                 <details className="mt-2">
                   <summary className="text-xs text-sage-500 cursor-pointer hover:text-sage-700">
-                    Ver stack trace
+                    {t.diag_view_stack}
                   </summary>
                   <pre className="mt-1 text-xs font-mono text-sage-600 whitespace-pre-wrap break-words bg-white/60 rounded-button p-2 max-h-60 overflow-auto">
                     {lastError.stack}
@@ -2016,12 +2052,12 @@ export const SettingsView = () => {
               )}
             </div>
             <Button variant="ghost" size="sm" onClick={clearLastError}>
-              Limpiar diagnóstico
+              {t.diag_clear}
             </Button>
           </div>
         ) : (
           <p className="text-xs text-sage-400">
-            No se ha capturado ningún error reciente.
+            {t.diag_none}
           </p>
         )}
       </Section>

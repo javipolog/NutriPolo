@@ -1,15 +1,26 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Plus, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
-import { Button, useToast, useConfirm } from './UI';
+import { Button, useToast, useConfirm, clickableProps } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
-import { useT } from '../i18n';
+import { useT, useLocale, plural } from '../i18n';
 import { ConsultationModal } from './ConsultationModal';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
-const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const capitalize = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Short weekday names Monday→Sunday in the given locale (2024-01-01 was a Monday). */
+function weekdayNames(locale) {
+  return Array.from({ length: 7 }, (_, i) =>
+    capitalize(new Date(2024, 0, 1 + i).toLocaleDateString(locale, { weekday: 'short' }).replace('.', '')));
+}
+
+/** Full month names January→December in the given locale. */
+function monthNames(locale) {
+  return Array.from({ length: 12 }, (_, i) =>
+    capitalize(new Date(2024, i, 1).toLocaleDateString(locale, { month: 'long' })));
+}
 
 function toISO(date) {
   const y = date.getFullYear();
@@ -61,16 +72,16 @@ function calStyle(c, calColorMap) {
  * Return visual metadata for a consultation based on its matchStatus.
  * Returns null for fully-linked consultations (normal rendering).
  */
-function consultationMatchVisual(c) {
+function consultationMatchVisual(c, t) {
   switch (c.matchStatus) {
     case 'auto-pending-review':
-      return { cls: 'bg-info-light border-l-info text-info', Icon: CheckCircle2, tooltip: 'Coincidencia automática — confirmar en inbox' };
+      return { cls: 'bg-info-light border-l-info text-info', Icon: CheckCircle2, tooltip: t.calendar_match_auto_tooltip };
     case 'suggested':
-      return { cls: 'bg-orange-50 border-l-orange-400 text-orange-700', Icon: AlertCircle, tooltip: 'Candidatos disponibles — revisar en inbox' };
+      return { cls: 'bg-orange-50 border-l-orange-400 text-orange-700', Icon: AlertCircle, tooltip: t.calendar_match_suggested_tooltip };
     case 'unknown':
-      return { cls: 'bg-red-50 border-l-danger text-danger', Icon: UserPlus, tooltip: 'Paciente desconocido — crear ficha' };
+      return { cls: 'bg-red-50 border-l-danger text-danger', Icon: UserPlus, tooltip: t.calendar_match_unknown_tooltip };
     case 'dismissed':
-      return { cls: 'bg-sage-100 border-l-sage-400 text-sage-500 opacity-60', Icon: XIcon, tooltip: 'Descartado' };
+      return { cls: 'bg-sage-100 border-l-sage-400 text-sage-500 opacity-60', Icon: XIcon, tooltip: t.match_status_dismissed };
     default:
       return null;
   }
@@ -83,6 +94,8 @@ const DEFAULT_LAST_HOUR = 20;
 // ── Weekly View ────────────────────────────────────────────────────────────
 
 const WeekView = ({ weekStart, consultations, personalEvents, clients, config, calColorMap, onNewConsultation, onEditConsultation }) => {
+  const t = useT();
+  const dayNames = weekdayNames(useLocale());
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const today = todayISO();
   const locationColors = {};
@@ -150,7 +163,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
             const isToday = iso === today;
             return (
               <div key={iso} className={`py-2 text-center text-xs font-medium border-l border-sage-200 ${isToday ? 'bg-wellness-50' : ''}`}>
-                <p className="text-sage-400">{DAYS_ES[d.getDay() === 0 ? 6 : d.getDay() - 1]}</p>
+                <p className="text-sage-400">{dayNames[d.getDay() === 0 ? 6 : d.getDay() - 1]}</p>
                 <p className={`text-lg font-bold mt-0.5 ${isToday ? 'text-wellness-500' : 'text-sage-700'}`}>{d.getDate()}</p>
               </div>
             );
@@ -182,12 +195,12 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
                       const client = clients.find(x => x.id === c.clienteId);
                       const locColor = locationColors[c.locationId] || 'border-l-sage-400';
                       const cStyle = calStyle(c, calColorMap);
-                      const matchVisual = consultationMatchVisual(c);
+                      const matchVisual = consultationMatchVisual(c, t);
                       const MatchIcon = matchVisual?.Icon;
                       return (
                         <div
                           key={c.id}
-                          onClick={e => { e.stopPropagation(); onEditConsultation(c); }}
+                          {...clickableProps(e => { e.stopPropagation(); onEditConsultation(c); })}
                           className={`text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 cursor-pointer truncate hover:opacity-80 ${
                             matchVisual
                               ? matchVisual.cls
@@ -214,7 +227,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
                         key={e.id}
                         onClick={ev => ev.stopPropagation()}
                         className="text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 border-l-sage-500 bg-sage-200/50 text-sage-700 italic truncate cursor-default"
-                        title={`[Personal] ${e.title}${e.duracion ? ` — ${e.duracion}min` : ''}`}
+                        title={`[${t.personal_event_prefix}] ${e.title}${e.duracion ? ` — ${e.duracion}min` : ''}`}
                       >
                         <span className="font-medium">{e.hora}</span> {e.title}
                       </div>
@@ -233,6 +246,8 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
 // ── Monthly View ───────────────────────────────────────────────────────────
 
 const MonthView = ({ monthStart, consultations, personalEvents, clients, calColorMap, onNewConsultation, onEditConsultation }) => {
+  const t = useT();
+  const dayNames = weekdayNames(useLocale());
   const today = todayISO();
   const year = monthStart.getFullYear();
   const month = monthStart.getMonth();
@@ -271,7 +286,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
     <div className="flex-1 flex flex-col">
       {/* Week day headers */}
       <div className="grid grid-cols-7 border-b border-sage-200 bg-sage-50">
-        {DAYS_ES.map(d => (
+        {dayNames.map(d => (
           <div key={d} className="py-2 text-center text-xs font-medium text-sage-500">{d}</div>
         ))}
       </div>
@@ -300,7 +315,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                         key={item.id}
                         onClick={e => e.stopPropagation()}
                         className="text-[10px] px-1 rounded truncate bg-sage-200/50 text-sage-700 italic cursor-default border border-sage-300"
-                        title={`[Personal] ${item.title}`}
+                        title={`[${t.personal_event_prefix}] ${item.title}`}
                       >
                         {!item.allDay && item.hora && <span className="font-medium mr-0.5">{item.hora}</span>}
                         {item.title}
@@ -310,12 +325,12 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                   const c = item;
                   const client = clients.find(x => x.id === c.clienteId);
                   const cStyle = calStyle(c, calColorMap);
-                  const matchVisual = consultationMatchVisual(c);
+                  const matchVisual = consultationMatchVisual(c, t);
                   const MatchIcon = matchVisual?.Icon;
                   return (
                     <div
                       key={c.id}
-                      onClick={e => { e.stopPropagation(); onEditConsultation(c); }}
+                      {...clickableProps(e => { e.stopPropagation(); onEditConsultation(c); })}
                       className={`text-[10px] px-1 rounded truncate cursor-pointer hover:opacity-80 ${
                         matchVisual
                           ? matchVisual.cls + ' border border-l-2'
@@ -335,7 +350,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                   );
                 })}
                 {dayConsults.length > 3 && (
-                  <p className="text-[10px] text-sage-400 pl-1">+{dayConsults.length - 3} más</p>
+                  <p className="text-[10px] text-sage-400 pl-1">{t.calendar_more.replace('{n}', dayConsults.length - 3)}</p>
                 )}
               </div>
             </div>
@@ -353,7 +368,7 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
   const locationName = id => config.locations?.find(l => l.id === id)?.name || id || '';
 
   if (consultations.length === 0) {
-    return <p className="text-center py-16 text-sage-400 text-sm">No hay consultas en este período</p>;
+    return <p className="text-center py-16 text-sage-400 text-sm">{t.calendar_no_consultations_period}</p>;
   }
 
   // Group by date
@@ -375,7 +390,7 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
               return (
                 <div
                   key={c.id}
-                  onClick={() => onEdit(c)}
+                  {...clickableProps(() => onEdit(c))}
                   className="bg-white border border-sage-200 rounded-soft p-3 flex items-center gap-3 cursor-pointer hover:shadow-card-hover transition-shadow"
                   style={cColor ? { borderLeftWidth: 4, borderLeftColor: cColor } : undefined}
                 >
@@ -388,7 +403,7 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sage-900 text-sm">{client?.nombre || c.googleSummary || 'Sin cliente'}</p>
+                    <p className="font-medium text-sage-900 text-sm">{client?.nombre || c.googleSummary || t.calendar_no_client}</p>
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-sage-400">
                       <span>{c.tipo}</span>
                       {c.locationId && <span className="flex items-center gap-0.5"><MapPin size={9} />{locationName(c.locationId)}</span>}
@@ -442,6 +457,7 @@ export const CalendarView = () => {
     [patientSuggestions]
   );
   const t = useT();
+  const monthsLong = monthNames(useLocale());
 
   const resetAgenda = useStore(s => s.resetAgenda);
   const toast = useToast();
@@ -473,30 +489,30 @@ export const CalendarView = () => {
     try {
       const stats = await googleCalendar.syncAll(useStore.getState());
       const parts = [];
-      if (stats.pushed) parts.push(`${stats.pushed} enviados`);
-      if (stats.pulled) parts.push(`${stats.pulled} recibidos`);
-      if (stats.updated) parts.push(`${stats.updated} actualizados`);
-      if (stats.errors > 0) parts.push(`${stats.errors} errores`);
-      toast.success(`Sincronizado${parts.length ? ' — ' + parts.join(', ') : ''}`);
+      if (stats.pushed) parts.push(`${stats.pushed} ${t.gcal_sync_pushed}`);
+      if (stats.pulled) parts.push(`${stats.pulled} ${t.gcal_sync_pulled}`);
+      if (stats.updated) parts.push(`${stats.updated} ${t.gcal_sync_updated}`);
+      if (stats.errors > 0) parts.push(`${stats.errors} ${t.gcal_sync_errors}`);
+      toast.success(`${t.gcal_synced}${parts.length ? ' — ' + parts.join(', ') : ''}`);
       if (stats.conflicts > 0) {
-        toast.info(`${stats.conflicts} conflicto${stats.conflicts > 1 ? 's' : ''} resuelto${stats.conflicts > 1 ? 's' : ''} — la versión más reciente se conservó`);
+        toast.info(`${stats.conflicts} ${stats.conflicts > 1 ? t.sync_conflict_resolved_plural : t.sync_conflict_resolved}`);
       }
       setLastSyncTime(new Date());
     } catch (e) {
       setSyncError(e?.message || String(e));
-      toast.error('Error al sincronizar: ' + (e?.message || String(e)));
+      toast.error(t.gcal_sync_error_detail.replace('{error}', e?.message || String(e)));
     } finally {
       setSyncing(false);
     }
-  }, [syncing, toast]);
+  }, [syncing, toast, t]);
 
   const handleReset = useCallback(async () => {
     const total = consultations.length;
-    if (!total) { toast.info('No hay consultas que eliminar'); return; }
+    if (!total) { toast.info(t.calendar_nothing_to_delete); return; }
 
     const ok = await confirm({
-      title: 'Resetear agenda',
-      message: `Se eliminarán ${total} consulta(s) locales. Los eventos de Google Calendar NO se verán afectados. Esta acción no se puede deshacer.`,
+      title: t.calendar_reset_title,
+      message: t.calendar_reset_message.replace('{n}', total),
       danger: true,
     });
     if (!ok) return;
@@ -504,13 +520,13 @@ export const CalendarView = () => {
     setResetting(true);
     try {
       resetAgenda();
-      toast.success(`Agenda reseteada — ${total} consulta(s) eliminada(s)`);
+      toast.success(t.calendar_reset_done.replace('{n}', total));
     } catch (e) {
-      toast.error('Error al resetear: ' + (e?.message || String(e)));
+      toast.error(t.calendar_reset_error.replace('{error}', e?.message || String(e)));
     } finally {
       setResetting(false);
     }
-  }, [consultations, confirm, resetAgenda, toast]);
+  }, [consultations, confirm, resetAgenda, toast, t]);
 
   // Auto-sync runs app-wide in useBackgroundJobs (App.jsx), not only while
   // this view is mounted.
@@ -572,11 +588,11 @@ export const CalendarView = () => {
     if (viewMode === 'week') {
       const end = addDays(weekStart, 6);
       const sameMonth = weekStart.getMonth() === end.getMonth();
-      if (sameMonth) return `${weekStart.getDate()}–${end.getDate()} ${MONTHS_ES[weekStart.getMonth()]} ${weekStart.getFullYear()}`;
-      return `${weekStart.getDate()} ${MONTHS_ES[weekStart.getMonth()]} – ${end.getDate()} ${MONTHS_ES[end.getMonth()]} ${end.getFullYear()}`;
+      if (sameMonth) return `${weekStart.getDate()}–${end.getDate()} ${monthsLong[weekStart.getMonth()]} ${weekStart.getFullYear()}`;
+      return `${weekStart.getDate()} ${monthsLong[weekStart.getMonth()]} – ${end.getDate()} ${monthsLong[end.getMonth()]} ${end.getFullYear()}`;
     }
-    if (viewMode === 'month') return `${MONTHS_ES[cursor.getMonth()]} ${cursor.getFullYear()}`;
-    return `Próximas consultas`;
+    if (viewMode === 'month') return `${monthsLong[cursor.getMonth()]} ${cursor.getFullYear()}`;
+    return t.calendar_upcoming;
   };
 
   const openNew = (defaults = {}) => {
@@ -603,7 +619,8 @@ export const CalendarView = () => {
                 <button
                   onClick={handleSync}
                   disabled={syncing}
-                  title="Sincronizar con Google Calendar"
+                  title={t.calendar_sync_button}
+                  aria-label={t.calendar_sync_button}
                   className={`p-1.5 rounded-button text-sage-500 hover:bg-sage-100 transition-colors disabled:opacity-50 ${syncing ? 'cursor-not-allowed' : ''}`}
                 >
                   <RefreshCw size={15} className={syncing ? 'animate-spin' : ''} />
@@ -611,17 +628,18 @@ export const CalendarView = () => {
                 <button
                   onClick={handleReset}
                   disabled={resetting || syncing}
-                  title="Resetear agenda — eliminar todas las consultas y eventos"
+                  title={t.calendar_reset_button}
+                  aria-label={t.calendar_reset_button}
                   className="p-1.5 rounded-button text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50"
                 >
                   <Trash2 size={15} />
                 </button>
               </div>
               {syncError ? (
-                <p className="text-[10px] text-red-500 leading-tight">Error en la sincronización</p>
+                <p className="text-[10px] text-red-500 leading-tight">{t.calendar_sync_failed}</p>
               ) : lastSyncTime ? (
                 <p className="text-[10px] text-sage-400 leading-tight">
-                  Última sync: {lastSyncTime.getHours().toString().padStart(2, '0')}:{lastSyncTime.getMinutes().toString().padStart(2, '0')}
+                  {t.calendar_last_sync.replace('{time}', `${lastSyncTime.getHours().toString().padStart(2, '0')}:${lastSyncTime.getMinutes().toString().padStart(2, '0')}`)}
                 </p>
               ) : null}
             </div>
@@ -635,13 +653,13 @@ export const CalendarView = () => {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         {/* Navigation */}
         <div className="flex items-center gap-2">
-          <button onClick={() => navigate(-1)} className="p-1.5 rounded-button text-sage-500 hover:bg-sage-100 transition-colors">
+          <button onClick={() => navigate(-1)} aria-label={t.previous} title={t.previous} className="p-1.5 rounded-button text-sage-500 hover:bg-sage-100 transition-colors">
             <ChevronLeft size={16} />
           </button>
           <button onClick={goToday} className="px-3 py-1 text-xs rounded-button border border-sage-300 text-sage-600 hover:bg-sage-50 transition-colors">
-            Hoy
+            {t.today}
           </button>
-          <button onClick={() => navigate(1)} className="p-1.5 rounded-button text-sage-500 hover:bg-sage-100 transition-colors">
+          <button onClick={() => navigate(1)} aria-label={t.next} title={t.next} className="p-1.5 rounded-button text-sage-500 hover:bg-sage-100 transition-colors">
             <ChevronRight size={16} />
           </button>
           <span className="text-sm font-medium text-sage-800 ml-1">{headerLabel()}</span>
@@ -652,7 +670,8 @@ export const CalendarView = () => {
           {allPersonalEvents.filter(e => !e.cancelled).length > 0 && (
             <button
               onClick={() => setShowPersonalEvents(v => !v)}
-              title={showPersonalEvents ? 'Ocultar eventos personales' : 'Mostrar eventos personales'}
+              title={showPersonalEvents ? t.calendar_hide_personal : t.calendar_show_personal}
+              aria-pressed={showPersonalEvents}
               className={`flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-button border transition-colors ${
                 showPersonalEvents
                   ? 'bg-sage-100 border-sage-300 text-sage-600 hover:bg-sage-200'
@@ -660,16 +679,17 @@ export const CalendarView = () => {
               }`}
             >
               <EyeOff size={13} />
-              Personal
+              {t.personal_event_prefix}
             </button>
           )}
 
           {/* View toggle */}
           <div className="flex gap-1 bg-sage-100 p-1 rounded-button">
-            {[['week', Calendar, 'Semana'], ['month', Calendar, 'Mes'], ['list', List, 'Lista']].map(([id, Icon, label]) => (
+            {[['week', Calendar, t.week_view], ['month', Calendar, t.month_view], ['list', List, t.view_list]].map(([id, Icon, label]) => (
               <button
                 key={id}
                 onClick={() => setViewMode(id)}
+                aria-pressed={viewMode === id}
                 className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-colors ${
                   viewMode === id ? 'bg-white text-sage-800 shadow-sm' : 'text-sage-500 hover:text-sage-700'
                 }`}
@@ -687,10 +707,13 @@ export const CalendarView = () => {
           <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-red-800">
-              Posible borrado masivo en "{cal.name || cal.id}"
+              {t.mass_delete_title} "{cal.name || cal.id}"
             </p>
             <p className="text-red-700 text-xs mt-0.5">
-              {cal.massDeletePending.prevCount} eventos → {cal.massDeletePending.newCount} ({cal.massDeletePending.drop} eliminados en Google). La sincronización está en pausa. Revisa Google Calendar y elige una acción.
+              {t.calendar_mass_delete_detail
+                .replace('{prev}', cal.massDeletePending.prevCount)
+                .replace('{new}', cal.massDeletePending.newCount)
+                .replace('{drop}', cal.massDeletePending.drop)}
             </p>
           </div>
           <div className="flex gap-1.5 flex-shrink-0">
@@ -698,13 +721,13 @@ export const CalendarView = () => {
               onClick={() => ignoreMassDeleteOnce(cal.id)}
               className="px-2.5 py-1 text-xs font-medium bg-white border border-red-300 text-red-700 rounded-button hover:bg-red-50 transition-colors"
             >
-              Ignorar y reanudar
+              {t.mass_delete_ignore}
             </button>
             <button
               onClick={() => acceptMassDelete(cal.id)}
               className="px-2.5 py-1 text-xs font-medium bg-red-500 text-white rounded-button hover:bg-red-600 transition-colors"
             >
-              Aceptar borrados
+              {t.mass_delete_accept}
             </button>
             <button
               onClick={() => {
@@ -715,7 +738,7 @@ export const CalendarView = () => {
               }}
               className="px-2.5 py-1 text-xs text-red-500 hover:text-red-700 transition-colors"
             >
-              Desactivar
+              {t.mass_delete_suspend}
             </button>
           </div>
         </div>
@@ -727,13 +750,13 @@ export const CalendarView = () => {
           <CheckCircle2 size={16} className="text-info shrink-0" />
           <span className="flex-1 text-info-dark">
             <strong>{pendingConfirmCount}</strong>{' '}
-            {pendingConfirmCount === 1 ? 'coincidencia automática' : 'coincidencias automáticas'} por confirmar
+            {plural(t, 'calendar_banner_confirm', pendingConfirmCount)}
           </span>
           <button
             onClick={() => setCurrentView('inbox')}
             className="px-3 py-1 text-xs font-medium bg-info text-white rounded-button hover:bg-info-dark transition-colors whitespace-nowrap"
           >
-            Revisar →
+            {t.new_patients_review} →
           </button>
         </div>
       )}
@@ -742,13 +765,13 @@ export const CalendarView = () => {
           <AlertCircle size={16} className="text-orange-500 shrink-0" />
           <span className="flex-1 text-orange-800">
             <strong>{pendingReviewCount}</strong>{' '}
-            {pendingReviewCount === 1 ? 'paciente nuevo detectado' : 'pacientes nuevos detectados'} en la clínica externa — identifícalos para vincular sus citas.
+            {plural(t, 'calendar_banner_review', pendingReviewCount)}
           </span>
           <button
             onClick={() => setCurrentView('inbox')}
             className="px-3 py-1 text-xs font-medium bg-orange-400 text-white rounded-button hover:bg-orange-500 transition-colors whitespace-nowrap"
           >
-            Revisar →
+            {t.new_patients_review} →
           </button>
         </div>
       )}

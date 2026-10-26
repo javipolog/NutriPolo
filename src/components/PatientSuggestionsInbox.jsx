@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import useStore from '../stores/store';
 import { useToast, useConfirm } from './UI';
+import { useT, plural } from '../i18n';
 
 // ── Score bar ─────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,7 @@ function ScoreBar({ score }) {
 // ── AutoMatchCard — compact card for high-confidence pending-confirm matches ──
 
 const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }) => {
+  const t = useT();
   const [showAlternatives, setShowAlternatives] = useState(false);
 
   const proposedClient = useMemo(
@@ -76,14 +78,14 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
               )}
               {suggestion.occurrences > 1 && (
                 <span className="text-xs text-sage-500 bg-sage-100 px-1.5 py-0.5 rounded-full">
-                  ×{suggestion.occurrences} citas
+                  {t.inbox_occurrences_badge.replace('{n}', suggestion.occurrences)}
                 </span>
               )}
             </div>
             {suggestion.firstSeenFecha && (
               <p className="text-xs text-sage-400 mt-0.5">
-                Primera vez: {suggestion.firstSeenFecha}
-                {suggestion.firstSeenHora ? ` a las ${suggestion.firstSeenHora}` : ''}
+                {t.suggestion_first_seen}: {suggestion.firstSeenFecha}
+                {suggestion.firstSeenHora ? ` ${t.inbox_at_time.replace('{time}', suggestion.firstSeenHora)}` : ''}
               </p>
             )}
           </div>
@@ -94,21 +96,23 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
               className="flex items-center gap-1 px-3 py-1.5 bg-info text-white text-xs font-semibold rounded-button hover:bg-info-dark transition-colors"
             >
               <CheckCircle2 size={12} />
-              Confirmar
+              {t.inbox_confirm}
             </button>
             {alternativeCandidates.length > 0 && (
               <button
                 onClick={() => setShowAlternatives(v => !v)}
                 className="px-2 py-1.5 text-xs text-info border border-info/40 rounded-button hover:bg-info/10 transition-colors"
-                title="Elegir otro cliente"
+                title={t.inbox_pick_other_client}
+                aria-expanded={showAlternatives}
               >
-                Otro
+                {t.inbox_other}
               </button>
             )}
             <button
               onClick={() => onDismiss(suggestion.id)}
               className="p-1.5 text-sage-400 hover:text-red-500 transition-colors rounded"
-              title="Descartar"
+              title={t.suggestion_dismiss}
+              aria-label={t.suggestion_dismiss}
             >
               <X size={13} />
             </button>
@@ -117,7 +121,7 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
 
         {showAlternatives && (
           <div className="mt-3 space-y-1.5 pt-3 border-t border-info/20">
-            <p className="text-xs font-medium text-sage-500">Elegir otro cliente:</p>
+            <p className="text-xs font-medium text-sage-500">{t.inbox_pick_other_client}:</p>
             {alternativeCandidates.map(({ client, score, clienteId }) => (
               <div
                 key={clienteId}
@@ -132,7 +136,7 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
                   className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-wellness-700 bg-wellness-50 border border-wellness-200 rounded hover:bg-wellness-100 transition-colors shrink-0"
                 >
                   <Link size={10} />
-                  Vincular
+                  {t.suggestion_link}
                 </button>
               </div>
             ))}
@@ -146,6 +150,7 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
 // ── SuggestionCard — existing card for ambiguous candidates / new patients ────
 
 const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) => {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newClientName, setNewClientName]   = useState(
@@ -181,16 +186,17 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
             </div>
             {suggestion.firstSeenFecha && (
               <p className="text-xs text-sage-500 mt-0.5">
-                Primera vez: {suggestion.firstSeenFecha}
-                {suggestion.firstSeenHora ? ` a las ${suggestion.firstSeenHora}` : ''}
-                {suggestion.occurrences > 1 ? ` · ${suggestion.occurrences} ocurrencias` : ''}
+                {t.suggestion_first_seen}: {suggestion.firstSeenFecha}
+                {suggestion.firstSeenHora ? ` ${t.inbox_at_time.replace('{time}', suggestion.firstSeenHora)}` : ''}
+                {suggestion.occurrences > 1 ? ` · ${suggestion.occurrences} ${t.suggestion_occurrences}` : ''}
               </p>
             )}
           </div>
           <button
             onClick={() => onDismiss(suggestion.id)}
             className="p-1.5 text-sage-400 hover:text-red-500 transition-colors flex-shrink-0 rounded"
-            title="Descartar — no volver a proponer este nombre"
+            title={t.inbox_dismiss_forever}
+            aria-label={t.inbox_dismiss_forever}
           >
             <X size={14} />
           </button>
@@ -198,7 +204,7 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
 
         {candidateClients.length > 0 ? (
           <div className="mt-3 space-y-1.5">
-            <p className="text-xs font-medium text-sage-500">Candidatos similares:</p>
+            <p className="text-xs font-medium text-sage-500">{t.suggestion_candidates}:</p>
             {(expanded ? candidateClients : candidateClients.slice(0, MAX_VISIBLE)).map(
               ({ client, score, clienteId }) => (
                 <div
@@ -214,7 +220,7 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
                     className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-wellness-700 bg-wellness-50 border border-wellness-200 rounded hover:bg-wellness-100 transition-colors shrink-0"
                   >
                     <Link size={10} />
-                    Vincular
+                    {t.suggestion_link}
                   </button>
                 </div>
               )
@@ -222,18 +228,19 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
             {candidateClients.length > MAX_VISIBLE && (
               <button
                 onClick={() => setExpanded(!expanded)}
+                aria-expanded={expanded}
                 className="flex items-center gap-1 text-xs text-sage-500 hover:text-sage-700 transition-colors mt-1"
               >
                 {expanded
-                  ? <><ChevronUp size={12} /> Ver menos</>
-                  : <><ChevronDown size={12} /> Ver {candidateClients.length - MAX_VISIBLE} más</>
+                  ? <><ChevronUp size={12} /> {t.show_less}</>
+                  : <><ChevronDown size={12} /> {t.show_n_more.replace('{n}', candidateClients.length - MAX_VISIBLE)}</>
                 }
               </button>
             )}
           </div>
         ) : (
           <p className="mt-2 text-xs text-sage-400 italic">
-            Sin candidatos similares — posiblemente un paciente nuevo.
+            {t.suggestion_no_candidates}
           </p>
         )}
       </div>
@@ -245,21 +252,23 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
             className="flex items-center gap-1.5 px-3 py-1.5 bg-wellness-400 text-white text-xs font-medium rounded-button hover:bg-wellness-500 transition-colors"
           >
             <Plus size={12} />
-            Crear cliente nuevo
+            {t.suggestion_create}
           </button>
           <button
             onClick={() => onDismiss(suggestion.id)}
             className="px-3 py-1.5 text-xs text-sage-500 hover:text-red-600 transition-colors"
           >
-            Descartar
+            {t.suggestion_dismiss}
           </button>
         </div>
       ) : (
         <div className="px-4 py-3 bg-sage-50 border-t border-sage-100 space-y-2">
-          <p className="text-xs font-semibold text-sage-700">Nuevo cliente</p>
+          <p className="text-xs font-semibold text-sage-700">{t.new_client}</p>
           <input
             type="text"
-            placeholder="Nombre completo *"
+            placeholder={`${t.client_name} *`}
+            aria-label={t.client_name}
+            aria-required="true"
             value={newClientName}
             onChange={e => setNewClientName(e.target.value)}
             className="w-full px-2.5 py-1.5 text-sm border border-sage-300 rounded-button bg-white focus:ring-1 focus:ring-wellness-400 focus:border-wellness-400 outline-none"
@@ -268,14 +277,16 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
           <div className="flex gap-2">
             <input
               type="tel"
-              placeholder="Teléfono"
+              placeholder={t.phone}
+              aria-label={t.phone}
               value={newClientPhone}
               onChange={e => setNewClientPhone(e.target.value)}
               className="flex-1 px-2.5 py-1.5 text-sm border border-sage-300 rounded-button bg-white focus:ring-1 focus:ring-wellness-400 focus:border-wellness-400 outline-none"
             />
             <input
               type="email"
-              placeholder="Email"
+              placeholder={t.email}
+              aria-label={t.email}
               value={newClientEmail}
               onChange={e => setNewClientEmail(e.target.value)}
               className="flex-1 px-2.5 py-1.5 text-sm border border-sage-300 rounded-button bg-white focus:ring-1 focus:ring-wellness-400 focus:border-wellness-400 outline-none"
@@ -286,7 +297,7 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
               onClick={() => setShowCreateForm(false)}
               className="px-3 py-1.5 text-xs text-sage-600 hover:text-sage-800 transition-colors"
             >
-              Cancelar
+              {t.cancel}
             </button>
             <button
               disabled={!newClientName.trim()}
@@ -300,7 +311,7 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
               className="flex items-center gap-1.5 px-3 py-1.5 bg-wellness-400 text-white text-xs font-medium rounded-button hover:bg-wellness-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <UserPlus size={12} />
-              Crear y vincular
+              {t.inbox_create_and_link}
             </button>
           </div>
         </div>
@@ -312,11 +323,12 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
 // ── Section header helper ─────────────────────────────────────────────────────
 
 function SectionHeader({ icon: Icon, label, count, colorClass = 'text-sage-600' }) {
+  const t = useT();
   return (
     <div className="flex items-center gap-2 pb-2 border-b border-sage-100">
       <Icon size={15} className={`${colorClass} shrink-0`} />
       <span className={`text-xs font-semibold uppercase tracking-wide ${colorClass}`}>{label}</span>
-      <span className="text-xs text-sage-400">· {count} pendiente{count !== 1 ? 's' : ''}</span>
+      <span className="text-xs text-sage-400">· {plural(t, 'inbox_n_pending', count)}</span>
     </div>
   );
 }
@@ -334,6 +346,7 @@ export const PatientSuggestionsInbox = () => {
   const overrideAutoMatch          = useStore(s => s.overrideAutoMatch);
   const confirmAllAutoMatches      = useStore(s => s.confirmAllAutoMatches);
   const toast = useToast();
+  const t = useT();
   const { confirm, ConfirmDialog } = useConfirm();
 
   const pendingConfirm = useMemo(
@@ -365,13 +378,13 @@ export const PatientSuggestionsInbox = () => {
     const sg = (patientSuggestions || []).find(s => s.id === suggestionId);
     const client = clients.find(c => c.id === sg?.suggestedClienteId);
     confirmAutoMatch(suggestionId);
-    toast.success(`Vinculado a ${client?.nombre || 'cliente'}`);
+    toast.success(`${t.suggestion_linked_ok} ${client?.nombre || t.client_fallback}`);
   };
 
   const handleOverride = (suggestionId, clienteId) => {
     const client = clients.find(c => c.id === clienteId);
     overrideAutoMatch(suggestionId, clienteId);
-    toast.success(`Vinculado a ${client?.nombre || 'cliente'}`);
+    toast.success(`${t.suggestion_linked_ok} ${client?.nombre || t.client_fallback}`);
   };
 
   const handleConfirmAll = async () => {
@@ -384,28 +397,28 @@ export const PatientSuggestionsInbox = () => {
       .filter(Boolean)
       .join('\n');
     const ok = await confirm({
-      title: 'Confirmar coincidencias',
-      message: `Se vincularán ${pendingConfirm.length} coincidencia${pendingConfirm.length !== 1 ? 's' : ''}:\n\n${names}\n\nPuedes cambiar cualquier vinculación manualmente después.`,
+      title: t.inbox_confirm_all_title,
+      message: `${plural(t, 'inbox_confirm_all_count', pendingConfirm.length)}:\n\n${names}\n\n${t.inbox_confirm_all_desc}`,
     });
     if (!ok) return;
     const count = confirmAllAutoMatches();
-    toast.success(`${count} coincidencia${count !== 1 ? 's' : ''} confirmada${count !== 1 ? 's' : ''}`);
+    toast.success(plural(t, 'inbox_confirmed_count', count));
   };
 
   const handleLink = (suggestionId, clienteId) => {
     linkPatientSuggestion(suggestionId, clienteId);
     const client = clients.find(c => c.id === clienteId);
-    toast.success(`Vinculado a ${client?.nombre || 'cliente'}`);
+    toast.success(`${t.suggestion_linked_ok} ${client?.nombre || t.client_fallback}`);
   };
 
   const handleCreate = (suggestionId, clientData) => {
     createClientFromSuggestion(suggestionId, clientData);
-    toast.success(`${clientData.nombre} creado y vinculado`);
+    toast.success(`${clientData.nombre} ${t.suggestion_created_ok}`);
   };
 
   const handleDismiss = (suggestionId) => {
     dismissPatientSuggestion(suggestionId);
-    toast.info('Sugerencia descartada — no volverá a aparecer');
+    toast.info(t.suggestion_dismissed_ok);
   };
 
   return (
@@ -416,12 +429,12 @@ export const PatientSuggestionsInbox = () => {
       <div>
         <h1 className="text-2xl font-bold text-sage-900 flex items-center gap-2.5">
           <UserPlus size={22} className="text-wellness-500" />
-          Nuevos pacientes detectados
+          {t.inbox_title}
         </h1>
         <p className="text-sm text-sage-500 mt-1">
           {totalPending === 0
-            ? 'Sin sugerencias pendientes de revisar'
-            : `${totalPending} ${totalPending === 1 ? 'paciente por revisar' : 'pacientes por revisar'}`
+            ? t.patient_inbox_empty
+            : plural(t, 'inbox_to_review', totalPending)
           }
         </p>
       </div>
@@ -431,10 +444,9 @@ export const PatientSuggestionsInbox = () => {
         <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
           <CheckCircle size={44} className="text-green-400" />
           <div>
-            <p className="text-sage-700 font-semibold">Todo al día</p>
+            <p className="text-sage-700 font-semibold">{t.dashboard_all_clear}</p>
             <p className="text-sage-500 text-sm mt-1 max-w-sm">
-              Cuando la clínica externa registre un paciente desconocido,
-              aparecerá aquí para que puedas vincularlo o crear su ficha.
+              {t.inbox_empty_desc}
             </p>
           </div>
         </div>
@@ -446,7 +458,7 @@ export const PatientSuggestionsInbox = () => {
           <div className="flex items-center justify-between">
             <SectionHeader
               icon={CheckCircle2}
-              label="Confirmar coincidencias automáticas"
+              label={t.inbox_section_confirm}
               count={pendingConfirm.length}
               colorClass="text-info"
             />
@@ -456,7 +468,7 @@ export const PatientSuggestionsInbox = () => {
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-info text-white text-xs font-semibold rounded-button hover:bg-info-dark transition-colors"
               >
                 <CheckCircle2 size={12} />
-                Confirmar todo ({pendingConfirm.length})
+                {t.inbox_confirm_all} ({pendingConfirm.length})
               </button>
             )}
           </div>
@@ -480,7 +492,7 @@ export const PatientSuggestionsInbox = () => {
         <div className="space-y-3">
           <SectionHeader
             icon={AlertCircle}
-            label="Candidatos a revisar"
+            label={t.inbox_section_review}
             count={pendingReview.length}
             colorClass="text-orange-600"
           />
@@ -499,7 +511,7 @@ export const PatientSuggestionsInbox = () => {
                     <div className="flex items-center gap-2 pb-1 border-b border-sage-100">
                       <Users size={13} className="text-sage-400 shrink-0" />
                       <span className="text-xs font-semibold text-sage-500 uppercase tracking-wide">
-                        {cal?.name || 'Calendario externo'}
+                        {cal?.name || t.external_calendar}
                       </span>
                     </div>
                   )}
@@ -525,7 +537,7 @@ export const PatientSuggestionsInbox = () => {
         <div className="space-y-3">
           <SectionHeader
             icon={UserPlus}
-            label="Pacientes nuevos"
+            label={t.inbox_section_new}
             count={pendingNew.length}
             colorClass="text-sage-600"
           />

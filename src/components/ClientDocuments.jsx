@@ -180,6 +180,7 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
                 <button
                   onClick={() => handleOpen(doc)}
                   title={t.doc_open}
+                  aria-label={t.doc_open}
                   className="p-1.5 text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 rounded-button transition-colors"
                 >
                   <Eye size={15} />
@@ -188,6 +189,7 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
                   <button
                     onClick={() => handleEmail(doc)}
                     title={t.doc_email_document}
+                    aria-label={t.doc_email_document}
                     className="p-1.5 text-sage-400 hover:text-info hover:bg-info/10 rounded-button transition-colors"
                   >
                     <Mail size={15} />
@@ -196,6 +198,7 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
                 <button
                   onClick={() => setMetadataModal({ mode: 'edit', doc })}
                   title={t.doc_edit}
+                  aria-label={t.doc_edit}
                   className="p-1.5 text-sage-400 hover:text-sage-600 hover:bg-sage-100 rounded-button transition-colors"
                 >
                   <Edit2 size={15} />
@@ -203,6 +206,7 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
                 <button
                   onClick={() => handleDelete(doc)}
                   title={t.doc_delete}
+                  aria-label={t.doc_delete}
                   className="p-1.5 text-sage-400 hover:text-danger hover:bg-danger/10 rounded-button transition-colors"
                 >
                   <Trash2 size={15} />

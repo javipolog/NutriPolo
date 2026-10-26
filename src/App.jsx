@@ -33,27 +33,20 @@ const WhatsNewModal = () => {
   };
 
   return (
-    <Modal open={open} onClose={handleClose} title={`Novedades en NutriPolo v${APP_VERSION}`} size="sm">
+    <Modal open={open} onClose={handleClose} title={t.whats_new_title.replace('{version}', APP_VERSION)} size="sm">
       <div className="space-y-4">
         <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
           <Bell size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">Recordatorios de citas por email y WhatsApp</p>
-            <p className="text-xs text-sage-600 mt-1">
-              Nuevo panel <strong>"Recordatorios"</strong> en Inicio: un clic abre WhatsApp con el mensaje
-              escrito, y los emails pueden enviarse solos. Configúralo en <strong>Ajustes → Recordatorios de citas</strong>
-              (el envío automático de emails viene desactivado hasta que lo actives).
-            </p>
+            <p className="text-sm font-semibold text-sage-800">{t.whats_new_reminders_title}</p>
+            <p className="text-xs text-sage-600 mt-1">{t.whats_new_reminders_desc}</p>
           </div>
         </div>
         <div className="flex items-start gap-3 p-3 bg-sand-50 border border-sand-200 rounded-soft">
           <ShieldCheck size={18} className="text-sand-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">Más fiabilidad y seguridad</p>
-            <p className="text-xs text-sage-600 mt-1">
-              Guardado más seguro, sincronización con Google Calendar que ya no revierte citas completadas,
-              credenciales de Google en el almacén de Windows y modo oscuro corregido.
-            </p>
+            <p className="text-sm font-semibold text-sage-800">{t.whats_new_reliability_title}</p>
+            <p className="text-xs text-sage-600 mt-1">{t.whats_new_reliability_desc}</p>
           </div>
         </div>
 
@@ -62,7 +55,7 @@ const WhatsNewModal = () => {
             onClick={handleClose}
             className="px-4 py-2 bg-wellness-400 text-white text-sm font-medium rounded-button hover:bg-wellness-500 transition-colors"
           >
-            Entendido
+            {t.got_it}
           </button>
         </div>
       </div>
@@ -78,6 +71,7 @@ const UpdateChecker = () => {
   const [installing, setInstalling] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const toast = useToast();
+  const t = useT();
 
   const check = useCallback(async () => {
     try {
@@ -107,7 +101,7 @@ const UpdateChecker = () => {
       await installUpdate();
       await relaunch();
     } catch (e) {
-      toast.error('Error al actualizar: ' + (e?.message || String(e)));
+      toast.error(t.update_error.replace('{error}', e?.message || String(e)));
       setInstalling(false);
     }
   };
@@ -115,22 +109,22 @@ const UpdateChecker = () => {
   if (!update || dismissed) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 max-w-sm animate-in slide-in-from-bottom">
+    <div role="status" className="fixed bottom-4 right-4 z-50 max-w-sm animate-in slide-in-from-bottom">
       <div className="bg-white border border-wellness-300 rounded-soft shadow-lg p-4 space-y-3">
         <div className="flex items-start gap-3">
           <Download size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-sage-800">
-              Nueva versión disponible
+              {t.update_available}
             </p>
             <p className="text-xs text-sage-600 mt-1">
-              NutriPolo <strong>v{update.version}</strong> está lista para instalar.
+              {t.update_ready.replace('{version}', update.version)}
             </p>
             {update.body && (
               <p className="text-xs text-sage-500 mt-1">{update.body}</p>
             )}
           </div>
-          <button onClick={() => setDismissed(true)} className="text-sage-400 hover:text-sage-600 p-0.5">
+          <button onClick={() => setDismissed(true)} aria-label={t.close} className="text-sage-400 hover:text-sage-600 p-0.5">
             <X size={14} />
           </button>
         </div>
@@ -139,7 +133,7 @@ const UpdateChecker = () => {
             onClick={() => setDismissed(true)}
             className="px-3 py-1.5 text-xs text-sage-600 hover:text-sage-800 transition-colors"
           >
-            Más tarde
+            {t.update_later}
           </button>
           <button
             onClick={handleInstall}
@@ -149,10 +143,10 @@ const UpdateChecker = () => {
             {installing ? (
               <>
                 <RefreshCw size={12} className="animate-spin" />
-                Instalando...
+                {t.update_installing}
               </>
             ) : (
-              'Actualizar ahora'
+              t.update_now
             )}
           </button>
         </div>
@@ -162,11 +156,14 @@ const UpdateChecker = () => {
 };
 
 // Lazy-loaded views (created in later phases — placeholders until implemented)
-const LazyView = ({ name }) => (
-  <div className="flex items-center justify-center h-64 text-sage-500 text-sm">
-    Vista "{name}" en construcción...
-  </div>
-);
+const LazyView = () => {
+  const t = useT();
+  return (
+    <div className="flex items-center justify-center h-64 text-sage-500 text-sm">
+      {t.loading}
+    </div>
+  );
+};
 
 // ============================================
 // INTEGRITY WARNING BANNER
@@ -174,19 +171,20 @@ const LazyView = ({ name }) => (
 const IntegrityWarningBanner = () => {
   const integrityWarnings = useStore(s => s.integrityWarnings);
   const [dismissed, setDismissed] = useState(false);
+  const t = useT();
   if (!integrityWarnings?.length || dismissed) return null;
   return (
-    <div className="bg-warning-light border-b border-warning/20 px-6 py-3 flex items-start gap-3">
+    <div role="alert" className="bg-warning-light border-b border-warning/20 px-6 py-3 flex items-start gap-3">
       <AlertTriangle size={16} className="text-warning mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="text-warning-dark text-sm font-medium">Advertencias de integridad de datos</p>
+        <p className="text-warning-dark text-sm font-medium">{t.integrity_warnings_title}</p>
         <ul className="mt-1 space-y-0.5">
           {integrityWarnings.map((w, i) => (
             <li key={i} className="text-warning text-xs">{w.message}</li>
           ))}
         </ul>
       </div>
-      <button onClick={() => setDismissed(true)} className="p-1 text-warning hover:text-warning-dark transition-colors shrink-0">
+      <button onClick={() => setDismissed(true)} aria-label={t.close} className="p-1 text-warning hover:text-warning-dark transition-colors shrink-0">
         <X size={14} />
       </button>
     </div>
@@ -198,14 +196,15 @@ const IntegrityWarningBanner = () => {
 // ============================================
 const SaveErrorBanner = () => {
   const saveError = useStore(s => s.saveError);
+  const t = useT();
   if (!saveError) return null;
   return (
-    <div className="bg-danger-light border-b border-danger/20 px-6 py-3 flex items-start gap-3">
+    <div role="alert" className="bg-danger-light border-b border-danger/20 px-6 py-3 flex items-start gap-3">
       <AlertTriangle size={16} className="text-danger mt-0.5 shrink-0" />
       <div className="flex-1 min-w-0">
-        <p className="text-danger text-sm font-medium">No se pudieron guardar los últimos cambios</p>
+        <p className="text-danger text-sm font-medium">{t.save_error_title}</p>
         <p className="text-danger text-xs mt-0.5">
-          Se reintentará automáticamente. No cierres la aplicación hasta que desaparezca este aviso. ({saveError})
+          {t.save_error_desc} ({saveError})
         </p>
       </div>
     </div>
@@ -273,7 +272,7 @@ function ViewLoader({ view }) {
   }, [view]);
 
   const Component = components[view];
-  if (!Component) return <LazyView name={view} />;
+  if (!Component) return <LazyView />;
   return <Component />;
 }
 
@@ -422,9 +421,11 @@ function AppContent() {
   ];
 
   const toastRef = useRef(toast);
+  const tRef = useRef(t);
   const histRef = useRef(_history);
   const futRef = useRef(_future);
   toastRef.current = toast;
+  tRef.current = t;
   histRef.current = _history;
   futRef.current = _future;
 
@@ -440,13 +441,13 @@ function AppContent() {
       const key = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        if (histRef.current.length > 0) { undo(); toastRef.current.info('Acción deshecha', 3000); }
+        if (histRef.current.length > 0) { undo(); toastRef.current.info(tRef.current.undo_done, 3000); }
         return;
       }
       // With Shift held the key arrives as 'Z'.
       if ((e.ctrlKey || e.metaKey) && (key === 'y' || (key === 'z' && e.shiftKey))) {
         e.preventDefault();
-        if (futRef.current.length > 0) { redo(); toastRef.current.info('Acción rehecha', 3000); }
+        if (futRef.current.length > 0) { redo(); toastRef.current.info(tRef.current.redo_done, 3000); }
         return;
       }
       if (e.ctrlKey || e.metaKey) {
@@ -493,19 +494,23 @@ function AppContent() {
             <button
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               className="p-1.5 rounded-button text-sage-500 hover:text-sage-800 hover:bg-sage-200 transition-colors"
-              title={sidebarCollapsed ? 'Expandir' : 'Colapsar'}
+              title={sidebarCollapsed ? t.sidebar_expand : t.sidebar_collapse}
+              aria-label={sidebarCollapsed ? t.sidebar_expand : t.sidebar_collapse}
+              aria-expanded={!sidebarCollapsed}
             >
               {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
             </button>
           </div>
 
           {/* Nav */}
-          <nav className="flex-1 p-2">
+          <nav className="flex-1 p-2" aria-label={t.main_navigation}>
             <ul className="space-y-0.5">
               {navItems.map(item => (
                 <li key={item.id}>
                   <button
                     onClick={() => setCurrentView(item.id)}
+                    aria-current={currentView === item.id ? 'page' : undefined}
+                    aria-label={sidebarCollapsed ? item.label : undefined}
                     className={`relative w-full flex items-center gap-3 rounded-button transition-colors duration-150 group ${
                       sidebarCollapsed ? 'justify-center p-3' : 'px-3 py-2.5'
                     } ${currentView === item.id
@@ -558,14 +563,14 @@ function AppContent() {
             <div className="p-3 border-t border-sage-300">
               <div className="bg-sage-50 border border-sage-300 rounded-soft p-3 mb-2">
                 <p className="text-sm font-medium text-sage-900 truncate">{config.nombre}</p>
-                <p className="text-xs text-sage-500 mt-0.5">Col. {config.numColegiada}</p>
+                <p className="text-xs text-sage-500 mt-0.5">{t.sidebar_colegiada} {config.numColegiada}</p>
               </div>
               <button
                 onClick={() => setShowCommandPalette(true)}
                 className="w-full flex items-center gap-2 px-3 py-2 rounded-button text-sage-500 hover:text-sage-800 hover:bg-sage-200 transition-colors text-xs"
               >
                 <Search size={12} />
-                <span className="flex-1 text-left">Buscar...</span>
+                <span className="flex-1 text-left">{t.search_placeholder}</span>
                 <kbd className="text-[10px] px-1.5 py-0.5 bg-sage-200 rounded border border-sage-300 text-sage-500">Ctrl+K</kbd>
               </button>
             </div>
@@ -574,7 +579,8 @@ function AppContent() {
               <button
                 onClick={() => setShowCommandPalette(true)}
                 className="w-full flex items-center justify-center p-2.5 rounded-button text-sage-500 hover:text-sage-800 hover:bg-sage-200 transition-colors"
-                title="Buscar (Ctrl+K)"
+                title={`${t.search} (Ctrl+K)`}
+                aria-label={t.search}
               >
                 <Search size={17} />
               </button>
@@ -615,6 +621,7 @@ function AppContent() {
  */
 function EncryptionGate() {
   const [phase, setPhase] = useState('checking');
+  const t = useT();
 
   // Phase 1 — check encryption state on mount
   useEffect(() => {
@@ -665,7 +672,7 @@ function EncryptionGate() {
         <div className="text-center">
           <Spinner size="lg" />
           <p className="text-sage-600 mt-4 text-sm">
-            {phase === 'checking' ? 'Comprobando seguridad...' : 'Descifrando datos...'}
+            {phase === 'checking' ? t.gate_checking : t.gate_decrypting}
           </p>
         </div>
       </div>

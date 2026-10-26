@@ -2,7 +2,7 @@
 
 Revisión completa de frontend (`src/`), backend Rust (`src-tauri/`) y configuración.
 Severidad: **A** alta (pérdida de datos, seguridad, datos incorrectos) · **M** media · **B** baja.
-Columna *Estado*: `PR1`…`PR4` = corregido en esa fase · `backlog` = pendiente.
+Columna *Estado*: `PR1`…`PR5` = corregido en esa fase · `backlog` = pendiente.
 
 Las referencias `archivo:línea` corresponden a la versión 1.9.0 (commit `fb337961`).
 
@@ -125,19 +125,19 @@ Las referencias `archivo:línea` corresponden a la versión 1.9.0 (commit `fb337
 
 ## 6. i18n
 
-- ~250 de 461 claves ES nunca se usan: hay grupos enteros traducidos (`inbox_*`, `gcal_*`, `smtp_*`, `dashboard_*`…) mientras los componentes siguen con texto en español fijo (`PatientSuggestionsInbox`, `Dashboard`, `CalendarView`, `SettingsView`, `App.jsx`, `UI.jsx`). **backlog**
+- ~250 de 461 claves ES nunca se usan: hay grupos enteros traducidos (`inbox_*`, `gcal_*`, `smtp_*`, `dashboard_*`…) mientras los componentes siguen con texto en español fijo (`PatientSuggestionsInbox`, `Dashboard`, `CalendarView`, `SettingsView`, `App.jsx`, `UI.jsx`). **PR5**: esos seis ficheros ya usan `t.*` (claves nuevas en ES/CA/EN, plurales con `plural()`), y CA/EN ya no tienen huecos frente a ES. Quedan textos fijos en otros componentes (`NutritionPlanEditor`, `InvoiceModal`, `ConsultationModal`, `ClientModal`, `MeasurementChart`, `ServicesView`…) y 158 claves ES sin usar, casi todas de esas pantallas. backlog
 - Claves usadas que no existen: `search_placeholder`, `settings_personal`. **PR3**
 - Claves usadas que faltan en CA: `consultation_status`, `consultation_measurement`, `settings_email`, `settings_appearance`. **PR3**
-- Fechas con `es-ES` y nombres de mes/día fijos (`Dashboard.jsx:20,41`, `CalendarView.jsx:11-12`…). **backlog**
+- Fechas con `es-ES` y nombres de mes/día fijos (`Dashboard.jsx:20,41`, `CalendarView.jsx:11-12`…). **PR5**: `useLocale()` + `Intl` en `Dashboard`, `CalendarView` y el diagnóstico de `SettingsView`. Quedan `ConsultationModal.jsx:311-312` e `InvoiceModal.jsx:137`. backlog
 
-## 7. Accesibilidad (todo backlog)
+## 7. Accesibilidad
 
-- `Modal`/`ConfirmModal` (`UI.jsx:158-192,334-357`): sin Escape, sin `role="dialog"`/`aria-modal`, sin trampa de foco.
-- Etiquetas no vinculadas a sus inputs (`htmlFor`/`id`) en `UI.jsx:266-314`.
-- `<div onClick>` sin soporte de teclado (`CalendarView`, `ClientsView:142`, `UI.jsx:325`).
-- `text-sage-400` sobre blanco ≈ 2,3:1 de contraste (no cumple AA).
-- Botones solo con icono sin `aria-label` (`ClientsView`, `Invoices`, `NutritionPlanEditor`, `ServicesView`, `CalendarView`, `SettingsView`, `UI.jsx`).
-- Pestañas sin `role="tablist"`; interruptor sin `role="switch"`.
+- `Modal`/`ConfirmModal` (`UI.jsx:158-192,334-357`): sin Escape, sin `role="dialog"`/`aria-modal`, sin trampa de foco. **PR5**: Escape (solo el diálogo superior), `role="dialog"`/`alertdialog` + `aria-modal` + `aria-labelledby`, foco inicial (primer campo; en `ConfirmModal` destructivo, Cancelar), trampa de Tab y foco devuelto al cerrar. El diálogo de migración de `SettingsView` pasa a usar `Modal`.
+- Etiquetas no vinculadas a sus inputs (`htmlFor`/`id`) en `UI.jsx:266-314`. **PR5**: `Input`/`Textarea`/`Select` generan `id` con `useId` y enlazan `aria-invalid`/`aria-describedby` al error. En `SettingsView` las etiquetas sueltas ya apuntan a su campo.
+- `<div onClick>` sin soporte de teclado (`CalendarView`, `ClientsView:142`, `UI.jsx:325`). **PR5**: `clickableProps()` (rol `button`, `tabIndex`, Enter/Espacio) en `Card` y en las citas del calendario y la lista. En `ClientsView:142` el botón «Perfil del cliente» de la fila es el acceso por teclado. Las celdas vacías del calendario siguen siendo solo de ratón (el botón «Nueva cita» cubre esa acción).
+- `text-sage-400` sobre blanco ≈ 2,3:1 de contraste (no cumple AA). backlog (requiere decidir la paleta)
+- Botones solo con icono sin `aria-label` (`ClientsView`, `Invoices`, `NutritionPlanEditor`, `ServicesView`, `CalendarView`, `SettingsView`, `UI.jsx`). **PR5** (también `ClientDocuments`, `ClientDetailView`, `CommandPalette`, `InvoiceModal`, `MeasurementChart`, `App.jsx`).
+- Pestañas sin `role="tablist"`; interruptor sin `role="switch"`. **PR5**: pestañas de `ClientDetailView` con `tablist`/`tab`/`tabpanel` y flechas; `role="switch"` en la sincronización automática y en el activo/inactivo de servicios; `aria-pressed` en los selectores de vista, tema, idioma y paleta.
 
 ## 8. Código muerto
 

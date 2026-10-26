@@ -170,24 +170,31 @@ export const ClientsView = () => {
                 <button
                   onClick={() => openWhatsApp(client)}
                   title={t.whatsapp_open}
+                  aria-label={`${t.whatsapp_open}: ${client.nombre}`}
                   className="p-2 rounded-button text-sage-400 hover:text-success hover:bg-success-light transition-colors"
                 >
                   <MessageCircle size={15} />
                 </button>
                 <button
                   onClick={() => { setEditClient(client); setShowModal(true); }}
+                  title={t.edit}
+                  aria-label={`${t.edit}: ${client.nombre}`}
                   className="p-2 rounded-button text-sage-400 hover:text-sage-700 hover:bg-sage-100 transition-colors"
                 >
                   <Edit2 size={15} />
                 </button>
                 <button
                   onClick={() => handleDelete(client)}
+                  title={t.delete}
+                  aria-label={`${t.delete}: ${client.nombre}`}
                   className="p-2 rounded-button text-sage-400 hover:text-danger hover:bg-danger-light transition-colors"
                 >
                   <Trash2 size={15} />
                 </button>
                 <button
                   onClick={() => setSelectedClientId(client.id)}
+                  title={t.client_profile}
+                  aria-label={`${t.client_profile}: ${client.nombre}`}
                   className="p-2 rounded-button text-sage-400 hover:text-wellness-500 hover:bg-wellness-50 transition-colors"
                 >
                   <ChevronRight size={15} />

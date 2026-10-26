@@ -226,7 +226,7 @@ export const CommandPalette = ({ open, onClose }) => {
             className="flex-1 bg-transparent text-sage-900 placeholder-sage-500 outline-none text-sm"
           />
           {query && (
-            <button onClick={() => setQuery('')} className="text-sage-500 hover:text-sage-700">
+            <button onClick={() => setQuery('')} aria-label={t.clear_search} title={t.clear_search} className="text-sage-500 hover:text-sage-700">
               <X size={16} />
             </button>
           )}

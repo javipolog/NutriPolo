@@ -39,6 +39,7 @@ const MacroBar = ({ proteinas, carbohidratos, grasas }) => {
 // Single meal slot
 // ─────────────────────────────────────────────────────────────
 const MealSlot = ({ meal, index, onChange, onDelete }) => {
+  const t = useT();
   const [collapsed, setCollapsed] = useState(false);
   const set = (k, v) => onChange({ ...meal, [k]: v });
 
@@ -82,7 +83,7 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
           />
         </div>
         <span className="text-xs text-sage-400">{(meal.opciones || []).length} opción{(meal.opciones || []).length !== 1 ? 'es' : ''}</span>
-        <button onClick={onDelete} className="p-1 text-sage-300 hover:text-danger transition-colors">
+        <button onClick={onDelete} aria-label={t.plan_delete_meal} title={t.plan_delete_meal} className="p-1 text-sage-300 hover:text-danger transition-colors">
           <Trash2 size={13} />
         </button>
       </div>
@@ -94,7 +95,7 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
             <div key={opt.id} className="border border-sage-100 rounded-button p-3 space-y-2 bg-sage-50">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-medium text-sage-500">Opción {i + 1}</span>
-                <button onClick={() => removeOption(opt.id)} className="text-sage-300 hover:text-danger">
+                <button onClick={() => removeOption(opt.id)} aria-label={t.plan_remove_option} title={t.plan_remove_option} className="text-sage-300 hover:text-danger">
                   <X size={12} />
                 </button>
               </div>
@@ -494,7 +495,8 @@ export const NutritionPlanEditor = () => {
                       } catch (e) { toast.error('Error al generar PDF: ' + errMsg(e)); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
-                    title="Descargar PDF"
+                    title={t.download_pdf}
+                    aria-label={t.download_pdf}
                   >
                     <Download size={14} />
                   </button>
@@ -524,7 +526,8 @@ export const NutritionPlanEditor = () => {
                       } catch (e) { toast.error('Error: ' + errMsg(e)); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
-                    title={t.doc_save_to_client || 'Guardar en documentos del cliente'}
+                    title={t.doc_save_to_client}
+                    aria-label={t.doc_save_to_client}
                   >
                     <FolderDown size={14} />
                   </button>
@@ -538,18 +541,23 @@ export const NutritionPlanEditor = () => {
                       } catch (e) { toast.error('Error al generar PDF: ' + errMsg(e)); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
-                    title="Enviar por email"
+                    title={t.send_by_email}
+                    aria-label={t.send_by_email}
                   >
                     <Mail size={14} />
                   </button>
                   <button
                     onClick={() => { setEditPlan(plan); setShowModal(true); }}
+                    title={t.edit}
+                    aria-label={`${t.edit}: ${plan.nombre || ''}`}
                     className="p-1.5 rounded-button text-sage-400 hover:text-sage-700 hover:bg-sage-100 transition-colors"
                   >
                     <Edit2 size={14} />
                   </button>
                   <button
                     onClick={() => handleDelete(plan)}
+                    title={t.delete}
+                    aria-label={`${t.delete}: ${plan.nombre || ''}`}
                     className="p-1.5 rounded-button text-sage-400 hover:text-danger hover:bg-danger-light transition-colors"
                   >
                     <Trash2 size={14} />
