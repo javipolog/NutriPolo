@@ -107,6 +107,16 @@ body,
 [data-theme="dark"] .bg-sand-300   { background-color: #4A4840; }
 [data-theme="dark"] .bg-sand-400   { background-color: #5A5750; }
 
+/* Semantic tints (alerts, badges) — dark versions */
+[data-theme="dark"] .bg-success-light { background-color: #16301F; }
+[data-theme="dark"] .bg-warning-light { background-color: #33290F; }
+[data-theme="dark"] .bg-danger-light  { background-color: #3A1B1B; }
+[data-theme="dark"] .bg-info-light    { background-color: #182A3D; }
+[data-theme="dark"] .text-warning-dark { color: #E9C46A; }
+[data-theme="dark"] .text-success-dark { color: #7FD3A0; }
+[data-theme="dark"] .text-danger-dark  { color: #F08A8A; }
+[data-theme="dark"] .text-info-dark    { color: #8DB8E8; }
+
 /* Terra (accent) en dark mode — lleugerament més clar */
 [data-theme="dark"] .bg-terra-50   { background-color: #352520; }
 [data-theme="dark"] .bg-terra-400  { background-color: #C87050; }

@@ -6,12 +6,11 @@ import {
 import {
     Calendar, Users, ClipboardList, Receipt, MapPin,
     AlertTriangle, CheckCircle, CheckCircle2, Clock, ArrowRight,
-    UserPlus, Activity, Bell, TrendingUp, MessageCircle
+    UserPlus, Activity, Bell, TrendingUp
 } from 'lucide-react';
-import { Card, StatCard, Button, EmptyState, StatusBadge, useToast } from './UI';
+import { Card, StatCard, Button, EmptyState, StatusBadge } from './UI';
 import useStore, { formatCurrency, formatDate, formatDateShort, filterVisibleConsultations } from '../stores/store';
-import { useT } from '../i18n';
-import { openWhatsAppReminder } from '../services/whatsappService';
+import { RemindersPanel } from './RemindersPanel';
 
 /* ============================================
    CONSTANTS
@@ -155,27 +154,11 @@ const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expirin
    ============================================ */
 
 const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
-    const config = useStore(s => s.config);
-    const updateConsultation = useStore(s => s.updateConsultation);
-    const t = useT();
-    const toast = useToast();
-
     const clientsById = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
     const locationsById = useMemo(
         () => new Map((locations || []).map(l => [l.id, l])),
         [locations]
     );
-
-    const locationName = (id) => config.locations?.find(l => l.id === id)?.name || id || '';
-
-    const handleWhatsAppReminder = (consultation, client) => {
-        const result = openWhatsAppReminder({ client, consultation, config, locationName });
-        if (result.error === 'no_phone') { toast.error(t.whatsapp_no_phone); return; }
-        if (result.success) {
-            updateConsultation(consultation.id, { lastWhatsappReminder: new Date().toISOString() });
-            toast.success(t.whatsapp_reminder_sent);
-        }
-    };
 
     return (
         <Card className="p-6 h-full">
@@ -222,15 +205,6 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                                         )}
                                     </p>
                                 </div>
-                                {c.estado === 'programada' && client && (
-                                    <button
-                                        onClick={() => handleWhatsAppReminder(c, client)}
-                                        title={t.whatsapp_reminder}
-                                        className="p-1.5 rounded-button text-sage-400 hover:text-success hover:bg-success-light transition-colors shrink-0"
-                                    >
-                                        <MessageCircle size={14} className={c.lastWhatsappReminder ? 'text-success' : ''} />
-                                    </button>
-                                )}
                                 <span className={`text-xs font-medium px-2 py-0.5 rounded-badge shrink-0 ${
                                     c.estado === 'completada' ? 'bg-success-light text-success' :
                                     c.estado === 'cancelada'  ? 'bg-danger-light text-danger' :
@@ -753,6 +727,8 @@ export const Dashboard = () => {
                     />
                 </div>
             </div>
+
+            <RemindersPanel onNavigate={setCurrentView} />
 
             <QuickActions onNavigate={setCurrentView} />
 

@@ -2,8 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { Button, Modal, Input, Textarea, useToast } from './UI';
 import useStore, { todayISO } from '../stores/store';
 import { useT } from '../i18n';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Mail, MessageCircle } from 'lucide-react';
 import { googleCalendar } from '../services/googleCalendarService';
+import { reminderSlot } from '../services/reminderService';
+import { useReminderActions } from '../hooks/useReminderActions';
+import { SendEmailModal } from './SendEmailModal';
 
 export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, defaultHora, onClose }) => {
   const clients = useStore(s => s.clients);
@@ -16,6 +19,23 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const t = useT();
   const toast = useToast();
   const isEdit = !!consultation;
+
+  // Reminders act on the saved consultation (live from the store).
+  const liveConsultation = useStore(s => consultation ? s.consultations.find(c => c.id === consultation.id) : null);
+  const reminderClient = liveConsultation?.estado === 'programada'
+    ? clients.find(c => c.id === liveConsultation.clienteId) : null;
+  const { sendWhatsApp } = useReminderActions();
+  const [showReminderEmail, setShowReminderEmail] = useState(false);
+  const reminderInfo = useMemo(() => {
+    if (!liveConsultation?.reminders) return '';
+    const slot = reminderSlot(liveConsultation);
+    const fmt = (iso) => new Date(iso).toLocaleString(undefined, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return ['email', 'whatsapp']
+      .map(ch => liveConsultation.reminders[ch])
+      .map((r, i) => (r && r.slot === slot && r.at ? `${i === 0 ? 'Email' : 'WhatsApp'} ${fmt(r.at)}` : null))
+      .filter(Boolean)
+      .join(' · ');
+  }, [liveConsultation]);
 
   // Determine if the source calendar is read-only (external-clinic or personal).
   // In that case, fecha/hora/duracion come from Google and must not be overwritten locally.
@@ -294,10 +314,30 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
         </p>
       )}
 
-      <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
+      <div className="flex flex-wrap items-center justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
+        {reminderClient && (
+          <div className="flex flex-wrap items-center gap-1 mr-auto">
+            <span className="text-xs text-sage-500 mr-1">{t.reminders_panel_title}:</span>
+            <Button variant="ghost" size="sm" icon={Mail} onClick={() => setShowReminderEmail(true)}>Email</Button>
+            <Button variant="ghost" size="sm" icon={MessageCircle} onClick={() => sendWhatsApp(liveConsultation, reminderClient)}>WhatsApp</Button>
+            {reminderInfo && <span className="text-[11px] text-sage-400">{t.reminders_last_sent} {reminderInfo}</span>}
+          </div>
+        )}
         <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
         <Button variant="primary" onClick={handleSave}>{t.save}</Button>
       </div>
+
+      {showReminderEmail && reminderClient && (
+        <SendEmailModal
+          mode="appointment"
+          client={reminderClient}
+          consultation={liveConsultation}
+          onSent={({ manual }) => useStore.getState().setConsultationReminder(liveConsultation.id, 'email', {
+            status: manual ? 'manual' : 'sent', at: new Date().toISOString(), slot: reminderSlot(liveConsultation),
+          })}
+          onClose={() => setShowReminderEmail(false)}
+        />
+      )}
     </Modal>
   );
 };

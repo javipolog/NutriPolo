@@ -12,6 +12,7 @@ import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../servi
 import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
+import { RemindersSection } from './settings/RemindersSection';
 import { invoke } from '@tauri-apps/api/tauri';
 
 // ── Locations CRUD ─────────────────────────────────────────────────────────
@@ -1666,8 +1667,8 @@ const InvoiceDesignSection = () => {
   );
 };
 
-const Section = ({ title, children }) => (
-  <div className="bg-white border border-sage-200 rounded-soft shadow-card p-5 space-y-4">
+const Section = ({ title, children, id }) => (
+  <div id={id} className="bg-white border border-sage-200 rounded-soft shadow-card p-5 space-y-4 scroll-mt-4">
     <h2 className="text-sm font-semibold text-sage-700 border-b border-sage-100 pb-2">{title}</h2>
     {children}
   </div>
@@ -1832,21 +1833,15 @@ export const SettingsView = () => {
       </Section>
 
       {/* Email / SMTP */}
-      <Section title={t.settings_email}>
+      <Section title={t.settings_email} id="settings-smtp">
         <SmtpSection />
       </Section>
 
-      {/* WhatsApp */}
-      <Section title="WhatsApp">
-        <div className="max-w-xs">
-          <label className="block text-xs font-medium text-sage-600 mb-1">{t.whatsapp_country_code}</label>
-          <Input
-            value={config.whatsappCountryCode || '34'}
-            onChange={e => set('whatsappCountryCode', e.target.value.replace(/\D/g, '').slice(0, 4))}
-            placeholder="34"
-          />
-          <p className="text-xs text-sage-400 mt-1">España: 34 · México: 52 · Argentina: 54</p>
-        </div>
+      {/* Appointment reminders (email + WhatsApp) */}
+      <Section title={t.reminders_title} id="settings-reminders">
+        <RemindersSection
+          onGoToSmtp={() => document.getElementById('settings-smtp')?.scrollIntoView({ behavior: 'smooth' })}
+        />
       </Section>
 
       {/* Appearance */}

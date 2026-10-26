@@ -93,6 +93,8 @@ export const ClientModal = ({ client, onClose }) => {
     notas: '', estado: 'activo',
     alergias: [], intolerancias: [], patologias: [],
     objetivos: [], restriccionesDieteticas: [],
+    recordatorios: { email: true, whatsapp: true },
+    idioma: '',
     ...client,
   });
   const [errors, setErrors] = useState({});
@@ -103,6 +105,7 @@ export const ClientModal = ({ client, onClose }) => {
   const validate = () => {
     const e = {};
     if (!form.nombre.trim()) e.nombre = t.error_required;
+    if (form.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = t.error_invalid_email;
     return e;
   };
 
@@ -159,7 +162,7 @@ export const ClientModal = ({ client, onClose }) => {
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.email}</label>
-            <Input value={form.email} onChange={e => set('email', e.target.value)} type="email" />
+            <Input value={form.email} onChange={e => set('email', e.target.value)} type="email" error={errors.email} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.phone}</label>
@@ -167,11 +170,37 @@ export const ClientModal = ({ client, onClose }) => {
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.whatsapp}</label>
-            <Input value={form.whatsapp} onChange={e => set('whatsapp', e.target.value)} placeholder="Sin prefijo +34" />
+            <Input value={form.whatsapp} onChange={e => set('whatsapp', e.target.value)} placeholder={t.client_whatsapp_placeholder} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_nif}</label>
             <Input value={form.nif} onChange={e => set('nif', e.target.value)} />
+          </div>
+          <div className="col-span-2 flex flex-wrap items-center gap-x-5 gap-y-2 p-3 bg-sage-50 border border-sage-200 rounded-soft">
+            <span className="text-xs font-medium text-sage-600">{t.client_reminders}</span>
+            {['email', 'whatsapp'].map(ch => (
+              <label key={ch} className="flex items-center gap-1.5 text-xs text-sage-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.recordatorios?.[ch] !== false}
+                  onChange={e => set('recordatorios', { ...(form.recordatorios || {}), [ch]: e.target.checked })}
+                />
+                {ch === 'email' ? 'Email' : 'WhatsApp'}
+              </label>
+            ))}
+            <label className="flex items-center gap-1.5 text-xs text-sage-600 ml-auto">
+              {t.client_language}
+              <select
+                value={form.idioma || ''}
+                onChange={e => set('idioma', e.target.value)}
+                className="px-2 py-1 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
+              >
+                <option value="">{t.client_language_default}</option>
+                <option value="es">Castellano</option>
+                <option value="ca">Català</option>
+                <option value="en">English</option>
+              </select>
+            </label>
           </div>
           <div className="col-span-2">
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_street}</label>

@@ -2,11 +2,11 @@
 
 ## Descripcion del Projecte
 
-Aplicacio d'escriptori per a Windows 11 per a la gestio de consultes de nutricionistes. Desenvolupada amb **Tauri 1.5** (Rust + React), permet gestionar clients, consultes, plans nutricionals, facturacio, mesures corporals, documents i integracio amb Google Calendar.
+Aplicacio d'escriptori per a Windows 11 per a la gestio de consultes de nutricionistes. Desenvolupada amb **Tauri 1.5** (Rust + React), permet gestionar clients, consultes, plans nutricionals, facturacio, mesures corporals, documents, integracio amb Google Calendar i recordatoris de cites (email + WhatsApp).
 
 **Autor:** Javier Polo Garcia
 **Llicencia:** MIT
-**Versio:** 1.0.0
+**Versio:** 1.10.0
 **Identificador:** com.nutripolo.app
 
 ---
@@ -53,31 +53,44 @@ nutripolo-app/
 │   │   ├── InvoiceModal.jsx          # Modal creacio/edicio factures
 │   │   ├── Invoices.jsx              # Llistat de factures
 │   │   ├── MeasurementChart.jsx      # Grafic d'evolucio de mesures
+│   │   ├── LoadErrorScreen.jsx       # Pantalla si el fitxer de dades no es pot llegir
 │   │   ├── NutritionPlanEditor.jsx   # Editor de plans nutricionals + PDF
+│   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
+│   │   ├── RemindersPanel.jsx        # Panell de recordatoris (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
 │   │   ├── ServicesView.jsx          # Gestio de serveis/tarifes
 │   │   ├── SettingsView.jsx          # Configuracio de l'app
+│   │   ├── settings/RemindersSection.jsx # Ajustos de recordatoris
+│   │   ├── UnlockScreen.jsx          # Desbloqueig (xifratge AES-256)
 │   │   └── UI.jsx                    # Components base reutilitzables (toast, confirm, etc.)
+│   │
+│   ├── hooks/
+│   │   ├── useBackgroundJobs.js      # Auto-sync GCal + enviament automatic de recordatoris
+│   │   ├── useReminderActions.js     # Accions de recordatori (WhatsApp / email) amb registre
+│   │   └── useNow.js                 # Rellotge que es refresca
 │   │
 │   ├── services/                     # Serveis de negoci
 │   │   ├── documentService.js        # Upload/open/delete documents via Tauri
 │   │   ├── emailService.js           # Enviament d'emails via SMTP
 │   │   ├── googleCalendarService.js  # Sync bidireccional amb Google Calendar
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
+│   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
-│   │   └── pdfPlanGenerator.js       # Generacio PDF plans nutricionals (pdf-lib)
+│   │   ├── pdfPlanGenerator.js       # Generacio PDF plans nutricionals (pdf-lib)
+│   │   └── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
 │   │
 │   ├── stores/                       # Estat global (Zustand)
 │   │   └── store.js                  # Store unic amb totes les entitats
 │   │
 │   ├── App.jsx                       # Component arrel + navegacio per vistes
-│   ├── i18n.js                       # Traduccions ES/CA
+│   ├── i18n.js                       # Traduccions ES/CA/EN (fallback per clau a ES)
 │   ├── main.jsx                      # Punt d'entrada React
 │   └── styles.css                    # Estils globals Tailwind
 │
 ├── src-tauri/                        # Backend Rust
 │   ├── src/
-│   │   ├── main.rs                   # Comandes IPC: save/load, email SMTP, documents
+│   │   ├── main.rs                   # Comandes IPC: save/load, email SMTP, documents, keyring
+│   │   ├── encryption.rs             # AES-256-GCM + Argon2id
 │   │   └── google_calendar.rs        # OAuth2 + API Google Calendar
 │   ├── icons/                        # Icones de l'aplicacio
 │   ├── Cargo.toml                    # Dependencies Rust
@@ -110,6 +123,9 @@ npm run dev
 # Compilar frontend
 npm run build
 
+# Tests unitaris (vitest)
+npm test
+
 # Compilar aplicacio completa (.exe)
 npm run tauri:build
 
@@ -125,12 +141,21 @@ npm run preview
 
 ```rust
 // Dades
-fn save_data(app_handle, key, value) -> Result<(), String>
+fn save_data(app_handle, key, value) -> Result<(), String>      // escriptura atomica (.tmp + rename)
 fn load_data(app_handle, key) -> Result<String, String>
 fn delete_data(app_handle, key) -> Result<(), String>
+fn quarantine_data(app_handle, key) -> Result<(), String>       // mou un fitxer illegible a *.corrupt-<ts>
+
+// Secrets (Windows Credential Manager)
+fn store_smtp_password / get_smtp_password / clear_smtp_password / has_smtp_password
+fn secret_set(name, value) / secret_get(name) / secret_clear(name)  // nomes gcal_refresh_token, gcal_client_secret
+
+// Xifratge
+fn encryption_is_enabled / encryption_is_unlocked / encryption_setup / encryption_unlock
+fn encryption_lock / encryption_change_password
 
 // Fitxers
-fn open_file(path) -> Result<(), String>
+fn open_file(path) -> Result<(), String>   // nomes PDF; desxifra a temporal si cal
 fn copy_file_to_documents(app_handle, source_path, client_id, dest_filename) -> Result<String, String>
 fn read_file_as_base64(app_handle, path) -> Result<String, String>
 fn delete_document_file(app_handle, path) -> Result<(), String>
@@ -167,6 +192,15 @@ fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
 - **Zustand** amb persistencia automatica al filesystem via Tauri
 - Store unic (`store.js`) amb totes les entitats i accions
 - Undo/redo integrat (`_history`, `_future`)
+- Migracions a `migrateStore` (STORE_VERSION); `config` es fusiona amb els valors per defecte en hidratar
+- Si el fitxer de dades no es pot llegir, les escriptures queden bloquejades (`getLoadFailure`)
+- Canvis de sincronitzacio o de recordatoris no han de tocar `localUpdatedAt` (si no, es fa push a Google)
+
+### Recordatoris de cites
+- Configuracio a `config.reminders` (valors per defecte a `DEFAULT_REMINDER_CONFIG`)
+- Estat per consulta a `consultation.reminders.{email|whatsapp}` = `{ status, at, slot, attempts?, error? }`; `slot` = `fecha + 'T' + hora` (reprogramar torna a activar el recordatori)
+- Preferencies del client: `client.recordatorios.{email|whatsapp}` (opt-out) i `client.idioma`
+- Email automatic per SMTP des de `useBackgroundJobs` (cada 5 min, nomes amb l'app oberta); WhatsApp semiautomatic via wa.me
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada (sand, terra, wellness, sage)
@@ -201,7 +235,8 @@ Documents dels clients es guarden a `documents/<clientId>/`.
 - Validacio de magic bytes per PDFs
 - Limit de 50MB per document
 - Path traversal protection en lectura/eliminacio de documents
-- SMTP password gestionat en memoria (no persistit)
+- SMTP password i secrets de Google al Windows Credential Manager (mai al store ni als backups)
+- Scope de fs limitat (`$APP`, `$APPDATA`, carpetes d'usuari); els camins triats en dialegs s'afegeixen sols
 
 ---
 

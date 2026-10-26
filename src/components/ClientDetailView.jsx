@@ -8,7 +8,8 @@ import { ClientModal } from './ClientModal';
 import { MeasurementChart } from './MeasurementChart';
 import { ClientDocuments } from './ClientDocuments';
 import { SendEmailModal } from './SendEmailModal';
-import { openWhatsAppReminder } from '../services/whatsappService';
+import { openWhatsAppChat } from '../services/reminderService';
+import { useReminderActions } from '../hooks/useReminderActions';
 
 const OBJETIVO_LABELS = {
   perdida_grasa: 'Pérdida grasa', ganancia_muscular: 'Ganancia muscular',
@@ -32,7 +33,6 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const invoices = useStore(useShallow(s => s.invoices.filter(i => i.clienteId === clientId)));
   const measurements = useStore(useShallow(s => s.getClientMeasurements(clientId)));
   const config = useStore(s => s.config);
-  const updateConsultation = useStore(s => s.updateConsultation);
   const setCurrentView = useStore(s => s.setCurrentView);
 
   const t = useT();
@@ -40,6 +40,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const [tab, setTab] = useState('profile');
   const [showEdit, setShowEdit] = useState(false);
   const [emailDoc, setEmailDoc] = useState(null);
+  const { sendWhatsApp } = useReminderActions();
 
   // Client deleted while open: leave the view (side effect, not during render).
   useEffect(() => { if (!client) onBack(); }, [client, onBack]);
@@ -48,22 +49,9 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const lastMeasurement = measurements[measurements.length - 1];
   const currentIMC = lastMeasurement?.imc || (lastMeasurement?.peso && client.altura ? calcIMC(lastMeasurement.peso, client.altura) : null);
 
-  const openWhatsApp = () => {
-    const phone = (client.whatsapp || client.telefono || '').replace(/\D/g, '');
-    if (!phone) { toast.error(t.no_phone_number); return; }
-    const cc = (config.whatsappCountryCode || '34').replace(/\D/g, '');
-    window.open(`https://wa.me/${cc}${phone}`, '_blank');
-  };
-
-  const locationName = (id) => config.locations?.find(l => l.id === id)?.name || id || '';
-
-  const handleWhatsAppReminder = (consultation) => {
-    const result = openWhatsAppReminder({ client, consultation, config, locationName });
-    if (result.error === 'no_phone') { toast.error(t.whatsapp_no_phone); return; }
-    if (result.success) {
-      updateConsultation(consultation.id, { lastWhatsappReminder: new Date().toISOString() });
-      toast.success(t.whatsapp_reminder_sent);
-    }
+  const openWhatsApp = async () => {
+    const result = await openWhatsAppChat(client, config);
+    if (!result.success) toast.error(t.no_phone_number);
   };
 
   const TABS = [
@@ -216,11 +204,11 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                   </div>
                   {c.estado === 'programada' && (
                     <button
-                      onClick={() => handleWhatsAppReminder(c)}
+                      onClick={() => sendWhatsApp(c, client)}
                       title={t.whatsapp_reminder}
                       className="p-1.5 rounded-button text-sage-400 hover:text-success hover:bg-success-light transition-colors shrink-0"
                     >
-                      <MessageCircle size={14} className={c.lastWhatsappReminder ? 'text-success' : ''} />
+                      <MessageCircle size={14} className={c.reminders?.whatsapp ? 'text-success' : ''} />
                     </button>
                   )}
                   <span className={`text-xs px-2 py-0.5 rounded-badge ${

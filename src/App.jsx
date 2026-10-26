@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Sparkles, Download, RefreshCw } from 'lucide-react';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw, Bell, ShieldCheck } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
@@ -8,11 +8,13 @@ import { LoadErrorScreen } from './components/LoadErrorScreen';
 import useStore, { flushAllPending, getLoadFailure, syncGoogleSecrets } from './stores/store';
 import { useT } from './i18n';
 import { useBackgroundJobs } from './hooks/useBackgroundJobs';
+import { useNow } from './hooks/useNow';
+import { countPendingReminders } from './components/RemindersPanel';
 
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -31,29 +33,26 @@ const WhatsNewModal = () => {
   };
 
   return (
-    <Modal open={open} onClose={handleClose} title="Novedades en NutriPolo v1.9.0" size="sm">
+    <Modal open={open} onClose={handleClose} title={`Novedades en NutriPolo v${APP_VERSION}`} size="sm">
       <div className="space-y-4">
         <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
-          <Sparkles size={20} className="text-wellness-500 mt-0.5 shrink-0" />
+          <Bell size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">Detección automática de nuevos pacientes</p>
+            <p className="text-sm font-semibold text-sage-800">Recordatorios de citas por email y WhatsApp</p>
             <p className="text-xs text-sage-600 mt-1">
-              Cuando la clínica externa registre una consulta con un nombre desconocido,
-              la app lo detectará y lo mostrará en <strong>"Nuevos pacientes detectados"</strong>
-              para que puedas crear su ficha o vincularlo a un cliente existente.
-            </p>
-            <p className="text-xs text-sage-500 mt-1.5">
-              Las consultas pendientes de versiones anteriores se han recuperado automáticamente.
+              Nuevo panel <strong>"Recordatorios"</strong> en Inicio: un clic abre WhatsApp con el mensaje
+              escrito, y los emails pueden enviarse solos. Configúralo en <strong>Ajustes → Recordatorios de citas</strong>
+              (el envío automático de emails viene desactivado hasta que lo actives).
             </p>
           </div>
         </div>
         <div className="flex items-start gap-3 p-3 bg-sand-50 border border-sand-200 rounded-soft">
-          <RefreshCw size={18} className="text-sand-500 mt-0.5 shrink-0" />
+          <ShieldCheck size={18} className="text-sand-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">Nombres de pacientes más limpios</p>
+            <p className="text-sm font-semibold text-sage-800">Más fiabilidad y seguridad</p>
             <p className="text-xs text-sage-600 mt-1">
-              Los precios en el nombre del evento (ej. <em>"María García 35€"</em>) ya no
-              interfieren con la detección ni con el nombre sugerido al crear la ficha.
+              Guardado más seguro, sincronización con Google Calendar que ya no revierte citas completadas,
+              credenciales de Google en el almacén de Windows y modo oscuro corregido.
             </p>
           </div>
         </div>
@@ -300,6 +299,13 @@ function AppContent() {
       sg.status === 'pending' || sg.status === 'pending-confirm'
     ).length
   );
+  const consultations = useStore(s => s.consultations);
+  const clients = useStore(s => s.clients);
+  const now = useNow(60000);
+  const pendingReminders = useMemo(
+    () => countPendingReminders({ config, consultations, clients }, now),
+    [config, consultations, clients, now]
+  );
 
   const toast = useToast();
   const t = useT();
@@ -406,7 +412,7 @@ function AppContent() {
   }, [config.autoLockMinutes]);
 
   const navItems = [
-    { id: 'dashboard', icon: Home,          label: t.nav_dashboard, shortcut: '1' },
+    { id: 'dashboard', icon: Home,          label: t.nav_dashboard, shortcut: '1', badge: pendingReminders },
     { id: 'agenda',    icon: Calendar,      label: t.nav_agenda,    shortcut: '2' },
     { id: 'clients',   icon: Users,         label: t.nav_clients,   shortcut: '3', badge: pendingTotal },
     { id: 'plans',     icon: ClipboardList, label: t.nav_plans,     shortcut: '4' },

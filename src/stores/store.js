@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
+import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
 
 // ============================================
 // TAURI STORAGE — Write queue amb debounce
@@ -256,7 +257,7 @@ const DEFAULT_SERVICES = [
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 10;
+const STORE_VERSION = 11;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -284,7 +285,22 @@ export const DEFAULT_INVOICE_DESIGN = {
 function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
-  return box.state;
+  const s = box.state;
+  if (version < 11) {
+    // v10 → v11: appointment reminders. The old WhatsApp stamp becomes a
+    // reminder record (config.reminders defaults arrive via the config merge).
+    if (Array.isArray(s.consultations)) {
+      s.consultations = s.consultations.map(c => {
+        if (!c.lastWhatsappReminder) return c;
+        const { lastWhatsappReminder, ...rest } = c;
+        return {
+          ...rest,
+          reminders: { ...(c.reminders || {}), whatsapp: { status: 'opened', at: lastWhatsappReminder, slot: reminderSlot(c) } },
+        };
+      });
+    }
+  }
+  return s;
 }
 
 function migrateLegacy(persistedState, version) {
@@ -803,6 +819,7 @@ const useStore = create(
         tipoIva: 0,
         emailProvider: 'gmail',
         whatsappCountryCode: '34',
+        reminders: DEFAULT_REMINDER_CONFIG,
         googleCalendar: {
           connected: false,
           clientId: '',
@@ -1260,6 +1277,14 @@ const useStore = create(
           return { config: { ...s.config, googleCalendar: { ...s.config.googleCalendar, calendars } } };
         });
       },
+
+      // Reminder bookkeeping (channel: 'email' | 'whatsapp'). Written directly,
+      // without localUpdatedAt, so it never triggers a push to Google.
+      setConsultationReminder: (id, channel, info) => set(s => ({
+        consultations: s.consultations.map(c => c.id === id
+          ? { ...c, reminders: { ...(c.reminders || {}), [channel]: info } }
+          : c),
+      })),
 
       deleteConsultation: (id) => {
         const item = get().consultations.find(c => c.id === id);

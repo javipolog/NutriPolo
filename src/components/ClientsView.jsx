@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Users, Plus, Edit2, Trash2, Search, MessageCircle, ChevronRight, Phone } from 'lucide-react';
 import { Button, Input, EmptyState, useToast, useConfirm } from './UI';
 import useStore, { formatDate } from '../stores/store';
+import { openWhatsAppChat } from '../services/reminderService';
 import { useT } from '../i18n';
 import { ClientModal } from './ClientModal';
 import { ClientDetailView } from './ClientDetailView';
@@ -59,11 +60,9 @@ export const ClientsView = () => {
     toast.success(`${client.nombre} eliminado`);
   };
 
-  const openWhatsApp = (client) => {
-    const phone = (client.whatsapp || client.telefono || '').replace(/\D/g, '');
-    if (!phone) { toast.error('Sin número de WhatsApp'); return; }
-    const cc = (config.whatsappCountryCode || '34').replace(/\D/g, '');
-    window.open(`https://wa.me/${cc}${phone}`, '_blank');
+  const openWhatsApp = async (client) => {
+    const result = await openWhatsAppChat(client, config);
+    if (!result.success) toast.error('Sin número de WhatsApp');
   };
 
   return (

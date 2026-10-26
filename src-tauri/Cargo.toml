@@ -1,6 +1,6 @@
 [package]
 name = "nutripolo-app"
-version = "1.9.0"
+version = "1.10.0"
 description = "Aplicación de gestión de consulta nutricional"
 authors = ["Javier Polo García"]
 license = "MIT"

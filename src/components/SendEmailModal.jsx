@@ -5,8 +5,9 @@ import useStore, { errMsg } from '../stores/store';
 import {
   resolveTemplate, AVAILABLE_VARIABLES,
   DEFAULT_PLAN_TEMPLATES, DEFAULT_APPOINTMENT_TEMPLATES, DEFAULT_INVOICE_TEMPLATES, DEFAULT_DOCUMENT_TEMPLATES,
-  sendPlanEmail, sendAppointmentReminder, sendEmailSMTP, openMailClient,
+  sendPlanEmail, sendAppointmentReminder, sendEmailSMTP, openMailClient, buildSmtpConfig,
 } from '../services/emailService';
+import { getReminderConfig, clientLanguage } from '../services/reminderService';
 import { useT } from '../i18n';
 
 const MODES = [
@@ -24,6 +25,7 @@ export const SendEmailModal = ({
   invoice,
   document: docRecord,
   pdfBytes,
+  onSent,
   onClose,
 }) => {
   const config = useStore(s => s.config);
@@ -33,8 +35,10 @@ export const SendEmailModal = ({
   const toast = useToast();
 
   const [mode, setMode] = useState(initialMode);
-  const [lang, setLang] = useState(config.appLang || 'es');
-  const [useSmtp, setUseSmtp] = useState(!!(config.smtp?.host && smtpPassword));
+  const [lang, setLang] = useState(clientLanguage(client, config));
+  // The password does not need to be in memory: sendEmailSMTP reads it from
+  // the OS keyring when missing.
+  const [useSmtp, setUseSmtp] = useState(!!config.smtp?.host);
   const [sending, setSending] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
 
@@ -63,7 +67,8 @@ export const SendEmailModal = ({
   // Build template defaults from mode
   const defaultTemplates = {
     plan: DEFAULT_PLAN_TEMPLATES,
-    appointment: DEFAULT_APPOINTMENT_TEMPLATES,
+    // Reminder templates customised in Settings → Recordatorios win.
+    appointment: { ...DEFAULT_APPOINTMENT_TEMPLATES, ...getReminderConfig(config).email.templates },
     invoice: DEFAULT_INVOICE_TEMPLATES,
     document: DEFAULT_DOCUMENT_TEMPLATES,
   };
@@ -88,20 +93,13 @@ export const SendEmailModal = ({
     document: docRecord,
     config,
     locationName,
+    lang,
   };
 
-  const resolvedSubject = useMemo(() => resolveTemplate(subject, resolveCtx), [subject, resolvedClient, consultation, plan, invoice, config]);
-  const resolvedBody    = useMemo(() => resolveTemplate(body, resolveCtx),    [body, resolvedClient, consultation, plan, invoice, config]);
+  const resolvedSubject = useMemo(() => resolveTemplate(subject, resolveCtx), [subject, resolvedClient, consultation, plan, invoice, config, lang]);
+  const resolvedBody    = useMemo(() => resolveTemplate(body, resolveCtx),    [body, resolvedClient, consultation, plan, invoice, config, lang]);
 
-  const smtpConfig = config.smtp?.host ? {
-    host: config.smtp.host,
-    port: config.smtp.port || 587,
-    username: config.smtp.user,
-    password: smtpPassword,
-    fromEmail: config.smtp.user,
-    fromName: config.nombre,
-    useTls: config.smtp.secure !== false,
-  } : null;
+  const smtpConfig = buildSmtpConfig(config, smtpPassword);
 
   const handleSend = async () => {
     if (!resolvedClient?.email) { toast.error('El cliente no tiene email registrado'); return; }
@@ -148,6 +146,7 @@ export const SendEmailModal = ({
 
       if (result?.success !== false) {
         toast.success(useSmtp ? 'Email enviado' : 'Cliente de correo abierto');
+        onSent?.({ mode, manual: !useSmtp });
         onClose();
       } else {
         toast.error(result?.error || 'Error al enviar');

@@ -16,9 +16,14 @@ import { open as openUrl } from '@tauri-apps/api/shell';
  *   {{clientNom}}     {{citaData}}    {{planNom}}       {{nutriNom}}
  *   {{clientEmail}}   {{citaHora}}    {{planFechaInicio}}{{nutriEmail}}
  *   {{citaUbicacio}}  {{citaTipus}}   {{planFechaFin}}   {{nutriTel}}
- *   {{facturaNum}}    {{facturaTotal}}                   {{nutriWeb}}
+ *   {{citaDia}}       {{citaDireccio}} {{citaDuracio}}   {{nutriWeb}}
+ *   {{facturaNum}}    {{facturaTotal}}
+ *
+ * `lang` (es/ca/en) only affects {{citaDia}}; defaults to config.appLang.
  */
-export const resolveTemplate = (template, { client, consultation, plan, invoice, document, config, locationName } = {}) => {
+const WEEKDAY_LOCALES = { es: 'es-ES', ca: 'ca-ES', en: 'en-GB' };
+
+export const resolveTemplate = (template, { client, consultation, plan, invoice, document, config, locationName, lang } = {}) => {
   if (!template) return '';
 
   const fmt = (d) => {
@@ -30,12 +35,21 @@ export const resolveTemplate = (template, { client, consultation, plan, invoice,
     ? new Intl.NumberFormat('es-ES', { style:'currency', currency:'EUR' }).format(n)
     : '—';
 
+  const location = (config?.locations || []).find(l => l.id === consultation?.locationId);
+  const weekday = consultation?.fecha
+    ? new Date(consultation.fecha + 'T00:00:00').toLocaleDateString(
+        WEEKDAY_LOCALES[lang || config?.appLang] || 'es-ES', { weekday: 'long' })
+    : '—';
+
   const vars = {
     '{{clientNom}}':       client?.nombre        || '—',
     '{{clientEmail}}':     client?.email         || '—',
     '{{citaData}}':        fmt(consultation?.fecha),
+    '{{citaDia}}':         weekday,
     '{{citaHora}}':        consultation?.hora    || '—',
-    '{{citaUbicacio}}':    locationName?.(consultation?.locationId) || consultation?.locationId || '—',
+    '{{citaUbicacio}}':    locationName?.(consultation?.locationId) || location?.name || consultation?.locationId || '—',
+    '{{citaDireccio}}':    location?.address     || '—',
+    '{{citaDuracio}}':     consultation?.duracion ? `${consultation.duracion} min` : '—',
     '{{citaTipus}}':       consultation?.tipo    || '—',
     '{{planNom}}':         plan?.nombre          || '—',
     '{{planFechaInicio}}': fmt(plan?.fechaInicio),
@@ -50,9 +64,11 @@ export const resolveTemplate = (template, { client, consultation, plan, invoice,
     '{{nutriWeb}}':        config?.web           || '—',
   };
 
+  // split/join instead of replaceAll: a replacement string containing `$&`
+  // or `$1` (e.g. in a client's name) must be inserted literally.
   let result = template;
   for (const [key, value] of Object.entries(vars)) {
-    result = result.replaceAll(key, value);
+    result = result.split(key).join(String(value));
   }
   return result;
 };
@@ -254,8 +270,11 @@ export const AVAILABLE_VARIABLES = [
   { key: '{{clientNom}}',      label: 'Nombre del cliente' },
   { key: '{{clientEmail}}',    label: 'Email del cliente' },
   { key: '{{citaData}}',       label: 'Fecha de la cita' },
+  { key: '{{citaDia}}',        label: 'Día de la semana de la cita' },
   { key: '{{citaHora}}',       label: 'Hora de la cita' },
+  { key: '{{citaDuracio}}',    label: 'Duración de la cita' },
   { key: '{{citaUbicacio}}',   label: 'Ubicación de la cita' },
+  { key: '{{citaDireccio}}',   label: 'Dirección de la ubicación' },
   { key: '{{citaTipus}}',      label: 'Tipo de consulta' },
   { key: '{{planNom}}',        label: 'Nombre del plan' },
   { key: '{{planFechaInicio}}',label: 'Fecha inicio del plan' },
@@ -311,6 +330,21 @@ export const openMailClient = async ({ to, subject, body, provider = 'gmail' }) 
 };
 
 // ── SMTP helpers ───────────────────────────────────────────────────────────
+
+/**
+ * SMTP config for sendEmailSMTP from the app config, or null when SMTP is
+ * not set up. An empty password makes sendEmailSMTP read it from the OS
+ * keyring, so this works without the Settings view ever being opened.
+ */
+export const buildSmtpConfig = (config, password = '') => (config?.smtp?.host ? {
+  host: config.smtp.host,
+  port: config.smtp.port || 587,
+  username: config.smtp.user,
+  password,
+  fromEmail: config.smtp.user,
+  fromName: config.nombre,
+  useTls: config.smtp.secure !== false,
+} : null);
 
 const uint8ArrayToBase64 = (bytes) => {
   let binary = '';
