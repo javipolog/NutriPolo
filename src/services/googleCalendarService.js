@@ -86,8 +86,55 @@ export const googleCalendar = {
         expiresAt: Date.now() + (result.expires_in * 1000),
         refreshToken: result.refresh_token || config.refreshToken,
       }))
+      .catch(e => {
+        // Revoked / expired refresh token (e.g. the 7-day limit of OAuth apps
+        // in "Testing" mode): stop retrying and ask the user to reconnect.
+        if (String(e).includes('oauth_invalid_grant')) {
+          const gc = useStore.getState().config.googleCalendar;
+          useStore.getState().updateConfig({
+            googleCalendar: { ...gc, connected: false, accessToken: '', refreshToken: '', expiresAt: 0, needsReauth: true },
+          });
+        }
+        throw e;
+      })
       .finally(() => { _refreshPromise = null; });
     return _refreshPromise;
+  },
+
+  /**
+   * Store a refreshed token, merging into the *current* config so concurrent
+   * settings changes are not overwritten with a stale snapshot.
+   */
+  persistToken(tokenResult) {
+    if (!tokenResult || typeof tokenResult === 'string') return;
+    const gc = useStore.getState().config.googleCalendar;
+    useStore.getState().updateConfig({
+      googleCalendar: {
+        ...gc,
+        accessToken: tokenResult.newToken,
+        expiresAt: tokenResult.expiresAt,
+        refreshToken: tokenResult.refreshToken,
+        needsReauth: false,
+      },
+    });
+  },
+
+  /** Valid access token string, refreshing and persisting it when needed. */
+  async ensureToken() {
+    const tokenResult = await this.getValidToken(useStore.getState().config.googleCalendar);
+    this.persistToken(tokenResult);
+    return typeof tokenResult === 'string' ? tokenResult : tokenResult.newToken;
+  },
+
+  /**
+   * Local `completada` / `no_show` are decisions Google cannot represent:
+   * a remote "confirmed" event must not turn them back into `programada`.
+   */
+  mergeRemoteEstado(localEstado, remoteEstado) {
+    if (remoteEstado === 'programada' && (localEstado === 'completada' || localEstado === 'no_show')) {
+      return localEstado;
+    }
+    return remoteEstado;
   },
 
   // ── Data conversion helpers ────────────────────────────────────────────────
@@ -243,36 +290,29 @@ export const googleCalendar = {
 
   /**
    * Retry an async operation with exponential backoff.
-   * Retries on network errors and 5xx. On 401, refreshes token and retries once.
-   * Does NOT retry on 400/404 (client errors).
+   * `fn` receives the access token to use. Retries on network errors and
+   * 5xx. On 401 the token is refreshed once and `fn` is called again with
+   * the new token. Other 4xx errors are not retried.
    */
-  async withRetry(fn, { maxRetries = 3, backoffMs = 1000, gcalConfig = null } = {}) {
+  async withRetry(fn, { maxRetries = 3, backoffMs = 1000, gcalConfig = null, token = null } = {}) {
     let lastError;
+    let currentToken = token;
+    let refreshed = false;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        return await fn();
+        return await fn(currentToken);
       } catch (e) {
         lastError = e;
-        const msg = String(e?.message || e);
-        // Don't retry client errors
-        if (msg.includes('(400)') || msg.includes('(404)') || msg.includes('(403)')) throw e;
-        // On 401, try refreshing token once
-        if (msg.includes('(401)') && gcalConfig && attempt === 0) {
-          try {
-            const refreshed = await this.getValidToken({ ...gcalConfig, expiresAt: 0 });
-            if (typeof refreshed !== 'string') {
-              useStore.getState().updateConfig({
-                googleCalendar: {
-                  ...useStore.getState().config.googleCalendar,
-                  accessToken: refreshed.newToken,
-                  expiresAt: refreshed.expiresAt,
-                  refreshToken: refreshed.refreshToken,
-                },
-              });
-            }
-          } catch { /* refresh failed, will retry anyway */ }
+        const status = Number(String(e?.message || e).match(/\((\d{3})\)/)?.[1]) || 0;
+        if (status === 401 && gcalConfig && !refreshed) {
+          refreshed = true;
+          const latest = useStore.getState().config.googleCalendar;
+          const result = await this.getValidToken({ ...latest, expiresAt: 0 });
+          this.persistToken(result);
+          currentToken = typeof result === 'string' ? result : result.newToken;
           continue;
         }
+        if (status >= 400 && status < 500) throw e;
         if (attempt < maxRetries) {
           await new Promise(r => setTimeout(r, backoffMs * Math.pow(2, attempt)));
         }
@@ -295,26 +335,20 @@ export const googleCalendar = {
     const pushCal = (gcalConfig.calendars || []).find(c => c.id === pushCalId);
     if (!pushCal || pushCal.syncMode !== 'bidirectional') return null;
 
-    const tokenResult = await this.getValidToken(gcalConfig);
-    const token = typeof tokenResult === 'string' ? tokenResult : tokenResult.newToken;
-    if (typeof tokenResult !== 'string') {
-      store.updateConfig({
-        googleCalendar: { ...gcalConfig, accessToken: tokenResult.newToken, expiresAt: tokenResult.expiresAt, refreshToken: tokenResult.refreshToken },
-      });
-    }
+    const token = await this.ensureToken();
 
     const event = this.consultationToEvent(consultation, store.clients);
 
     let result;
     if (consultation.googleEventId) {
       result = await this.withRetry(
-        () => this.updateEvent(token, pushCalId, consultation.googleEventId, event),
-        { gcalConfig }
+        (tk) => this.updateEvent(tk, pushCalId, consultation.googleEventId, event),
+        { gcalConfig, token }
       );
     } else {
       result = await this.withRetry(
-        () => this.createEvent(token, pushCalId, event),
-        { gcalConfig }
+        (tk) => this.createEvent(tk, pushCalId, event),
+        { gcalConfig, token }
       );
     }
 
@@ -323,6 +357,10 @@ export const googleCalendar = {
       googleEventId: result.id,
       sourceCalendarId: pushCalId,
       lastSyncedAt: new Date().toISOString(),
+      // Google's own timestamp for our write, so the next pull does not
+      // mistake it for a remote edit.
+      remoteUpdated: result.updated || new Date().toISOString(),
+      syncPending: false,
     };
     store.updateConsultation(consultation.id, syncFields);
 
@@ -338,17 +376,11 @@ export const googleCalendar = {
     if (!gcalConfig?.connected || !consultation.googleEventId) return;
     if (consultation.sourceCalendarId !== gcalConfig.defaultPushCalendarId) return;
 
-    const tokenResult = await this.getValidToken(gcalConfig);
-    const token = typeof tokenResult === 'string' ? tokenResult : tokenResult.newToken;
-    if (typeof tokenResult !== 'string') {
-      store.updateConfig({
-        googleCalendar: { ...gcalConfig, accessToken: tokenResult.newToken, expiresAt: tokenResult.expiresAt, refreshToken: tokenResult.refreshToken },
-      });
-    }
+    const token = await this.ensureToken();
 
     await this.withRetry(
-      () => this.deleteEvent(token, gcalConfig.defaultPushCalendarId, consultation.googleEventId),
-      { gcalConfig }
+      (tk) => this.deleteEvent(tk, gcalConfig.defaultPushCalendarId, consultation.googleEventId),
+      { gcalConfig, token }
     );
   },
 
@@ -385,24 +417,18 @@ export const googleCalendar = {
       return { pushed: 0, pulled: 0, updated: 0, deleted: 0, errors: 0 };
     }
 
-    const totalStats = { pushed: 0, pulled: 0, updated: 0, errors: 0 };
+    const totalStats = { pushed: 0, pulled: 0, updated: 0, conflicts: 0, errors: 0 };
     for (const cal of enabledCalendars) {
       try {
         // Re-validate token per calendar to handle mid-sync expiration
-        const freshConfig = useStore.getState().config.googleCalendar;
-        const tokenResult = await this.getValidToken(freshConfig);
-        const token = typeof tokenResult === 'string' ? tokenResult : tokenResult.newToken;
-        if (typeof tokenResult !== 'string') {
-          useStore.getState().updateConfig({
-            googleCalendar: { ...freshConfig, accessToken: tokenResult.newToken, expiresAt: tokenResult.expiresAt, refreshToken: tokenResult.refreshToken },
-          });
-        }
+        const token = await this.ensureToken();
 
         const freshStore = useStore.getState();
         const stats = await this.syncCalendar(freshStore, token, cal);
         totalStats.pushed  += stats.pushed || 0;
         totalStats.pulled  += stats.pulled;
         totalStats.updated += stats.updated;
+        totalStats.conflicts += stats.conflicts || 0;
       } catch (e) {
         if (import.meta.env.DEV) console.error(`[GCal Sync] Error for calendar ${cal.name || cal.id}:`, e);
         totalStats.errors++;
@@ -635,7 +661,7 @@ export const googleCalendar = {
               fecha: partial.fecha,
               hora: partial.hora,
               duracion: partial.duracion,
-              estado: partial.estado,
+              estado: this.mergeRemoteEstado(existing.estado, partial.estado),
               googleSummary: partial.googleSummary,
               remoteUpdated: ev.updated || null,
               lastSyncedAt: new Date().toISOString(),
@@ -662,6 +688,7 @@ export const googleCalendar = {
               // Preserve user-linked clienteId — eventToConsultation only
               // exact-matches, so it would nuke the link on any receptionist edit.
               clienteId: partial.clienteId || existing.clienteId,
+              estado: this.mergeRemoteEstado(existing.estado, partial.estado),
               remoteUpdated: ev.updated || null,
             });
           }
@@ -907,14 +934,14 @@ export const googleCalendar = {
           // Case 0: Retry previously failed pushes
           if (c.syncPending && c.googleEventId && c.sourceCalendarId === calId) {
             const event = this.consultationToEvent(c, clients);
-            await this.withRetry(
-              () => this.updateEvent(token, calId, c.googleEventId, event),
-              { gcalConfig }
+            const result = await this.withRetry(
+              (tk) => this.updateEvent(tk, calId, c.googleEventId, event),
+              { gcalConfig, token }
             );
             updateConsultation(c.id, {
               lastSyncedAt: new Date().toISOString(),
               syncPending: false,
-              remoteUpdated: remoteByGoogleId[c.googleEventId]?.updated || c.remoteUpdated,
+              remoteUpdated: result?.updated || new Date().toISOString(),
             });
             stats.pushed++;
             continue;
@@ -924,8 +951,8 @@ export const googleCalendar = {
           if (!c.googleEventId && !c.sourceCalendarId) {
             const event = this.consultationToEvent(c, clients);
             const result = await this.withRetry(
-              () => this.createEvent(token, calId, event),
-              { gcalConfig }
+              (tk) => this.createEvent(tk, calId, event),
+              { gcalConfig, token }
             );
             updateConsultation(c.id, {
               googleEventId: result.id,
@@ -953,20 +980,20 @@ export const googleCalendar = {
               if (localTs >= remoteTs) {
                 // Local wins → push to Google; save remote as shadow for possible undo
                 const conflictShadow = remote ? {
-                  fecha: remote.start?.dateTime?.slice(0, 10) || remote.start?.date,
-                  hora:  remote.start?.dateTime?.slice(11, 16),
-                  duracion: remote.end?.dateTime && remote.start?.dateTime
-                    ? Math.round((new Date(remote.end.dateTime) - new Date(remote.start.dateTime)) / 60000)
+                  fecha: remote.start_datetime?.slice(0, 10),
+                  hora:  remote.start_datetime?.includes('T') ? remote.start_datetime.slice(11, 16) : undefined,
+                  duracion: remote.end_datetime && remote.start_datetime?.includes('T')
+                    ? Math.round((new Date(remote.end_datetime) - new Date(remote.start_datetime)) / 60000)
                     : undefined,
                 } : null;
                 const event = this.consultationToEvent(c, clients);
-                await this.withRetry(
-                  () => this.updateEvent(token, calId, c.googleEventId, event),
-                  { gcalConfig }
+                const result = await this.withRetry(
+                  (tk) => this.updateEvent(tk, calId, c.googleEventId, event),
+                  { gcalConfig, token }
                 );
                 updateConsultation(c.id, {
                   lastSyncedAt: new Date().toISOString(),
-                  remoteUpdated: remote?.updated || new Date().toISOString(),
+                  remoteUpdated: result?.updated || new Date().toISOString(),
                   syncConflict: true,
                   conflictShadow,
                 });
@@ -979,6 +1006,7 @@ export const googleCalendar = {
                 updateConsultation(c.id, {
                   ...partial,
                   clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
+                  estado: this.mergeRemoteEstado(c.estado, partial.estado),
                   lastSyncedAt: new Date().toISOString(),
                   remoteUpdated: remote.updated || new Date().toISOString(),
                   syncConflict: true,
@@ -989,13 +1017,13 @@ export const googleCalendar = {
             } else if (localChanged) {
               // Only local changed → push to Google
               const event = this.consultationToEvent(c, clients);
-              await this.withRetry(
-                () => this.updateEvent(token, calId, c.googleEventId, event),
-                { gcalConfig }
+              const result = await this.withRetry(
+                (tk) => this.updateEvent(tk, calId, c.googleEventId, event),
+                { gcalConfig, token }
               );
               updateConsultation(c.id, {
                 lastSyncedAt: new Date().toISOString(),
-                remoteUpdated: remote?.updated || c.remoteUpdated,
+                remoteUpdated: result?.updated || new Date().toISOString(),
                 syncConflict: false,
               });
               stats.pushed++;
@@ -1004,7 +1032,8 @@ export const googleCalendar = {
           }
         } catch (e) {
           if (import.meta.env.DEV) console.error(`[GCal Push] Error for consultation ${c.id}:`, e);
-          updateConsultation(c.id, { syncPending: true });
+          // Sync op (lastSyncedAt unchanged): flag for retry without bumping localUpdatedAt.
+          updateConsultation(c.id, { syncPending: true, lastSyncedAt: c.lastSyncedAt });
         }
       }
     }
@@ -1039,6 +1068,7 @@ export const googleCalendar = {
         updateConsultation(c.id, {
           ...partial,
           clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
+          estado: this.mergeRemoteEstado(c.estado, partial.estado),
           lastSyncedAt: new Date().toISOString(),
           remoteUpdated: remote.updated || new Date().toISOString(),
           syncPending: false,
@@ -1078,7 +1108,7 @@ export const googleCalendar = {
     for (const c of latestConsultations) {
       if (c.googleEventId && c.sourceCalendarId === calId && cancelledSet.has(c.googleEventId)) {
         if (c.estado !== 'cancelada') {
-          updateConsultation(c.id, { estado: 'cancelada' });
+          updateConsultation(c.id, { estado: 'cancelada', lastSyncedAt: new Date().toISOString() });
           stats.updated++;
         }
       }

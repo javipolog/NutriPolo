@@ -448,7 +448,11 @@ const GoogleCalendarSection = () => {
   const [showAdvancedFuzzy, setShowAdvancedFuzzy] = useState(false);
 
   const gcal = config.googleCalendar || {};
-  const setGcal = (partial) => updateConfig({ googleCalendar: { ...gcal, ...partial } });
+  // Read the live config: handlers call this after long awaits (OAuth, sync)
+  // and a render-time snapshot would overwrite concurrent changes.
+  const setGcal = (partial) => updateConfig({
+    googleCalendar: { ...useStore.getState().config.googleCalendar, ...partial },
+  });
 
   // Helper: update a single calendar's stored config
   const updateStoredCal = (calId, patch) => {
@@ -466,7 +470,7 @@ const GoogleCalendarSection = () => {
   const [calendars, setCalendars] = useState([]);
 
   useEffect(() => {
-    if (gcal.connected && gcal.accessToken) handleLoadCalendars();
+    if (gcal.connected) handleLoadCalendars();
   }, [gcal.connected]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleConnect = async () => {
@@ -514,6 +518,23 @@ const GoogleCalendarSection = () => {
         return base;
       });
 
+      // Reconnecting after an expired session: keep the per-calendar settings.
+      const previous = new Map((gcal.calendars || []).map(c => [c.id, c]));
+      if (previous.size > 0) {
+        const merged = newCalendars.map(c => previous.has(c.id)
+          ? { ...previous.get(c.id), name: c.name, color: c.color, accessRole: c.accessRole }
+          : c);
+        const keepDefault = merged.some(c => c.id === gcal.defaultPushCalendarId) ? gcal.defaultPushCalendarId : null;
+        setGcal({
+          connected: true, needsReauth: false,
+          clientId: clientId.trim(), clientSecret: clientSecret.trim(),
+          accessToken, refreshToken, expiresAt,
+          calendars: merged, defaultPushCalendarId: keepDefault, userEmail,
+        });
+        toast.success('Google Calendar reconectado');
+        return;
+      }
+
       // Auto-detect NutriPolo calendar: set as bidirectional push target if writable
       const nutripoloIdx = newCalendars.findIndex(
         c => c.name && c.name.toLowerCase().includes('nutripolo')
@@ -529,6 +550,7 @@ const GoogleCalendarSection = () => {
 
       setGcal({
         connected: true,
+        needsReauth: false,
         clientId: clientId.trim(),
         clientSecret: clientSecret.trim(),
         accessToken,
@@ -553,12 +575,12 @@ const GoogleCalendarSection = () => {
   };
 
   const handleLoadCalendars = async () => {
-    if (!gcal.accessToken) return;
     try {
-      const calList = await googleCalendar.listCalendars(gcal.accessToken);
+      const token = await googleCalendar.ensureToken();
+      const calList = await googleCalendar.listCalendars(token);
       setCalendars(calList);
-    } catch {
-      // ignore — calendars may not be loaded yet
+    } catch (e) {
+      toast.error('No se pudieron cargar los calendarios: ' + String(e?.message || e));
     }
   };
 
@@ -1023,6 +1045,15 @@ const GoogleCalendarSection = () => {
 
   return (
     <div className="space-y-3">
+      {gcal.needsReauth && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-warning-light border border-warning/30 rounded-button">
+          <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
+          <p className="text-xs text-warning-dark">
+            La sesión con Google ha caducado o se ha revocado. Vuelve a conectar para reanudar la sincronización;
+            tu configuración de calendarios se conservará.
+          </p>
+        </div>
+      )}
       <p className="text-xs text-sage-500">
         Conecta tu Google Calendar para sincronizar consultas automáticamente.
         Necesitas un proyecto en{' '}

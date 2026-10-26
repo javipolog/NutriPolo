@@ -7,6 +7,7 @@ import { UnlockScreen } from './components/UnlockScreen';
 import { LoadErrorScreen } from './components/LoadErrorScreen';
 import useStore, { flushAllPending, getLoadFailure, syncGoogleSecrets } from './stores/store';
 import { useT } from './i18n';
+import { useBackgroundJobs } from './hooks/useBackgroundJobs';
 
 // ============================================
 // WHAT'S NEW MODAL
@@ -303,6 +304,8 @@ function AppContent() {
   const toast = useToast();
   const t = useT();
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+
+  useBackgroundJobs({ toast });
 
   // Apply theme
   useEffect(() => {

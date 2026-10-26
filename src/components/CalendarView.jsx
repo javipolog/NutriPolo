@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
 import { Button, useToast, useConfirm } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
@@ -499,21 +499,8 @@ export const CalendarView = () => {
     }
   }, [consultations, confirm, resetAgenda, toast]);
 
-  // Keep a stable ref to the latest handleSync so the interval never goes stale
-  const handleSyncRef = useRef(handleSync);
-  useEffect(() => { handleSyncRef.current = handleSync; });
-
-  // Auto-sync on mount and every 5 minutes when enabled.
-  // Re-runs whenever connected/autoSync changes so the interval is torn down
-  // immediately if the user disconnects or disables auto-sync.
-  useEffect(() => {
-    const connected = config.googleCalendar?.connected;
-    const autoSync = config.googleCalendar?.autoSync;
-    if (!connected || !autoSync) return;
-    handleSyncRef.current();
-    const interval = setInterval(() => handleSyncRef.current(), 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [config.googleCalendar?.connected, config.googleCalendar?.autoSync]);
+  // Auto-sync runs app-wide in useBackgroundJobs (App.jsx), not only while
+  // this view is mounted.
 
   const weekStart = startOfWeek(cursor);
   const monthStart = startOfMonth(cursor);

@@ -166,6 +166,10 @@ fn build_event_body(event: &CalendarEvent) -> serde_json::Value {
     if let Some(ref loc) = event.location {
         body["location"] = serde_json::Value::String(loc.clone());
     }
+    // "cancelled" cancels the event in Google; "confirmed" restores it.
+    if let Some(ref status) = event.status {
+        body["status"] = serde_json::Value::String(status.clone());
+    }
     if let Some(ref nid) = event.nutripolo_id {
         body["extendedProperties"] = serde_json::json!({
             "private": { "nutripoloId": nid }
@@ -173,6 +177,19 @@ fn build_event_body(event: &CalendarEvent) -> serde_json::Value {
     }
 
     body
+}
+
+/// Shared HTTP client: connection reuse plus timeouts, so a stalled request
+/// can never hang a sync forever.
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(20))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
 }
 
 /// Simple percent-encoder for URL components.
@@ -326,7 +343,7 @@ pub async fn gcal_exchange_token(
     redirect_uri: String,
     code_verifier: String,
 ) -> Result<TokenResponse, String> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let params = [
         ("client_id", client_id.as_str()),
         ("client_secret", client_secret.as_str()),
@@ -376,7 +393,7 @@ pub async fn gcal_refresh_token(
     client_secret: String,
     refresh_token: String,
 ) -> Result<TokenResponse, String> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let params = [
         ("client_id", client_id.as_str()),
         ("client_secret", client_secret.as_str()),
@@ -400,6 +417,10 @@ pub async fn gcal_refresh_token(
     if !status.is_success() {
         #[cfg(debug_assertions)]
         eprintln!("[gcal_refresh_token] status={} body={:?}", status, body);
+        // The refresh token was revoked or expired: the user must reconnect.
+        if body["error"].as_str() == Some("invalid_grant") {
+            return Err("oauth_invalid_grant".to_string());
+        }
         return Err("oauth_token_refresh_failed".to_string());
     }
 
@@ -423,7 +444,7 @@ pub async fn gcal_refresh_token(
 pub async fn gcal_list_calendars(
     access_token: String,
 ) -> Result<Vec<CalendarListEntry>, String> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let resp = client
         .get("https://www.googleapis.com/calendar/v3/users/me/calendarList")
         .bearer_auth(&access_token)
@@ -439,7 +460,7 @@ pub async fn gcal_list_calendars(
 
     if !status.is_success() {
         let err_msg = body["error"]["message"].as_str().unwrap_or("Unknown error");
-        return Err(format!("List calendars failed ({}): {}", status, err_msg));
+        return Err(format!("List calendars failed ({}): {}", status.as_u16(), err_msg));
     }
 
     let items = body["items"].as_array().ok_or("Missing items array")?;
@@ -473,7 +494,7 @@ pub async fn gcal_list_events(
         url_encode(&calendar_id)
     );
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let mut all_events: Vec<CalendarEvent> = Vec::new();
     let mut page_token: Option<String> = None;
 
@@ -505,7 +526,7 @@ pub async fn gcal_list_events(
 
         if !status.is_success() {
             let err_msg = body["error"]["message"].as_str().unwrap_or("Unknown error");
-            return Err(format!("List events failed ({}): {}", status, err_msg));
+            return Err(format!("List events failed ({}): {}", status.as_u16(), err_msg));
         }
 
         if let Some(items) = body["items"].as_array() {
@@ -537,7 +558,7 @@ pub async fn gcal_list_deleted_events(
         url_encode(&calendar_id)
     );
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let mut deleted_ids: Vec<String> = Vec::new();
     let mut page_token: Option<String> = None;
 
@@ -569,7 +590,7 @@ pub async fn gcal_list_deleted_events(
 
         if !status.is_success() {
             let err_msg = body["error"]["message"].as_str().unwrap_or("Unknown error");
-            return Err(format!("List deleted events failed ({}): {}", status, err_msg));
+            return Err(format!("List deleted events failed ({}): {}", status.as_u16(), err_msg));
         }
 
         if let Some(items) = body["items"].as_array() {
@@ -604,7 +625,7 @@ pub async fn gcal_create_event(
     );
 
     let body = build_event_body(&event);
-    let client = reqwest::Client::new();
+    let client = http_client();
     let resp = client
         .post(&url)
         .bearer_auth(&access_token)
@@ -623,7 +644,7 @@ pub async fn gcal_create_event(
         let err_msg = response_body["error"]["message"]
             .as_str()
             .unwrap_or("Unknown error");
-        return Err(format!("Create event failed ({}): {}", status, err_msg));
+        return Err(format!("Create event failed ({}): {}", status.as_u16(), err_msg));
     }
 
     Ok(map_google_event(&response_body))
@@ -644,7 +665,7 @@ pub async fn gcal_update_event(
     );
 
     let body = build_event_body(&event);
-    let client = reqwest::Client::new();
+    let client = http_client();
     let resp = client
         .put(&url)
         .bearer_auth(&access_token)
@@ -663,7 +684,7 @@ pub async fn gcal_update_event(
         let err_msg = response_body["error"]["message"]
             .as_str()
             .unwrap_or("Unknown error");
-        return Err(format!("Update event failed ({}): {}", status, err_msg));
+        return Err(format!("Update event failed ({}): {}", status.as_u16(), err_msg));
     }
 
     Ok(map_google_event(&response_body))
@@ -673,7 +694,7 @@ pub async fn gcal_update_event(
 /// Best-effort: returns Ok even if revocation fails (token may already be expired).
 #[tauri::command]
 pub async fn gcal_revoke_token(token: String) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    let client = http_client();
     let _ = client
         .post("https://oauth2.googleapis.com/revoke")
         .form(&[("token", &token)])
@@ -695,7 +716,7 @@ pub async fn gcal_delete_event(
         url_encode(&event_id)
     );
 
-    let client = reqwest::Client::new();
+    let client = http_client();
     let resp = client
         .delete(&url)
         .bearer_auth(&access_token)
@@ -705,8 +726,12 @@ pub async fn gcal_delete_event(
 
     let status = resp.status();
 
-    // 204 No Content is the expected success response for a DELETE.
-    if status.is_success() || status == reqwest::StatusCode::NO_CONTENT {
+    // 204 No Content is the expected success response for a DELETE. An event
+    // that is already gone (404 / 410 Gone) is the desired end state too.
+    if status.is_success()
+        || status == reqwest::StatusCode::NOT_FOUND
+        || status == reqwest::StatusCode::GONE
+    {
         return Ok(());
     }
 
@@ -717,5 +742,5 @@ pub async fn gcal_delete_event(
     let err_msg = response_body["error"]["message"]
         .as_str()
         .unwrap_or("Unknown error");
-    Err(format!("Delete event failed ({}): {}", status, err_msg))
+    Err(format!("Delete event failed ({}): {}", status.as_u16(), err_msg))
 }
