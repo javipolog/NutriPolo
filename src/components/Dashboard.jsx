@@ -9,7 +9,7 @@ import {
     UserPlus, Activity, Bell, TrendingUp, MessageCircle
 } from 'lucide-react';
 import { Card, StatCard, Button, EmptyState, StatusBadge, useToast } from './UI';
-import useStore, { formatCurrency, formatDate, formatDateShort, todayISO, filterVisibleConsultations } from '../stores/store';
+import useStore, { formatCurrency, formatDate, formatDateShort, filterVisibleConsultations } from '../stores/store';
 import { useT } from '../i18n';
 import { openWhatsAppReminder } from '../services/whatsappService';
 
@@ -23,7 +23,7 @@ const CONSULTATION_STATUS_DOT = {
     programada:  'bg-wellness-400',
     completada:  'bg-success',
     cancelada:   'bg-danger',
-    no_asistio:  'bg-sage-400',
+    no_show:     'bg-sage-400',
 };
 
 /* ============================================
@@ -58,10 +58,13 @@ function getRelativeDate(dateStr) {
     if (!dateStr) return '';
     const now = new Date();
     const d = new Date(dateStr + 'T00:00:00');
-    const diffDays = Math.floor((now - d) / 86400000);
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.round((today - d) / 86400000);
     if (diffDays === 0) return 'Hoy';
     if (diffDays === 1) return 'Ayer';
-    if (diffDays < 7) return `Hace ${diffDays} días`;
+    if (diffDays === -1) return 'Mañana';
+    if (diffDays < 0 && diffDays > -7) return `En ${-diffDays} días`;
+    if (diffDays > 0 && diffDays < 7) return `Hace ${diffDays} días`;
     return formatDateShort(dateStr);
 }
 
@@ -197,7 +200,7 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                 <div className="space-y-0 divide-y divide-sage-100">
                     {consultations.map(c => {
                         const client = clientsById.get(c.clienteId);
-                        const location = locationsById.get(c.localizacion);
+                        const location = locationsById.get(c.locationId);
                         const dotColor = CONSULTATION_STATUS_DOT[c.estado] || 'bg-sage-300';
                         return (
                             <div key={c.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
@@ -231,7 +234,7 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                                 <span className={`text-xs font-medium px-2 py-0.5 rounded-badge shrink-0 ${
                                     c.estado === 'completada' ? 'bg-success-light text-success' :
                                     c.estado === 'cancelada'  ? 'bg-danger-light text-danger' :
-                                    c.estado === 'no_asistio' ? 'bg-sage-100 text-sage-500' :
+                                    c.estado === 'no_show' ? 'bg-sage-100 text-sage-500' :
                                     'bg-wellness-50 text-wellness-500'
                                 }`}>
                                     {c.estado === 'programada' ? 'Pendiente' :

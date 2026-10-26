@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Send, Loader2, Eye, EyeOff, Mail } from 'lucide-react';
 import { Modal, Button, Input, Textarea, useToast } from './UI';
-import useStore from '../stores/store';
+import useStore, { errMsg } from '../stores/store';
 import {
   resolveTemplate, AVAILABLE_VARIABLES,
   DEFAULT_PLAN_TEMPLATES, DEFAULT_APPOINTMENT_TEMPLATES, DEFAULT_INVOICE_TEMPLATES, DEFAULT_DOCUMENT_TEMPLATES,
@@ -153,7 +153,7 @@ export const SendEmailModal = ({
         toast.error(result?.error || 'Error al enviar');
       }
     } catch (e) {
-      toast.error(e.message || 'Error inesperado');
+      toast.error(errMsg(e) || 'Error inesperado');
     } finally {
       setSending(false);
     }

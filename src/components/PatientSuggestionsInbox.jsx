@@ -383,10 +383,10 @@ export const PatientSuggestionsInbox = () => {
       })
       .filter(Boolean)
       .join('\n');
-    const ok = await confirm(
-      'Confirmar coincidencias',
-      `Se vincularán ${pendingConfirm.length} coincidencia${pendingConfirm.length !== 1 ? 's' : ''}:\n\n${names}\n\nPuedes cambiar cualquier vinculación manualmente después.`
-    );
+    const ok = await confirm({
+      title: 'Confirmar coincidencias',
+      message: `Se vincularán ${pendingConfirm.length} coincidencia${pendingConfirm.length !== 1 ? 's' : ''}:\n\n${names}\n\nPuedes cambiar cualquier vinculación manualmente después.`,
+    });
     if (!ok) return;
     const count = confirmAllAutoMatches();
     toast.success(`${count} coincidencia${count !== 1 ? 's' : ''} confirmada${count !== 1 ? 's' : ''}`);

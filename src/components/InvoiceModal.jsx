@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { Modal, Textarea, Button, useToast } from './UI';
-import useStore, { todayISO, generateId, computeInvoiceTotals, formatDate } from '../stores/store';
+import useStore, { todayISO, generateId, computeInvoiceTotals, formatDate, errMsg } from '../stores/store';
 import { useT } from '../i18n';
 import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
 import { save } from '@tauri-apps/api/dialog';
@@ -151,9 +151,16 @@ export const InvoiceModal = ({ invoice, onClose }) => {
   };
 
   // ── Save ─────────────────────────────────────────────────────
+  // The invoice is created before the PDF dialog awaits; a ref guard (not
+  // just state) stops a double click from creating it twice.
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
   const handleSave = async () => {
+    if (savingRef.current) return;
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
+    savingRef.current = true;
+    setSaving(true);
 
     const cleanItems = parsedItems.map(({ id, descripcion, cantidad, precioUnitario, servicioId, consultationId }) => ({
       id, descripcion, cantidad, precioUnitario, servicioId, consultationId,
@@ -201,7 +208,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
     } catch (pdfErr) {
       if (import.meta.env.DEV) console.error('PDF generation failed:', pdfErr);
       toast.success(isEdit ? 'Factura actualizada' : 'Factura creada');
-      toast.error(`Error generando PDF: ${pdfErr?.message || 'error desconocido'}`);
+      toast.error(`Error generando PDF: ${errMsg(pdfErr) || 'error desconocido'}`);
     }
 
     onClose();
@@ -518,7 +525,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
 
       <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
         <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
-        <Button variant="primary" onClick={handleSave}>{t.save}</Button>
+        <Button variant="primary" onClick={handleSave} disabled={saving}>{t.save}</Button>
       </div>
     </Modal>
   );

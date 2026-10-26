@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Clock, Sparkles, Download, RefreshCw } from 'lucide-react';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Sparkles, Download, RefreshCw } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
@@ -418,11 +418,9 @@ function AppContent() {
   const toastRef = useRef(toast);
   const histRef = useRef(_history);
   const futRef = useRef(_future);
-  const tRef = useRef(t);
   toastRef.current = toast;
   histRef.current = _history;
   futRef.current = _future;
-  tRef.current = t;
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -433,12 +431,14 @@ function AppContent() {
         return;
       }
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      const key = e.key.toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) {
         e.preventDefault();
         if (histRef.current.length > 0) { undo(); toastRef.current.info('Acción deshecha', 3000); }
         return;
       }
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      // With Shift held the key arrives as 'Z'.
+      if ((e.ctrlKey || e.metaKey) && (key === 'y' || (key === 'z' && e.shiftKey))) {
         e.preventDefault();
         if (futRef.current.length > 0) { redo(); toastRef.current.info('Acción rehecha', 3000); }
         return;

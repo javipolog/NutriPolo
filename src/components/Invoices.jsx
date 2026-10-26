@@ -48,7 +48,8 @@ export const Invoices = () => {
     }).sort((a, b) => (b.numero || '').localeCompare(a.numero || ''));
   }, [invoices, clients, search, filterYear, filterEstado]);
 
-  const total = filtered.reduce((s, i) => s + (i.total || i.importe || 0), 0);
+  // Cancelled (anulada) invoices count neither as billed nor as pending.
+  const total = filtered.filter(i => i.estado !== 'anulada').reduce((s, i) => s + (i.total || i.importe || 0), 0);
   const totalPagado = filtered.filter(i => i.estado === 'pagada').reduce((s, i) => s + (i.total || i.importe || 0), 0);
 
   const handleDelete = async (inv) => {

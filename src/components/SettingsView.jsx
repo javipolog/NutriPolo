@@ -1,38 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Check, Download, Upload, Sun, Moon, Monitor, Mail,
+  Upload, Sun, Moon, Monitor,
   Eye, EyeOff, RotateCcw, Send, Loader2, X, Plus, Edit2,
-  Trash2, MapPin, ClipboardList, Languages, Calendar, RefreshCw,
+  Trash2, MapPin, Languages, Calendar, RefreshCw,
   LogOut, Wifi, Palette, Image, Type, ChevronDown, ChevronUp, FileText,
-  Archive, HardDriveDownload, History, ShieldCheck, Clock, AlertTriangle, Settings2, AlertCircle, Lock
+  Archive, History, ShieldCheck, Clock, AlertTriangle, Settings2, AlertCircle, Lock
 } from 'lucide-react';
 import { Button, Input, Textarea, Modal, useToast, useConfirm } from './UI';
-import useStore, { generateId, DEFAULT_INVOICE_DESIGN, inferCalendarPurpose, flushAllPending } from '../stores/store';
+import useStore, { generateId, inferCalendarPurpose, flushAllPending, errMsg } from '../stores/store';
 import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
 import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
 import { invoke } from '@tauri-apps/api/tauri';
-
-// ── Inline editable list (for locations & consultation types) ──────────────
-
-const InlineList = ({ items, onAdd, onUpdate, onDelete, renderItem, addLabel }) => {
-  const [adding, setAdding] = useState(false);
-  const [editId, setEditId] = useState(null);
-  const [draft, setDraft] = useState('');
-
-  const startAdd = () => { setDraft(''); setAdding(true); setEditId(null); };
-  const startEdit = (item) => { setDraft(JSON.stringify(item)); setEditId(item.id || item); setAdding(false); };
-
-  return (
-    <div className="space-y-2">
-      {items.map(item => renderItem(item, editId, setEditId, onUpdate, onDelete))}
-      <Button variant="ghost" size="sm" icon={Plus} onClick={() => onAdd()}>
-        {addLabel}
-      </Button>
-    </div>
-  );
-};
 
 // ── Locations CRUD ─────────────────────────────────────────────────────────
 
@@ -42,7 +22,6 @@ const LocationsManager = () => {
   const toast = useToast();
   const [editId, setEditId] = useState(null);
   const [draft, setDraft] = useState({ name: '', address: '', type: 'presencial' });
-  const [adding, setAdding] = useState(false);
 
   const locations = config.locations || [];
 
@@ -54,7 +33,6 @@ const LocationsManager = () => {
       updateConfig({ locations: locations.map(l => l.id === editId ? { ...l, ...draft } : l) });
     }
     setEditId(null);
-    setAdding(false);
     toast.success('Guardado');
   };
 
@@ -66,16 +44,16 @@ const LocationsManager = () => {
   const startAdd = () => {
     setDraft({ name: '', address: '', type: 'presencial' });
     setEditId('new');
-    setAdding(true);
   };
 
   const startEdit = (loc) => {
     setDraft({ name: loc.name, address: loc.address || '', type: loc.type || 'presencial' });
     setEditId(loc.id);
-    setAdding(false);
   };
 
-  const Form = () => (
+  // A JSX element, not an inline component: an inline component would be a
+  // new type on every render and remount the inputs (losing focus per key).
+  const form = (
     <div className="border border-wellness-200 rounded-soft p-3 bg-wellness-50 space-y-2">
       <div className="grid grid-cols-2 gap-2">
         <Input
@@ -100,7 +78,7 @@ const LocationsManager = () => {
         className="text-sm"
       />
       <div className="flex gap-2 justify-end">
-        <Button variant="ghost" size="sm" onClick={() => { setEditId(null); setAdding(false); }}>Cancelar</Button>
+        <Button variant="ghost" size="sm" onClick={() => setEditId(null)}>Cancelar</Button>
         <Button variant="primary" size="sm" onClick={save}>Guardar</Button>
       </div>
     </div>
@@ -110,7 +88,7 @@ const LocationsManager = () => {
     <div className="space-y-2">
       {locations.map(loc => (
         <div key={loc.id}>
-          {editId === loc.id ? <Form /> : (
+          {editId === loc.id ? form : (
             <div className="flex items-center gap-3 p-2.5 border border-sage-200 rounded-soft bg-white">
               <MapPin size={13} className="text-wellness-400 shrink-0" />
               <div className="flex-1 min-w-0">
@@ -124,7 +102,7 @@ const LocationsManager = () => {
           )}
         </div>
       ))}
-      {editId === 'new' && <Form />}
+      {editId === 'new' && form}
       {editId !== 'new' && (
         <Button variant="ghost" size="sm" icon={Plus} onClick={startAdd}>Añadir ubicación</Button>
       )}
@@ -337,7 +315,7 @@ const SmtpSection = () => {
       if (result.success) toast.success('Conexión SMTP correcta');
       else toast.error(result.error || 'Error de conexión');
     } catch (e) {
-      toast.error(e.message);
+      toast.error(errMsg(e));
     } finally {
       setTesting(false);
     }
@@ -587,7 +565,6 @@ const GoogleCalendarSection = () => {
   const handleSyncNow = async () => {
     setSyncing(true);
     try {
-      const { default: useStore } = await import('../stores/store');
       const stats = await googleCalendar.syncAll(useStore.getState());
       const parts = [];
       if (stats.pushed) parts.push(`${stats.pushed} enviados`);
@@ -1449,12 +1426,15 @@ const InvoiceDesignSection = () => {
     toast.success('Logo eliminado');
   };
 
+  // Render helpers (not components) so inputs keep their identity across
+  // renders — otherwise dragging the color picker remounts it mid-drag.
   // ── Color swatch for preset cards ──
-  const PresetCard = ({ id, preset }) => {
+  const presetCard = (id, preset) => {
     const isActive = design.preset === id;
     const colors = preset.colors;
     return (
       <button
+        key={id}
         onClick={() => setDesign({ preset: id, colors: getPresetColors(id) })}
         className={`flex flex-col items-center gap-1.5 px-3 py-2.5 rounded-soft border-2 transition-all ${
           isActive
@@ -1473,8 +1453,8 @@ const InvoiceDesignSection = () => {
   };
 
   // ── Color input row ──
-  const ColorRow = ({ label, colorKey }) => (
-    <div className="flex items-center gap-3">
+  const colorRow = (label, colorKey) => (
+    <div key={colorKey} className="flex items-center gap-3">
       <input
         type="color"
         value={design.colors[colorKey]}
@@ -1487,7 +1467,7 @@ const InvoiceDesignSection = () => {
   );
 
   // ── HTML Preview ──
-  const Preview = () => {
+  const preview = () => {
     const c = design.colors;
     return (
       <div className="border border-sage-200 rounded-soft overflow-hidden bg-white" style={{ maxWidth: 360 }}>
@@ -1598,7 +1578,7 @@ const InvoiceDesignSection = () => {
         </label>
         <div className="flex flex-wrap gap-2">
           {Object.entries(PRESETS).map(([id, preset]) => (
-            <PresetCard key={id} id={id} preset={preset} />
+            presetCard(id, preset)
           ))}
           {design.preset === 'custom' && (
             <div className="flex flex-col items-center justify-center px-3 py-2.5 rounded-soft border-2 border-wellness-400 bg-wellness-50 shadow-sm">
@@ -1624,14 +1604,14 @@ const InvoiceDesignSection = () => {
         </button>
         {colorsOpen && (
           <div className="mt-3 grid grid-cols-2 gap-3 p-3 bg-sage-50 rounded-soft border border-sage-200">
-            <ColorRow label={t.design_accent || 'Color principal'} colorKey="accent" />
-            <ColorRow label="Color oscuro" colorKey="accentDark" />
-            <ColorRow label="Color claro" colorKey="accentLight" />
-            <ColorRow label="Color medio" colorKey="accentMid" />
-            <ColorRow label="Texto principal" colorKey="primary" />
-            <ColorRow label="Texto secundario" colorKey="secondary" />
-            <ColorRow label="Labels" colorKey="muted" />
-            <ColorRow label="Fondo alterno" colorKey="cardBg" />
+            {colorRow(t.design_accent || 'Color principal', 'accent')}
+            {colorRow("Color oscuro", 'accentDark')}
+            {colorRow("Color claro", 'accentLight')}
+            {colorRow("Color medio", 'accentMid')}
+            {colorRow("Texto principal", 'primary')}
+            {colorRow("Texto secundario", 'secondary')}
+            {colorRow("Labels", 'muted')}
+            {colorRow("Fondo alterno", 'cardBg')}
           </div>
         )}
       </div>
@@ -1680,7 +1660,7 @@ const InvoiceDesignSection = () => {
           <FileText size={13} className="inline mr-1" />
           {t.design_preview || 'Vista previa'}
         </label>
-        <Preview />
+        {preview()}
       </div>
     </div>
   );
@@ -1733,7 +1713,7 @@ export const SettingsView = () => {
       }
     } catch (e) {
       setExportProgress(null);
-      toast.error(t.backup_export_error + ': ' + e.message);
+      toast.error(t.backup_export_error + ': ' + errMsg(e));
     }
   };
 
@@ -1751,7 +1731,7 @@ export const SettingsView = () => {
         toast.success(t.backup_import_success);
       }
     } catch (e) {
-      toast.error(t.backup_import_error + ': ' + e.message);
+      toast.error(t.backup_import_error + ': ' + errMsg(e));
     } finally {
       setImporting(false);
     }
@@ -1770,7 +1750,7 @@ export const SettingsView = () => {
       await restoreFromAutoBackup(selectedBackupDate);
       toast.success(t.backup_import_success);
     } catch (e) {
-      toast.error(t.backup_restore_error + ': ' + e.message);
+      toast.error(t.backup_restore_error + ': ' + errMsg(e));
     } finally {
       setRestoring(false);
     }

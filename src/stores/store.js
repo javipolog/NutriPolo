@@ -125,12 +125,22 @@ export function formatDateShort(dateStr) {
   return `${dd}/${mm}/${yy}`;
 }
 
-export function todayISO() {
-  const d = new Date();
+/** Readable message for any thrown value: Tauri `invoke` rejects with plain strings. */
+export function errMsg(e) {
+  if (typeof e === 'string') return e;
+  return e?.message || String(e);
+}
+
+/** YYYY-MM-DD in local time (toISOString() would give the UTC date). */
+export function localISODate(d = new Date()) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${dd}`;
+}
+
+export function todayISO() {
+  return localISODate(new Date());
 }
 
 export function calcIMC(peso, altura) {
@@ -1271,7 +1281,7 @@ const useStore = create(
         const today = todayISO();
         const limit = new Date();
         limit.setDate(limit.getDate() + days);
-        const limitStr = limit.toISOString().slice(0, 10);
+        const limitStr = localISODate(limit);
         const { consultations, config } = get();
         return filterVisibleConsultations(consultations, config.googleCalendar)
           .filter(c => c.fecha >= today && c.fecha <= limitStr && c.estado === 'programada')
@@ -1281,7 +1291,7 @@ const useStore = create(
       getPendingFollowUps: (days = 30) => {
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - days);
-        const cutoffStr = cutoff.toISOString().slice(0, 10);
+        const cutoffStr = localISODate(cutoff);
         return get().clients.filter(c =>
           c.estado === 'activo' &&
           (!c.fechaUltimaConsulta || c.fechaUltimaConsulta < cutoffStr)
@@ -1322,7 +1332,7 @@ const useStore = create(
         const today = todayISO();
         const limit = new Date();
         limit.setDate(limit.getDate() + days);
-        const limitStr = limit.toISOString().slice(0, 10);
+        const limitStr = localISODate(limit);
         return get().nutritionPlans.filter(p =>
           p.estado === 'activo' && p.fechaFin && p.fechaFin >= today && p.fechaFin <= limitStr
         );

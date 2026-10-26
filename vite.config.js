@@ -16,7 +16,6 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_DEBUG,
   },
   optimizeDeps: {
-    include: ['pdfjs-dist'],
     esbuildOptions: {
       target: 'esnext',
     },

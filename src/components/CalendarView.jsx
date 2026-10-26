@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Plus, Clock, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
 import { Button, useToast, useConfirm } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
@@ -77,7 +77,8 @@ function consultationMatchVisual(c) {
 }
 
 // ── Hour slots for weekly view ─────────────────────────────────────────────
-const HOURS = Array.from({ length: 13 }, (_, i) => i + 8); // 8..20
+const DEFAULT_FIRST_HOUR = 8;
+const DEFAULT_LAST_HOUR = 20;
 
 // ── Weekly View ────────────────────────────────────────────────────────────
 
@@ -99,6 +100,18 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
     const match = blockedHours.find(b => b.dayOfWeek === dow && hour >= b.startHour && hour < b.endHour);
     return match?.label || '';
   };
+
+  // 8–20 by default, widened so early/late appointments are never hidden.
+  const hours = useMemo(() => {
+    let first = DEFAULT_FIRST_HOUR, last = DEFAULT_LAST_HOUR;
+    for (const c of [...consultations, ...(personalEvents || [])]) {
+      const h = c.hora ? parseInt(c.hora.split(':')[0], 10) : NaN;
+      if (Number.isNaN(h) || c.allDay) continue;
+      first = Math.min(first, h);
+      last = Math.max(last, h);
+    }
+    return Array.from({ length: last - first + 1 }, (_, i) => i + first);
+  }, [consultations, personalEvents]);
 
   const byDayHour = useMemo(() => {
     const map = {};
@@ -146,7 +159,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
 
         {/* Time rows */}
         <div className="relative flex-1 flex flex-col">
-          {HOURS.map(h => (
+          {hours.map(h => (
             <div key={h} className="grid grid-cols-[48px_repeat(7,1fr)] border-b border-sage-100 flex-1 min-h-[40px]">
               <div className="text-right pr-2 pt-1 text-[10px] text-sage-400 shrink-0">{h}:00</div>
               {days.map(d => {
@@ -546,7 +559,8 @@ export const CalendarView = () => {
     setCursor(prev => {
       const d = new Date(prev);
       if (viewMode === 'week') d.setDate(d.getDate() + dir * 7);
-      else if (viewMode === 'month') d.setMonth(d.getMonth() + dir);
+      // Day 1 first: Jan 31 + 1 month would otherwise overflow to March.
+      else if (viewMode === 'month') { d.setDate(1); d.setMonth(d.getMonth() + dir); }
       else d.setDate(d.getDate() + dir * 30);
       return d;
     });

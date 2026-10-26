@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Calendar, Leaf, Receipt, FileText } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { useShallow } from 'zustand/react/shallow';
+import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText } from 'lucide-react';
 import { Button, useToast } from './UI';
 import useStore, { formatDate, calcIMC } from '../stores/store';
 import { useT } from '../i18n';
@@ -24,10 +25,12 @@ const InfoRow = ({ label, value }) => (
 
 export const ClientDetailView = ({ clientId, onBack }) => {
   const client = useStore(s => s.clients.find(c => c.id === clientId));
-  const consultations = useStore(s => s.consultations.filter(c => c.clienteId === clientId));
-  const nutritionPlans = useStore(s => s.nutritionPlans.filter(p => p.clienteId === clientId));
-  const invoices = useStore(s => s.invoices.filter(i => i.clienteId === clientId));
-  const measurements = useStore(s => s.getClientMeasurements(clientId));
+  // useShallow: these selectors build new arrays, which would otherwise
+  // re-render the view on every unrelated store change.
+  const consultations = useStore(useShallow(s => s.consultations.filter(c => c.clienteId === clientId)));
+  const nutritionPlans = useStore(useShallow(s => s.nutritionPlans.filter(p => p.clienteId === clientId)));
+  const invoices = useStore(useShallow(s => s.invoices.filter(i => i.clienteId === clientId)));
+  const measurements = useStore(useShallow(s => s.getClientMeasurements(clientId)));
   const config = useStore(s => s.config);
   const updateConsultation = useStore(s => s.updateConsultation);
   const setCurrentView = useStore(s => s.setCurrentView);
@@ -38,7 +41,9 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [emailDoc, setEmailDoc] = useState(null);
 
-  if (!client) { onBack(); return null; }
+  // Client deleted while open: leave the view (side effect, not during render).
+  useEffect(() => { if (!client) onBack(); }, [client, onBack]);
+  if (!client) return null;
 
   const lastMeasurement = measurements[measurements.length - 1];
   const currentIMC = lastMeasurement?.imc || (lastMeasurement?.peso && client.altura ? calcIMC(lastMeasurement.peso, client.altura) : null);

@@ -329,6 +329,8 @@ export const TRANSLATIONS = {
 
     // Settings
     settings_title:          'Ajustes',
+    settings_personal:       'Datos personales',
+    search_placeholder:      'Buscar...',
     settings_profile:        'Datos de la consulta',
     settings_locations:      'Ubicaciones',
     settings_consultation_types: 'Tipos de consulta',
@@ -700,6 +702,8 @@ export const TRANSLATIONS = {
     consultation_hour:       'Hora',
     consultation_location:   'Ubicació',
     consultation_type:       'Tipus de consulta',
+    consultation_status:     'Estat',
+    consultation_measurement:'Prendre mesures en aquesta visita',
     consultation_duration:   'Durada (min)',
     consultation_private_notes: 'Notes privades (només tu)',
     consultation_client_notes:  'Notes per al client',
@@ -797,6 +801,10 @@ export const TRANSLATIONS = {
     invoice_total:           'Total',
     invoice_no_unbilled:     'Sense consultes pendents de facturar',
     settings_title:          'Ajustos',
+    settings_personal:       'Dades personals',
+    search_placeholder:      'Cercar...',
+    settings_email:          'Configuració de correu',
+    settings_appearance:     'Aparença',
     settings_invoice_design: 'Disseny de documents',
     design_logo:             'Logotip',
     design_upload_logo:      'Pujar logotip',
@@ -1079,6 +1087,8 @@ export const TRANSLATIONS = {
     invoice_total:           'Total',
     invoice_no_unbilled:     'No unbilled consultations',
     settings_title:          'Settings',
+    settings_personal:       'Personal details',
+    search_placeholder:      'Search...',
     settings_invoice_design: 'Document Design',
     design_logo:             'Logo',
     design_upload_logo:      'Upload logo',
@@ -1239,9 +1249,15 @@ export const TRANSLATIONS = {
   },
 };
 
+// CA and EN are incomplete: fall back key by key to Spanish so a missing
+// translation shows Spanish text instead of an empty label.
+const RESOLVED = Object.fromEntries(
+  Object.entries(TRANSLATIONS).map(([lang, dict]) => [lang, { ...TRANSLATIONS.es, ...dict }])
+);
+
 export function useT() {
   const appLang = useStore(s => s.config?.appLang || 'es');
-  return TRANSLATIONS[appLang] || TRANSLATIONS.es;
+  return RESOLVED[appLang] || RESOLVED.es;
 }
 
 export default useT;

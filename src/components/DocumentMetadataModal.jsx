@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Input, Textarea, Select, Button } from './UI';
 import { useT } from '../i18n';
+import { todayISO } from '../stores/store';
 
 const DOC_TYPES = [
   { value: 'plan_nutricional', labelKey: 'doc_type_plan' },
@@ -33,7 +34,7 @@ export const DocumentMetadataModal = ({ open, onClose, onSave, document, fileNam
         setForm({
           nombre: fileName ? fileName.replace(/\.pdf$/i, '') : '',
           tipo: 'plan_nutricional',
-          fechaDocumento: new Date().toISOString().slice(0, 10),
+          fechaDocumento: todayISO(),
           notas: '',
         });
       }

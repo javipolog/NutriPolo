@@ -4,7 +4,8 @@ import useStore, { formatCurrency, formatDateShort } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT } from '../i18n';
 
-const highlight = (text, query) => {
+const highlight = (value, query) => {
+  const text = value == null ? '' : String(value);
   if (!query) return text;
   const idx = text.toLowerCase().indexOf(query.toLowerCase());
   if (idx === -1) return text;
@@ -33,6 +34,8 @@ export const CommandPalette = ({ open, onClose }) => {
     setSyncing(true);
     try {
       await googleCalendar.syncAll(useStore.getState());
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('[CommandPalette sync]', e);
     } finally {
       setSyncing(false);
     }

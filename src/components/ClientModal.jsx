@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Button, Input, Textarea, Select, Modal, useToast } from './UI';
-import useStore, { generateId } from '../stores/store';
+import React, { useState } from 'react';
+import { Button, Input, Textarea, Modal, useToast } from './UI';
+import useStore from '../stores/store';
 import { useT } from '../i18n';
 
 const OBJECTIVES = [

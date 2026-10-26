@@ -154,7 +154,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             className={`w-full px-3 py-2 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors.clienteId ? 'border-danger' : 'border-sage-300'}`}
           >
             <option value="">Seleccionar cliente...</option>
-            {clients.sort((a, b) => a.nombre.localeCompare(b.nombre)).map(c => (
+            {[...clients].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')).map(c => (
               <option key={c.id} value={c.id}>{c.nombre}</option>
             ))}
           </select>
@@ -173,7 +173,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_duration}</label>
-            <Input type="number" value={form.duracion} onChange={e => set('duracion', e.target.value)} disabled={isReadonly} />
+            <Input type="number" value={form.duracion} onChange={e => set('duracion', e.target.value === '' ? '' : Number(e.target.value))} disabled={isReadonly} />
           </div>
         </div>
 

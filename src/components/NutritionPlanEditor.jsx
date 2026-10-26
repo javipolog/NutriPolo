@@ -4,7 +4,8 @@ import {
   Leaf, Download, Mail, FolderDown
 } from 'lucide-react';
 import { Button, Modal, Input, Textarea, EmptyState, useToast, useConfirm } from './UI';
-import useStore, { formatDate, todayISO, generateId } from '../stores/store';
+import { invoke } from '@tauri-apps/api/tauri';
+import useStore, { formatDate, todayISO, generateId, errMsg } from '../stores/store';
 import { useT } from '../i18n';
 import { SendEmailModal } from './SendEmailModal';
 
@@ -22,12 +23,12 @@ const MacroBar = ({ proteinas, carbohidratos, grasas }) => {
     <div className="mt-2">
       <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
         <div style={{ width: `${pct(p)}%` }} className="bg-wellness-400 transition-all" title={`Proteínas ${pct(p)}%`} />
-        <div style={{ width: `${pct(c)}%` }} className="bg-coral-400 transition-all" title={`Carbohidratos ${pct(c)}%`} />
+        <div style={{ width: `${pct(c)}%` }} className="bg-orange-400 transition-all" title={`Carbohidratos ${pct(c)}%`} />
         <div style={{ width: `${pct(g)}%` }} className="bg-yellow-400 transition-all" title={`Grasas ${pct(g)}%`} />
       </div>
       <div className="flex gap-3 mt-1 text-[10px] text-sage-500">
         <span><span className="inline-block w-2 h-2 rounded-full bg-wellness-400 mr-1" />P {pct(p)}%</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-coral-400 mr-1" />C {pct(c)}%</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1" />C {pct(c)}%</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-yellow-400 mr-1" />G {pct(g)}%</span>
       </div>
     </div>
@@ -450,8 +451,6 @@ export const NutritionPlanEditor = () => {
         <div className="space-y-3">
           {filtered.map(plan => {
             const client = clients.find(c => c.id === plan.clienteId);
-            const totalKcal = plan.comidas?.reduce((sum, meal) =>
-              sum + (meal.opciones || []).reduce((s, o) => s + (parseFloat(o.kcalAprox) || 0), 0), 0) || 0;
 
             return (
               <div key={plan.id} className="bg-white border border-sage-200 rounded-soft shadow-card p-4 flex items-start gap-4 hover:shadow-card-hover transition-shadow">
@@ -480,15 +479,19 @@ export const NutritionPlanEditor = () => {
                     onClick={async () => {
                       try {
                         const { generateNutritionPlanPDF } = await import('../services/pdfPlanGenerator');
-                        const client = clients.find(c => c.id === plan.clienteId);
+                        const { save } = await import('@tauri-apps/api/dialog');
+                        const { writeBinaryFile } = await import('@tauri-apps/api/fs');
                         const bytes = await generateNutritionPlanPDF(plan, client, config);
-                        const blob = new Blob([bytes], { type: 'application/pdf' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url; a.download = `${plan.nombre || 'plan'}.pdf`; a.click();
-                        URL.revokeObjectURL(url);
-                        toast.success('PDF descargado');
-                      } catch (e) { toast.error('Error al generar PDF: ' + e.message); }
+                        // Same flow as invoices: an <a download> blob link is unreliable in Tauri.
+                        const filePath = await save({
+                          defaultPath: `${(plan.nombre || 'plan').replace(/[\\/:*?"<>|]/g, '_')}.pdf`,
+                          filters: [{ name: 'PDF', extensions: ['pdf'] }],
+                        });
+                        if (!filePath) return;
+                        await writeBinaryFile(filePath, bytes);
+                        invoke('open_file', { path: filePath }).catch(() => {});
+                        toast.success('PDF guardado');
+                      } catch (e) { toast.error('Error al generar PDF: ' + errMsg(e)); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
                     title="Descargar PDF"
@@ -500,7 +503,6 @@ export const NutritionPlanEditor = () => {
                       try {
                         const { generateNutritionPlanPDF } = await import('../services/pdfPlanGenerator');
                         const { saveBytesToDocuments } = await import('../services/documentService');
-                        const client = clients.find(c => c.id === plan.clienteId);
                         const bytes = await generateNutritionPlanPDF(plan, client, config);
                         let binary = '';
                         for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
@@ -519,7 +521,7 @@ export const NutritionPlanEditor = () => {
                           notas: '',
                         });
                         toast.success(t.doc_saved_to_client || 'Plan guardado en documentos del cliente');
-                      } catch (e) { toast.error('Error: ' + e.message); }
+                      } catch (e) { toast.error('Error: ' + errMsg(e)); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
                     title={t.doc_save_to_client || 'Guardar en documentos del cliente'}
@@ -527,7 +529,14 @@ export const NutritionPlanEditor = () => {
                     <FolderDown size={14} />
                   </button>
                   <button
-                    onClick={() => setEmailPlan(plan)}
+                    onClick={async () => {
+                      // The email must carry the plan itself: generate the PDF first.
+                      try {
+                        const { generateNutritionPlanPDF } = await import('../services/pdfPlanGenerator');
+                        const pdfBytes = await generateNutritionPlanPDF(plan, client, config);
+                        setEmailPlan({ plan, pdfBytes });
+                      } catch (e) { toast.error('Error al generar PDF: ' + errMsg(e)); }
+                    }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
                     title="Enviar por email"
                   >
@@ -562,8 +571,9 @@ export const NutritionPlanEditor = () => {
       {emailPlan && (
         <SendEmailModal
           mode="plan"
-          plan={emailPlan}
-          client={clients.find(c => c.id === emailPlan.clienteId)}
+          plan={emailPlan.plan}
+          pdfBytes={emailPlan.pdfBytes}
+          client={clients.find(c => c.id === emailPlan.plan.clienteId)}
           onClose={() => setEmailPlan(null)}
         />
       )}

@@ -2,14 +2,30 @@ import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Plus, Trash2 } from 'lucide-react';
 import { Button, useToast, useConfirm } from './UI';
-import useStore, { formatDate, formatDateShort, calcIMC } from '../stores/store';
+import useStore, { formatDate, formatDateShort, calcIMC, todayISO } from '../stores/store';
 import { useT } from '../i18n';
 
-const MeasurementModal = ({ clientId, clientHeight, onClose }) => {
+// Module-level so it keeps its identity across renders (an inline component
+// would remount the <input> on every keystroke and drop the focus).
+const MeasurementField = ({ label, unit, value, onChange }) => (
+  <div>
+    <label className="block text-xs text-sage-500 mb-1">{label} {unit && <span className="text-sage-400">({unit})</span>}</label>
+    <input
+      type="number"
+      step="0.1"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="w-full px-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white text-sage-800 focus:outline-none focus:border-wellness-400"
+      placeholder="—"
+    />
+  </div>
+);
+
+const MeasurementModal = ({ clientId, onClose }) => {
   const addMeasurement = useStore(s => s.addMeasurement);
   const toast = useToast();
   const t = useT();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayISO();
 
   const [form, setForm] = useState({
     fecha: today, peso: '', grasaCorporal: '', masaMuscular: '',
@@ -35,18 +51,9 @@ const MeasurementModal = ({ clientId, clientHeight, onClose }) => {
     onClose();
   };
 
-  const Field = ({ label, field, unit }) => (
-    <div>
-      <label className="block text-xs text-sage-500 mb-1">{label} {unit && <span className="text-sage-400">({unit})</span>}</label>
-      <input
-        type="number"
-        step="0.1"
-        value={form[field]}
-        onChange={e => set(field, e.target.value)}
-        className="w-full px-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white text-sage-800 focus:outline-none focus:border-wellness-400"
-        placeholder="—"
-      />
-    </div>
+  // Plain render helper (not a component) so the inputs keep their identity.
+  const field = (label, key, unit) => (
+    <MeasurementField key={key} label={label} unit={unit} value={form[key]} onChange={v => set(key, v)} />
   );
 
   return (
@@ -59,20 +66,20 @@ const MeasurementModal = ({ clientId, clientHeight, onClose }) => {
         </div>
         <div className="p-5 space-y-4">
           <div className="grid grid-cols-3 gap-3">
-            <Field label={t.measurement_weight} field="peso" unit="kg" />
-            <Field label={t.measurement_body_fat} field="grasaCorporal" unit="%" />
-            <Field label={t.measurement_muscle} field="masaMuscular" unit="kg" />
-            <Field label={t.measurement_water} field="agua" unit="%" />
-            <Field label={t.measurement_visceral_fat} field="grasaVisceral" unit="" />
+            {field(t.measurement_weight, 'peso', 'kg')}
+            {field(t.measurement_body_fat, 'grasaCorporal', '%')}
+            {field(t.measurement_muscle, 'masaMuscular', 'kg')}
+            {field(t.measurement_water, 'agua', '%')}
+            {field(t.measurement_visceral_fat, 'grasaVisceral', '')}
           </div>
           <div>
             <p className="text-xs font-medium text-sage-600 mb-2">Perímetros corporales</p>
             <div className="grid grid-cols-3 gap-3">
-              <Field label={t.measurement_waist} field="cintura" unit="cm" />
-              <Field label={t.measurement_chest} field="pecho" unit="cm" />
-              <Field label={t.measurement_hip} field="cadera" unit="cm" />
-              <Field label={t.measurement_arm} field="brazo" unit="cm" />
-              <Field label={t.measurement_thigh} field="muslo" unit="cm" />
+              {field(t.measurement_waist, 'cintura', 'cm')}
+              {field(t.measurement_chest, 'pecho', 'cm')}
+              {field(t.measurement_hip, 'cadera', 'cm')}
+              {field(t.measurement_arm, 'brazo', 'cm')}
+              {field(t.measurement_thigh, 'muslo', 'cm')}
             </div>
           </div>
           <div>
@@ -201,7 +208,6 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
       {showModal && (
         <MeasurementModal
           clientId={clientId}
-          clientHeight={clientHeight}
           onClose={() => setShowModal(false)}
         />
       )}
