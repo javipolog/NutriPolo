@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { Bell, MessageCircle, Mail, Settings, UserPlus, ArrowRight, Loader2 } from 'lucide-react';
-import { Card, Button } from './UI';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Bell, MessageCircle, Mail, Settings, UserPlus, ArrowRight, Loader2, SkipForward, CheckCircle2 } from 'lucide-react';
+import { Card, Button, Modal, Textarea } from './UI';
 import useStore, { filterVisibleConsultations, todayISO, localISODate } from '../stores/store';
 import { useT } from '../i18n';
 import { useNow } from '../hooks/useNow';
 import { useReminderActions } from '../hooks/useReminderActions';
-import { getReminderCandidates, getReminderConfig } from '../services/reminderService';
+import { getReminderCandidates, getReminderConfig, buildReminderWhatsApp } from '../services/reminderService';
 
 const STATE_STYLES = {
   due:        'bg-warning-light text-warning-dark',
@@ -81,6 +81,73 @@ const ChannelCell = ({ entry, autoEmail, busy, onSend, t }) => {
   );
 };
 
+/**
+ * Walks through the due WhatsApp reminders one by one: each step shows the
+ * message (editable) and opens the chat; the user presses Send in WhatsApp
+ * and comes back for the next. `entries` is a snapshot taken when opening.
+ */
+const WhatsAppQueueModal = ({ entries, onClose, sendWhatsApp, t }) => {
+  const config = useStore(s => s.config);
+  const [index, setIndex] = useState(0);
+  const [opened, setOpened] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const entry = entries[index];
+  const [text, setText] = useState('');
+
+  useEffect(() => {
+    if (entry) setText(buildReminderWhatsApp({ consultation: entry.consultation, client: entry.client, config }).text || '');
+    // Rebuild only when moving to another patient, not on every config change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry]);
+
+  const next = () => setIndex(i => i + 1);
+  const openCurrent = async () => {
+    setBusy(true);
+    try {
+      if (await sendWhatsApp(entry.consultation, entry.client, { text, silent: true })) {
+        setOpened(n => n + 1);
+        next();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title={t.reminders_wa_queue_title} size="sm">
+      {!entry ? (
+        <div className="space-y-4 text-center">
+          <CheckCircle2 size={32} className="mx-auto text-success" />
+          <p className="text-sm text-sage-700">
+            {t.reminders_wa_queue_done.replace('{opened}', opened).replace('{skipped}', entries.length - opened)}
+          </p>
+          <Button onClick={onClose}>{t.close}</Button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="flex items-baseline justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-sage-900 truncate">{entry.client.nombre}</p>
+              <p className="text-xs text-sage-500">{dayLabel(entry.start, t)} · {entry.consultation.hora || '—'}</p>
+            </div>
+            <span className="text-xs text-sage-500 shrink-0" aria-live="polite">
+              {t.reminders_wa_queue_progress.replace('{i}', index + 1).replace('{n}', entries.length)}
+            </span>
+          </div>
+          <Textarea rows={5} value={text} onChange={e => setText(e.target.value)} aria-label={t.reminders_message} />
+          <p className="text-xs text-sage-500">{t.reminders_wa_queue_help}</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" icon={SkipForward} onClick={next} disabled={busy}>{t.reminders_wa_queue_skip}</Button>
+            <Button icon={busy ? Loader2 : MessageCircle} onClick={openCurrent} disabled={busy || !text.trim()} autoFocus>
+              {t.reminders_wa_queue_open}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+};
+
 export const RemindersPanel = ({ onNavigate }) => {
   const consultations = useStore(s => s.consultations);
   const clients = useStore(s => s.clients);
@@ -89,6 +156,7 @@ export const RemindersPanel = ({ onNavigate }) => {
   const now = useNow(60000);
   const { sendWhatsApp, sendEmail } = useReminderActions();
   const [busyKey, setBusyKey] = useState(null);
+  const [waQueue, setWaQueue] = useState(null);
 
   const rc = getReminderConfig(config);
   const autoEmail = rc.email.auto && !!config.smtp?.host;
@@ -142,8 +210,8 @@ export const RemindersPanel = ({ onNavigate }) => {
         </div>
         <div className="flex flex-wrap gap-2">
           {dueWhatsApp.length > 0 && (
-            <Button size="sm" icon={MessageCircle} disabled={!!busyKey} onClick={() => send(dueWhatsApp[0])}>
-              {t.reminders_next_whatsapp} ({dueWhatsApp.length})
+            <Button size="sm" icon={MessageCircle} disabled={!!busyKey} onClick={() => setWaQueue(dueWhatsApp)}>
+              {t.reminders_wa_queue_button} ({dueWhatsApp.length})
             </Button>
           )}
           {pendingEmails.length > 0 && (
@@ -200,6 +268,10 @@ export const RemindersPanel = ({ onNavigate }) => {
             );
           })}
         </div>
+      )}
+
+      {waQueue && (
+        <WhatsAppQueueModal entries={waQueue} onClose={() => setWaQueue(null)} sendWhatsApp={sendWhatsApp} t={t} />
       )}
     </Card>
   );

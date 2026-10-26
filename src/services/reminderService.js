@@ -5,8 +5,9 @@
  *
  *  - Email: sent automatically over SMTP when the reminder window opens
  *    (see useBackgroundJobs), or by hand from the Dashboard panel.
- *  - WhatsApp: semi-automatic. The app builds a wa.me link with the message
- *    pre-filled and opens it; the nutritionist presses "Send" in WhatsApp.
+ *  - WhatsApp: semi-automatic. The app opens the chat with the message
+ *    pre-filled (WhatsApp Desktop via whatsapp://, or wa.me in the browser);
+ *    the nutritionist presses "Send" in WhatsApp.
  *
  * The first half of this file is pure (no Tauri / store access) so the
  * scheduling rules can be unit-tested.
@@ -29,7 +30,8 @@ export const DEFAULT_REMINDER_CONFIG = {
   // `templates` holds only the languages the user customised; the rest fall
   // back to the defaults above / DEFAULT_APPOINTMENT_TEMPLATES.
   email:    { enabled: true, auto: false, leadHours: 24, templates: {} },
-  whatsapp: { enabled: true, leadHours: 24, templates: {} },
+  // openWith: 'browser' (wa.me) | 'desktop' (whatsapp:// → WhatsApp Desktop app)
+  whatsapp: { enabled: true, leadHours: 24, templates: {}, openWith: 'browser' },
   // Never remind when the appointment is closer than this (late bookings).
   minLeadHours: 2,
   // No automatic emails inside this window (crosses midnight when from > to).
@@ -190,17 +192,29 @@ export function whatsAppTemplate(config, lang) {
     || DEFAULT_WHATSAPP_REMINDER_TEMPLATES.es;
 }
 
-export function buildReminderWhatsApp({ consultation, client, config }) {
+/** Chat link for a normalized phone, in the app chosen in settings. */
+export function whatsAppUrl(phone, text, config) {
+  const desktop = getReminderConfig(config).whatsapp.openWith === 'desktop';
+  const q = text ? encodeURIComponent(text) : '';
+  if (desktop) return `whatsapp://send?phone=${phone}${q ? `&text=${q}` : ''}`;
+  return `https://wa.me/${phone}${q ? `?text=${q}` : ''}`;
+}
+
+/** `text` overrides the template (the queue lets the user edit the message). */
+export function buildReminderWhatsApp({ consultation, client, config, text: override }) {
   const phone = normalizeWhatsAppPhone(client?.whatsapp || client?.telefono, config?.whatsappCountryCode);
   if (!phone) return { error: 'no_phone' };
   const lang = clientLanguage(client, config);
-  const text = resolveTemplate(whatsAppTemplate(config, lang), { client, consultation, config, lang });
-  return { url: `https://wa.me/${phone}?text=${encodeURIComponent(text)}`, text, phone };
+  const text = override ?? resolveTemplate(whatsAppTemplate(config, lang), { client, consultation, config, lang });
+  return { url: whatsAppUrl(phone, text, config), text, phone };
 }
 
 // ── Side effects ────────────────────────────────────────────────────────────
 
-/** Open an https URL in the system browser (window.open is unreliable in Tauri 1). */
+/**
+ * Open an https / whatsapp:// URL with the system handler (window.open is
+ * unreliable in Tauri 1). Allowed schemes: tauri.conf.json → allowlist.shell.open.
+ */
 export async function openExternal(url) {
   try {
     await openUrl(url);
@@ -213,12 +227,12 @@ export async function openExternal(url) {
 export async function openWhatsAppChat(client, config) {
   const phone = normalizeWhatsAppPhone(client?.whatsapp || client?.telefono, config?.whatsappCountryCode);
   if (!phone) return { success: false, error: 'no_phone' };
-  await openExternal(`https://wa.me/${phone}`);
+  await openExternal(whatsAppUrl(phone, '', config));
   return { success: true };
 }
 
-export async function openWhatsAppReminder({ consultation, client, config }) {
-  const built = buildReminderWhatsApp({ consultation, client, config });
+export async function openWhatsAppReminder({ consultation, client, config, text }) {
+  const built = buildReminderWhatsApp({ consultation, client, config, text });
   if (built.error) return { success: false, error: built.error };
   await openExternal(built.url);
   return { success: true };

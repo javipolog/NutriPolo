@@ -126,6 +126,16 @@ describe('message building', () => {
     expect(r.text).toContain('15/10/2026');
     expect(r.text).toContain('Centro');
   });
+  it('builds a whatsapp:// link for the desktop app', () => {
+    const cfg = { ...config, reminders: { whatsapp: { openWith: 'desktop' } } };
+    const r = buildReminderWhatsApp({ consultation: consult(), client, config: cfg });
+    expect(r.url.startsWith('whatsapp://send?phone=34622123456&text=')).toBe(true);
+    expect(decodeURIComponent(r.url.split('&text=')[1])).toBe(r.text);
+  });
+  it('uses the edited text when given', () => {
+    const r = buildReminderWhatsApp({ consultation: consult(), client, config, text: 'Hola & adiós' });
+    expect(r.url).toBe(`https://wa.me/34622123456?text=${encodeURIComponent('Hola & adiós')}`);
+  });
   it('uses custom email templates when set', () => {
     const cfg = { ...config, reminders: { email: { templates: { es: { subject: 'Cita {{citaHora}}', body: 'Hola {{clientNom}}' } } } } };
     const m = buildReminderEmail({ consultation: consult(), client, config: cfg });

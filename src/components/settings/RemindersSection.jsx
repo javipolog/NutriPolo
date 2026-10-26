@@ -165,6 +165,23 @@ export const RemindersSection = ({ onGoToSmtp }) => {
           </label>
         </div>
         <p className="text-xs text-sage-400">{t.reminders_country_hint}</p>
+        <fieldset>
+          <legend className="block text-xs font-medium text-sage-600 mb-1">{t.reminders_whatsapp_open_with}</legend>
+          <div className="flex flex-wrap gap-4">
+            {[['desktop', t.reminders_whatsapp_open_desktop], ['browser', t.reminders_whatsapp_open_browser]].map(([id, label]) => (
+              <label key={id} className="flex items-center gap-1.5 text-sm text-sage-800 cursor-pointer">
+                <input
+                  type="radio"
+                  name="whatsapp-open-with"
+                  checked={rc.whatsapp.openWith === id}
+                  onChange={() => setChannelCfg('whatsapp', { openWith: id })}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-sage-400 mt-1">{t.reminders_whatsapp_open_hint}</p>
+        </fieldset>
       </div>
 
       {/* Timing rules */}

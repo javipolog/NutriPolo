@@ -44,9 +44,10 @@ export function useReminderActions() {
   const toast = useToast();
   const t = useT();
 
-  const sendWhatsApp = useCallback(async (consultation, client) => {
+  /** Options: `text` replaces the template message; `silent` skips the success toast. */
+  const sendWhatsApp = useCallback(async (consultation, client, { text, silent = false } = {}) => {
     const config = useStore.getState().config;
-    const result = await openWhatsAppReminder({ consultation, client, config });
+    const result = await openWhatsAppReminder({ consultation, client, config, text });
     if (!result.success) {
       toast.error(reminderErrorText(result.error, t));
       return false;
@@ -54,7 +55,7 @@ export function useReminderActions() {
     useStore.getState().setConsultationReminder(consultation.id, 'whatsapp', {
       status: 'opened', at: new Date().toISOString(), slot: reminderSlot(consultation),
     });
-    toast.success(t.whatsapp_reminder_sent);
+    if (!silent) toast.success(t.whatsapp_reminder_sent);
     return true;
   }, [toast, t]);
 
