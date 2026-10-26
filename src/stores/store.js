@@ -13,7 +13,8 @@ const RETRY_DELAY_MS = 5000;
 
 // Outside Tauri (plain `npm run dev` in a browser) there is no IPC bridge;
 // persist to localStorage so the UI can still be exercised.
-const isTauri = typeof window !== 'undefined' && !!window.__TAURI_IPC__;
+// Checked per call (not cached at import time) so a late-injected bridge is never missed.
+const isTauri = () => typeof window !== 'undefined' && typeof window.__TAURI_IPC__ === 'function';
 
 // Set when the persisted file exists but cannot be read (corrupt JSON,
 // decrypt failure…). While set, writes are blocked so the default empty
@@ -31,7 +32,7 @@ function flushWrite(name) {
   const value = writeQueue[name];
   if (value === undefined) return Promise.resolve();
   delete writeQueue[name];
-  if (!isTauri) {
+  if (!isTauri()) {
     try { localStorage.setItem(name, value); } catch {}
     return Promise.resolve();
   }
@@ -48,7 +49,7 @@ function flushWrite(name) {
 
 const tauriStorage = {
   getItem: async (name) => {
-    if (!isTauri) return localStorage.getItem(name);
+    if (!isTauri()) return localStorage.getItem(name);
     try {
       return await invoke('load_data', { key: name });
     } catch (err) {
@@ -74,7 +75,7 @@ const tauriStorage = {
     clearTimeout(writeTimers[name]);
     delete writeQueue[name];
     delete writeTimers[name];
-    if (!isTauri) { localStorage.removeItem(name); return; }
+    if (!isTauri()) { localStorage.removeItem(name); return; }
     await invoke('delete_data', { key: name }).catch(() => {});
   },
 };
@@ -696,7 +697,7 @@ function mergeRestoredConfig(current, restored) {
  */
 let secretsSyncStarted = false;
 export async function syncGoogleSecrets() {
-  if (!isTauri || secretsSyncStarted) return;
+  if (!isTauri() || secretsSyncStarted) return;
   secretsSyncStarted = true;
   const gc = useStore.getState().config.googleCalendar || {};
   try {
@@ -1884,7 +1885,7 @@ const useStore = create(
           ? { ...s.config, smtp: s.config.smtp ? { ...s.config.smtp, password: '' } : s.config.smtp }
           : s.config;
         // Google secrets live in the keyring (see syncGoogleSecrets).
-        if (isTauri) safeConfig = stripGoogleSecrets(safeConfig);
+        if (isTauri()) safeConfig = stripGoogleSecrets(safeConfig);
         return {
           config: safeConfig,
           clients: s.clients,
