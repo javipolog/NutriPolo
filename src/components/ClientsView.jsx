@@ -52,7 +52,7 @@ export const ClientsView = () => {
   }
 
   const handleDelete = async (client) => {
-    const ok = await confirm(`¿Eliminar a ${client.nombre}? Se eliminarán también sus consultas, mediciones y documentos.`);
+    const ok = await confirm(`¿Eliminar a ${client.nombre}? Se eliminarán también sus consultas, mediciones y planes (Ctrl+Z para deshacer). Sus documentos se borrarán definitivamente. Las facturas se conservan.`);
     if (!ok) return;
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);

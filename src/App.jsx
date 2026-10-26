@@ -4,7 +4,8 @@ import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Searc
 import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
-import useStore from './stores/store';
+import { LoadErrorScreen } from './components/LoadErrorScreen';
+import useStore, { flushAllPending, getLoadFailure, syncGoogleSecrets } from './stores/store';
 import { useT } from './i18n';
 
 // ============================================
@@ -193,6 +194,25 @@ const IntegrityWarningBanner = () => {
 };
 
 // ============================================
+// SAVE ERROR BANNER
+// ============================================
+const SaveErrorBanner = () => {
+  const saveError = useStore(s => s.saveError);
+  if (!saveError) return null;
+  return (
+    <div className="bg-danger-light border-b border-danger/20 px-6 py-3 flex items-start gap-3">
+      <AlertTriangle size={16} className="text-danger mt-0.5 shrink-0" />
+      <div className="flex-1 min-w-0">
+        <p className="text-danger text-sm font-medium">No se pudieron guardar los últimos cambios</p>
+        <p className="text-danger text-xs mt-0.5">
+          Se reintentará automáticamente. No cierres la aplicación hasta que desaparezca este aviso. ({saveError})
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// ============================================
 // DYNAMIC VIEW LOADER
 // ============================================
 function ViewLoader({ view }) {
@@ -356,6 +376,8 @@ function AppContent() {
         clearTimeout(timer);
         timer = setTimeout(async () => {
           try {
+            // Write pending changes while the key is still available.
+            await flushAllPending();
             await invoke('encryption_lock');
           } catch {}
           window.location.reload();
@@ -441,6 +463,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-sage-50 flex flex-col">
+      <SaveErrorBanner />
       <IntegrityWarningBanner />
 
       <div className="flex flex-1 min-h-0">
@@ -578,6 +601,7 @@ function AppContent() {
  *   checking       → asking the backend whether encryption.json exists
  *   unlocking      → encryption enabled, waiting for user to unlock
  *   hydrating      → unlocked (or no encryption), triggering persist.rehydrate()
+ *   loadError      → the data file exists but could not be read (writes blocked)
  *   ready          → store is hydrated, render the main app
  */
 function EncryptionGate() {
@@ -614,9 +638,11 @@ function EncryptionGate() {
       try {
         await useStore.persist.rehydrate();
       } catch {
-        // Rehydration errors are logged inside the store; fall through
-        // so the UI isn't permanently stuck on a loading spinner.
+        // Errors surface through getLoadFailure() below.
       }
+      if (cancelled) return;
+      if (getLoadFailure()) { setPhase('loadError'); return; }
+      await syncGoogleSecrets();
       if (!cancelled) setPhase('ready');
     })();
     return () => { cancelled = true; };
@@ -639,6 +665,10 @@ function EncryptionGate() {
 
   if (phase === 'unlocking') {
     return <UnlockScreen onUnlocked={handleUnlocked} />;
+  }
+
+  if (phase === 'loadError') {
+    return <LoadErrorScreen failure={getLoadFailure()} onResolved={async () => { await syncGoogleSecrets(); setPhase('ready'); }} />;
   }
 
   return <AppContent />;

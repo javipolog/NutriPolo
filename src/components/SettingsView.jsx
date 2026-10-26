@@ -7,7 +7,7 @@ import {
   Archive, HardDriveDownload, History, ShieldCheck, Clock, AlertTriangle, Settings2, AlertCircle, Lock
 } from 'lucide-react';
 import { Button, Input, Textarea, Modal, useToast, useConfirm } from './UI';
-import useStore, { generateId, DEFAULT_INVOICE_DESIGN, inferCalendarPurpose } from '../stores/store';
+import useStore, { generateId, DEFAULT_INVOICE_DESIGN, inferCalendarPurpose, flushAllPending } from '../stores/store';
 import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
 import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar } from '../services/googleCalendarService';
@@ -1157,6 +1157,8 @@ const SecuritySection = () => {
     });
     if (!ok) return;
     try {
+      // Write pending changes while the key is still available.
+      await flushAllPending();
       await invoke('encryption_lock');
       // Force a reload so the EncryptionGate re-checks state
       window.location.reload();

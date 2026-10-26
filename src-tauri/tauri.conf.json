@@ -30,7 +30,7 @@
         "exists": false,
         "scope": [
           "$APP/**",
-          "$HOME/**",
+          "$APPDATA/**",
           "$DOCUMENT/**",
           "$DESKTOP/**",
           "$DOWNLOAD/**"

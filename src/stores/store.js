@@ -8,31 +8,63 @@ import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from
 // ============================================
 const writeQueue = {};
 const writeTimers = {};
+const RETRY_DELAY_MS = 5000;
+
+// Outside Tauri (plain `npm run dev` in a browser) there is no IPC bridge;
+// persist to localStorage so the UI can still be exercised.
+const isTauri = typeof window !== 'undefined' && !!window.__TAURI_IPC__;
+
+// Set when the persisted file exists but cannot be read (corrupt JSON,
+// decrypt failure…). While set, writes are blocked so the default empty
+// state never overwrites the real data on disk.
+let loadFailure = null;
+export const getLoadFailure = () => loadFailure;
+export function clearLoadFailure() { loadFailure = null; }
+
+function reportSaveError(error) {
+  const current = useStore.getState().saveError;
+  if (current !== error) useStore.setState({ saveError: error });
+}
 
 function flushWrite(name) {
   const value = writeQueue[name];
-  if (value === undefined) return;
+  if (value === undefined) return Promise.resolve();
   delete writeQueue[name];
-  invoke('save_data', { key: name, value }).catch(() => {});
+  if (!isTauri) {
+    try { localStorage.setItem(name, value); } catch {}
+    return Promise.resolve();
+  }
+  return invoke('save_data', { key: name, value })
+    .then(() => { if (useStore.getState().saveError) reportSaveError(null); })
+    .catch((err) => {
+      // Keep the value queued (unless a newer one arrived) and retry.
+      if (writeQueue[name] === undefined) writeQueue[name] = value;
+      clearTimeout(writeTimers[name]);
+      writeTimers[name] = setTimeout(() => flushWrite(name), RETRY_DELAY_MS);
+      reportSaveError(String(err || 'save_failed'));
+    });
 }
 
 const tauriStorage = {
   getItem: async (name) => {
+    if (!isTauri) return localStorage.getItem(name);
     try {
       return await invoke('load_data', { key: name });
     } catch (err) {
       const msg = String(err || '');
-      // If the vault is locked we must NOT fall back to localStorage;
-      // that would clobber the real data with empty defaults the next
-      // time the user saves. Return null so Zustand keeps its defaults
+      // Nothing saved yet (first launch).
+      if (msg.includes('not_found')) return null;
+      // If the vault is locked return null so Zustand keeps its defaults
       // and let App.jsx re-trigger rehydration after unlock.
-      if (msg.includes('not_unlocked')) {
-        return null;
-      }
-      return localStorage.getItem(name);
+      if (msg.includes('not_unlocked')) return null;
+      // The file exists but is unreadable: never fall back to empty
+      // defaults silently, or the next save would destroy the real data.
+      loadFailure = { key: name, error: msg };
+      return null;
     }
   },
   setItem: (name, value) => {
+    if (loadFailure) return;
     writeQueue[name] = value;
     clearTimeout(writeTimers[name]);
     writeTimers[name] = setTimeout(() => flushWrite(name), 300);
@@ -41,17 +73,19 @@ const tauriStorage = {
     clearTimeout(writeTimers[name]);
     delete writeQueue[name];
     delete writeTimers[name];
-    try { await invoke('delete_data', { key: name }); }
-    catch { localStorage.removeItem(name); }
+    if (!isTauri) { localStorage.removeItem(name); return; }
+    await invoke('delete_data', { key: name }).catch(() => {});
   },
 };
 
+/** Write every queued value now. Await it before locking the vault. */
 export function flushAllPending() {
-  Object.keys(writeTimers).forEach(name => {
+  const names = new Set([...Object.keys(writeTimers), ...Object.keys(writeQueue)]);
+  return Promise.all([...names].map(name => {
     clearTimeout(writeTimers[name]);
     delete writeTimers[name];
-    flushWrite(name);
-  });
+    return flushWrite(name);
+  }));
 }
 
 if (typeof window !== 'undefined') {
@@ -233,7 +267,17 @@ export const DEFAULT_INVOICE_DESIGN = {
   taglineText: 'Nutrición Clínica',
 };
 
+// Zustand passes the bare persisted state to `migrate`, but the legacy
+// steps below were written against a `{ state }` wrapper and therefore
+// never ran (the v4 step even threw). `migrateStore` boxes the state so
+// they apply as originally intended.
 function migrateStore(persistedState, version) {
+  const box = { state: persistedState || {} };
+  migrateLegacy(box, version);
+  return box.state;
+}
+
+function migrateLegacy(persistedState, version) {
   if (version < 2) {
     // v1 → v2: replace calendarId scalar with calendars array
     const gc = persistedState.state?.config?.googleCalendar;
@@ -286,7 +330,7 @@ function migrateStore(persistedState, version) {
   }
   if (version < 4) {
     // v3 → v4: add invoiceDesign to config
-    if (!persistedState.state?.config?.invoiceDesign) {
+    if (persistedState.state?.config && !persistedState.state.config.invoiceDesign) {
       persistedState.state.config.invoiceDesign = DEFAULT_INVOICE_DESIGN;
     }
   }
@@ -600,6 +644,126 @@ function migrateStore(persistedState, version) {
   return persistedState;
 }
 
+// ── Google OAuth secrets ──
+// refreshToken / clientSecret live in the OS credential store (like the
+// SMTP password) and accessToken only in memory. They are stripped from
+// the persisted store, auto-backups and exports.
+const GCAL_SECRET_NAMES = { refreshToken: 'gcal_refresh_token', clientSecret: 'gcal_client_secret' };
+
+export function stripGoogleSecrets(config) {
+  if (!config?.googleCalendar) return config;
+  return {
+    ...config,
+    googleCalendar: { ...config.googleCalendar, accessToken: '', refreshToken: '', clientSecret: '', expiresAt: 0 },
+  };
+}
+
+// Restored backups must not replace the live Google connection.
+function mergeRestoredConfig(current, restored) {
+  if (!restored) return current;
+  return { ...current, ...restored, googleCalendar: current.googleCalendar };
+}
+
+/**
+ * Called once after hydration. Moves legacy plaintext secrets into the
+ * keyring, or loads them from it, then keeps the keyring in sync.
+ */
+let secretsSyncStarted = false;
+export async function syncGoogleSecrets() {
+  if (!isTauri || secretsSyncStarted) return;
+  secretsSyncStarted = true;
+  const gc = useStore.getState().config.googleCalendar || {};
+  try {
+    const loaded = {};
+    for (const [field, name] of Object.entries(GCAL_SECRET_NAMES)) {
+      if (gc[field]) {
+        // Legacy store still holds it in plaintext → migrate.
+        await invoke('secret_set', { name, value: gc[field] });
+      } else {
+        const value = await invoke('secret_get', { name });
+        if (value) loaded[field] = value;
+      }
+    }
+    // Always set: this also rewrites the persisted file without the legacy secrets.
+    useStore.setState(s => ({
+      config: { ...s.config, googleCalendar: { ...s.config.googleCalendar, ...loaded } },
+    }));
+  } catch (e) {
+    if (import.meta.env.DEV) console.warn('Keyring sync failed:', e);
+  }
+
+  const timers = {};
+  useStore.subscribe((state, prev) => {
+    const now = state.config.googleCalendar || {};
+    const before = prev.config.googleCalendar || {};
+    for (const [field, name] of Object.entries(GCAL_SECRET_NAMES)) {
+      if (now[field] === before[field]) continue;
+      clearTimeout(timers[field]);
+      timers[field] = setTimeout(() => {
+        invoke('secret_set', { name, value: useStore.getState().config.googleCalendar?.[field] || '' })
+          .catch(e => { if (import.meta.env.DEV) console.warn('Keyring write failed:', e); });
+      }, 800);
+    }
+  });
+}
+
+// Removes a client together with the records that only make sense with it.
+// Invoices are kept (fiscal records). Google-synced consultations are
+// unlinked instead of deleted, otherwise the next pull would re-import them.
+// Returns the state patch plus a snapshot so undo can put everything back.
+function buildClientDeletion(s, id) {
+  const ownConsultations = s.consultations.filter(c => c.clienteId === id || c.suggestedClienteId === id);
+  const snapshot = {
+    consultations: ownConsultations,
+    measurements: s.measurements.filter(m => m.clienteId === id),
+    nutritionPlans: s.nutritionPlans.filter(p => p.clienteId === id),
+  };
+  const consultations = s.consultations.flatMap(c => {
+    if (c.clienteId === id) {
+      if (!c.googleEventId) return [];
+      return [{ ...c, clienteId: null, matchStatus: 'unknown', suggestedClienteId: undefined, matchScore: undefined }];
+    }
+    if (c.suggestedClienteId === id) {
+      return [{ ...c, suggestedClienteId: undefined, matchScore: undefined, matchStatus: 'suggested' }];
+    }
+    return [c];
+  });
+  const patch = {
+    clients: s.clients.filter(c => c.id !== id),
+    consultations,
+    measurements: s.measurements.filter(m => m.clienteId !== id),
+    nutritionPlans: s.nutritionPlans.filter(p => p.clienteId !== id),
+    // The document files are removed from disk by the caller, so their
+    // metadata goes for good (it is not part of the undo snapshot).
+    clientDocuments: (s.clientDocuments || []).filter(d => d.clienteId !== id),
+    // Downgrade any pending-confirm suggestions proposing this client
+    patientSuggestions: s.patientSuggestions.map(sg => {
+      const filteredCandidates = (sg.candidates || []).filter(c => c.clienteId !== id);
+      const wasSuggestedClient = sg.suggestedClienteId === id;
+      if (!wasSuggestedClient && !(sg.candidates || []).some(c => c.clienteId === id)) return sg;
+      return {
+        ...sg,
+        candidates: filteredCandidates,
+        topScore: filteredCandidates[0]?.score ?? null,
+        suggestedClienteId: wasSuggestedClient ? null : sg.suggestedClienteId,
+        status: (wasSuggestedClient && sg.status === 'pending-confirm') ? 'pending' : sg.status,
+      };
+    }),
+  };
+  return { patch, snapshot };
+}
+
+function restoreClientDeletion(s, entry) {
+  const cascade = entry.cascade || {};
+  const restoredIds = new Set((cascade.consultations || []).map(c => c.id));
+  return {
+    clients: [entry.item, ...s.clients],
+    consultations: [...s.consultations.filter(c => !restoredIds.has(c.id)), ...(cascade.consultations || [])],
+    measurements: [...s.measurements, ...(cascade.measurements || [])],
+    nutritionPlans: [...s.nutritionPlans, ...(cascade.nutritionPlans || [])],
+  };
+}
+
 // ============================================
 // STORE
 // ============================================
@@ -695,7 +859,7 @@ const useStore = create(
         };
         set(s => ({
           clients: [...s.clients, newClient],
-          _history: [{ type: 'delete_client', item: newClient }, ...s._history].slice(0, 20),
+          _history: [{ type: 'add_client', item: newClient }, ...s._history].slice(0, 20),
         }));
         return newClient;
       },
@@ -704,35 +868,14 @@ const useStore = create(
       })),
       deleteClient: (id) => {
         const item = get().clients.find(c => c.id === id);
-        set(s => ({
-          clients: s.clients.filter(c => c.id !== id),
-          _history: [{ type: 'delete_client', item }, ...s._history].slice(0, 20),
-          // Cascade: downgrade any pending-confirm suggestions proposing this client
-          patientSuggestions: s.patientSuggestions.map(sg => {
-            const filteredCandidates = (sg.candidates || []).filter(c => c.clienteId !== id);
-            const wasSuggestedClient = sg.suggestedClienteId === id;
-            if (!wasSuggestedClient && !(sg.candidates || []).some(c => c.clienteId === id)) return sg;
-            return {
-              ...sg,
-              candidates: filteredCandidates,
-              topScore: filteredCandidates[0]?.score ?? null,
-              suggestedClienteId: wasSuggestedClient ? null : sg.suggestedClienteId,
-              status: (wasSuggestedClient && sg.status === 'pending-confirm')
-                ? (filteredCandidates.length > 0 ? 'pending' : 'pending')
-                : sg.status,
-            };
-          }),
-          // Cascade: downgrade consultations that pointed to the deleted client
-          consultations: s.consultations.map(c => {
-            if (c.suggestedClienteId !== id) return c;
-            return {
-              ...c,
-              suggestedClienteId: undefined,
-              matchScore: undefined,
-              matchStatus: 'suggested',
-            };
-          }),
-        }));
+        if (!item) return;
+        set(s => {
+          const { patch, snapshot } = buildClientDeletion(s, id);
+          return {
+            ...patch,
+            _history: [{ type: 'delete_client', item, cascade: snapshot }, ...s._history].slice(0, 20),
+          };
+        });
       },
 
       // ---- MEASUREMENTS ----
@@ -1363,7 +1506,8 @@ const useStore = create(
             _future: [last, ...s._future].slice(0, 20),
             _history: rest,
           };
-          if (last.type === 'delete_client')       next.clients         = [last.item, ...s.clients];
+          if (last.type === 'delete_client')       Object.assign(next, restoreClientDeletion(s, last));
+          if (last.type === 'add_client')          next.clients         = s.clients.filter(c => c.id !== last.item.id);
           if (last.type === 'delete_consultation') next.consultations   = [last.item, ...s.consultations];
           if (last.type === 'delete_plan')         next.nutritionPlans  = [last.item, ...s.nutritionPlans];
           if (last.type === 'delete_invoice')      next.invoices        = [last.item, ...s.invoices];
@@ -1380,7 +1524,8 @@ const useStore = create(
             _history: [next, ...s._history].slice(0, 20),
             _future: rest,
           };
-          if (next.type === 'delete_client')       update.clients         = s.clients.filter(c => c.id !== next.item.id);
+          if (next.type === 'delete_client')       Object.assign(update, buildClientDeletion(s, next.item.id).patch);
+          if (next.type === 'add_client')          update.clients         = [next.item, ...s.clients];
           if (next.type === 'delete_consultation') update.consultations   = s.consultations.filter(c => c.id !== next.item.id);
           if (next.type === 'delete_plan')         update.nutritionPlans  = s.nutritionPlans.filter(p => p.id !== next.item.id);
           if (next.type === 'delete_invoice')      update.invoices        = s.invoices.filter(i => i.id !== next.item.id);
@@ -1399,6 +1544,8 @@ const useStore = create(
       integrityWarnings: [],
       isLoading: false,
       smtpPassword: '',
+      // Last persistence error (string) or null. Not persisted.
+      saveError: null,
       setSmtpPassword: (p) => set({ smtpPassword: p }),
 
       validateDataIntegrity: () => {
@@ -1443,7 +1590,7 @@ const useStore = create(
         const backup = {
           version: STORE_VERSION,
           date: new Date().toISOString(),
-          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
+          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
         };
         try {
           const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
@@ -1479,7 +1626,7 @@ const useStore = create(
           invoices:       d.invoices       || [],
           clientDocuments:d.clientDocuments || [],
           emailTemplates: d.emailTemplates || null,
-          config: d.config ? { ...get().config, ...d.config } : get().config,
+          config: mergeRestoredConfig(get().config, d.config),
         });
       },
 
@@ -1489,7 +1636,7 @@ const useStore = create(
         const payload = {
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
+          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
         };
 
         const zip = new JSZip();
@@ -1554,15 +1701,14 @@ const useStore = create(
             invoices:       d.invoices       || [],
             clientDocuments:d.clientDocuments || [],
             emailTemplates: d.emailTemplates || null,
-            config: d.config ? { ...get().config, ...d.config } : get().config,
+            config: mergeRestoredConfig(get().config, d.config),
           });
           return { documentsRestored: 0 };
         }
 
         // ZIP import
         const JSZip = (await import('jszip')).default;
-        const { readBinaryFile, writeBinaryFile, createDir } = await import('@tauri-apps/api/fs');
-        const { appDataDir } = await import('@tauri-apps/api/path');
+        const { readBinaryFile } = await import('@tauri-apps/api/fs');
 
         const zipBytes = await readBinaryFile(path);
         const zip = await JSZip.loadAsync(zipBytes);
@@ -1574,20 +1720,21 @@ const useStore = create(
         const parsed = JSON.parse(dataRaw);
         const d = parsed.data || parsed;
 
-        // Restore document files
-        const base = await appDataDir();
+        // Restore document files through the backend so they are encrypted
+        // when at-rest encryption is on. Only `documents/<clientId>/<file>`
+        // entries with safe names are accepted.
+        const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
         let documentsRestored = 0;
         const docFiles = Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir);
         for (const filePath of docFiles) {
           try {
             const parts = filePath.split('/');
-            if (parts.length < 3) continue;
-            const clienteId = parts[1];
-            const storedFileName = parts.slice(2).join('/');
-            const dirPath = `${base}documents\\${clienteId}`;
-            await createDir(dirPath, { recursive: true });
-            const content = await zip.files[filePath].async('uint8array');
-            await writeBinaryFile(`${dirPath}\\${storedFileName}`, content);
+            if (parts.length !== 3) continue;
+            const [, clienteId, storedFileName] = parts;
+            if (!SAFE_SEGMENT.test(clienteId) || !SAFE_SEGMENT.test(storedFileName)
+              || clienteId.includes('..') || storedFileName.includes('..')) continue;
+            const base64Data = await zip.files[filePath].async('base64');
+            await invoke('save_bytes_to_documents', { clientId: clienteId, destFilename: storedFileName, base64Data });
             documentsRestored++;
           } catch (e) {
             if (import.meta.env.DEV) console.warn('Failed to restore document:', filePath, e);
@@ -1604,7 +1751,7 @@ const useStore = create(
           invoices:       d.invoices       || [],
           clientDocuments:d.clientDocuments || [],
           emailTemplates: d.emailTemplates || null,
-          config: d.config ? { ...get().config, ...d.config } : get().config,
+          config: mergeRestoredConfig(get().config, d.config),
         });
 
         return { documentsRestored };
@@ -1616,7 +1763,7 @@ const useStore = create(
         const data = JSON.stringify({
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
+          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
         }, null, 2);
         try {
           const { save } = await import('@tauri-apps/api/dialog');
@@ -1656,7 +1803,7 @@ const useStore = create(
               invoices:       d.invoices       || [],
               clientDocuments:d.clientDocuments || [],
               emailTemplates: d.emailTemplates || null,
-              config: d.config ? { ...get().config, ...d.config } : get().config,
+              config: mergeRestoredConfig(get().config, d.config),
             });
           } else {
             set(s => ({
@@ -1686,13 +1833,23 @@ const useStore = create(
       // already interacted with the empty default state.
       skipHydration: true,
       migrate: migrateStore,
+      // The default merge is shallow, so a persisted `config` would replace
+      // the default one wholesale and new config keys would never appear for
+      // existing installs. Merge config one level deeper.
+      merge: (persisted, current) => ({
+        ...current,
+        ...(persisted || {}),
+        config: { ...current.config, ...(persisted?.config || {}) },
+      }),
       partialize: (s) => {
         // NEVER persist the SMTP password — it lives only in the OS
         // credential store (see store_smtp_password / get_smtp_password).
         // Strip it defensively before Zustand serializes the config.
-        const safeConfig = s.config
+        let safeConfig = s.config
           ? { ...s.config, smtp: s.config.smtp ? { ...s.config.smtp, password: '' } : s.config.smtp }
           : s.config;
+        // Google secrets live in the keyring (see syncGoogleSecrets).
+        if (isTauri) safeConfig = stripGoogleSecrets(safeConfig);
         return {
           config: safeConfig,
           clients: s.clients,
@@ -1713,7 +1870,10 @@ const useStore = create(
           consultationFilters: s.consultationFilters,
         };
       },
-      onRehydrateStorage: () => (state) => {
+      onRehydrateStorage: () => (state, error) => {
+        if (error && !loadFailure) {
+          loadFailure = { key: 'nutripolo-storage', error: String(error?.message || error) };
+        }
         if (state) {
           state.isLoading = false;
           // Sanitize reader-only calendars — never allow bidirectional on reader calendars

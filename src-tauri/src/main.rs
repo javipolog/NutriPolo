@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use base64::Engine as _;
-use tauri::Manager;
 use lettre::{
     message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart},
     transport::smtp::authentication::Credentials,
@@ -70,6 +69,17 @@ fn encryption_is_enabled_internal(app_handle: &tauri::AppHandle) -> bool {
     encryption_config_path(app_handle).exists()
 }
 
+/// Write `bytes` to `path` atomically: write a sibling `.tmp` file first and
+/// then rename it over the target. A crash or power cut mid-write leaves the
+/// previous version intact instead of a truncated file.
+fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let mut tmp_name = path.as_os_str().to_owned();
+    tmp_name.push(".tmp");
+    let tmp = PathBuf::from(tmp_name);
+    fs::write(&tmp, bytes)?;
+    fs::rename(&tmp, path)
+}
+
 #[tauri::command]
 fn save_data(app_handle: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
     validate_path_component(&key, "key")?;
@@ -86,13 +96,14 @@ fn save_data(app_handle: tauri::AppHandle, key: String, value: String) -> Result
         let key_bytes = encryption::current_key()?;
         let ct = encryption::encrypt(value.as_bytes(), &key_bytes)?;
         let path = dir.join(format!("{}.enc", key));
-        // Remove any stale plaintext version to avoid data divergence.
+        write_atomic(&path, &ct).map_err(|e| e.to_string())?;
+        // Only drop the stale plaintext version once the encrypted one is safely on disk.
         let plain_path = dir.join(format!("{}.json", key));
         let _ = fs::remove_file(&plain_path);
-        fs::write(&path, ct).map_err(|e| e.to_string())
+        Ok(())
     } else {
         let path = dir.join(format!("{}.json", key));
-        fs::write(&path, value).map_err(|e| e.to_string())
+        write_atomic(&path, value.as_bytes()).map_err(|e| e.to_string())
     }
 }
 
@@ -123,29 +134,96 @@ fn load_data(app_handle: tauri::AppHandle, key: String) -> Result<String, String
 fn delete_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> {
     validate_path_component(&key, "key")?;
     let dir = get_data_dir(&app_handle);
-    let mut removed_any = false;
     for ext in &["json", "enc"] {
         let path = dir.join(format!("{}.{}", key, ext));
         if path.exists() {
             fs::remove_file(&path).map_err(|e| e.to_string())?;
-            removed_any = true;
         }
     }
-    let _ = removed_any;
     Ok(())
 }
 
+/// Move an unreadable data file aside (`<key>.corrupt-<unix>.<ext>`) so a
+/// restore can write a fresh copy without destroying the original bytes.
 #[tauri::command]
+fn quarantine_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> {
+    validate_path_component(&key, "key")?;
+    let dir = get_data_dir(&app_handle);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    for ext in &["json", "enc"] {
+        let path = dir.join(format!("{}.{}", key, ext));
+        if path.exists() {
+            let target = dir.join(format!("{}.corrupt-{}.{}", key, stamp, ext));
+            fs::rename(&path, &target).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Directory where decrypted copies of encrypted documents are placed so the
+/// system PDF viewer can open them. Wiped on startup and on lock.
+fn viewer_temp_dir() -> PathBuf {
+    std::env::temp_dir().join("nutripolo-view")
+}
+
+fn clear_viewer_temp_dir() {
+    let _ = fs::remove_dir_all(viewer_temp_dir());
+}
+
+fn launch_with_default_app(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(path).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = std::process::Command::new("xdg-open").arg(path).spawn();
+    result.map(|_| ()).map_err(|e| sanitize_err(e, "open_failed"))
+}
+
+/// Open a PDF with the system's default viewer. Only `.pdf` files are
+/// accepted. Documents stored encrypted under AppData are decrypted to a
+/// temporary copy first. `shell::open` cannot be used here: Tauri's default
+/// shell scope only allows https/mailto/tel URLs, so local paths were rejected.
+#[tauri::command(async)]
 fn open_file(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
-    let p = std::path::Path::new(&path);
-    if !p.exists() {
+    let p = Path::new(&path);
+    let is_pdf = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false);
+    if !is_pdf {
+        return Err("only_pdf_allowed".to_string());
+    }
+
+    let encrypted = encryption_is_enabled_internal(&app_handle);
+    if encrypted {
+        let docs_root = get_data_dir(&app_handle).join("documents");
+        let real = resolve_document_path(&path, true);
+        let in_docs = match (fs::canonicalize(&docs_root), fs::canonicalize(&real)) {
+            (Ok(root), Ok(c)) => c.starts_with(root),
+            _ => false,
+        };
+        if in_docs && real.extension().and_then(|e| e.to_str()) == Some("enc") {
+            let key_bytes = encryption::current_key()?;
+            let ct = fs::read(&real).map_err(|e| e.to_string())?;
+            let plain = encryption::decrypt(&ct, &key_bytes)?;
+            let tmp_dir = viewer_temp_dir();
+            fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
+            let name = p.file_name().ok_or_else(|| "invalid_path".to_string())?;
+            let tmp_path = tmp_dir.join(name);
+            fs::write(&tmp_path, plain).map_err(|e| e.to_string())?;
+            return launch_with_default_app(&tmp_path);
+        }
+    }
+
+    if !p.is_file() {
         return Err("File not found".to_string());
     }
-    if !p.is_file() {
-        return Err("Path is not a file".to_string());
-    }
-    tauri::api::shell::open(&app_handle.shell_scope(), &path, None)
-        .map_err(|e| e.to_string())
+    launch_with_default_app(p)
 }
 
 // ============================================
@@ -180,7 +258,7 @@ fn err_result(code: &str) -> SendEmailResult {
     SendEmailResult { success: false, message_id: None, error: Some(code.to_string()) }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn send_email_smtp(
     to_email: String,
     to_name: Option<String>,
@@ -270,7 +348,7 @@ fn send_email_smtp(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn test_smtp_connection(smtp_config: SmtpConfig) -> SendEmailResult {
     // Same defensive checks as send_email_smtp — the config fields end
     // up as SMTP protocol content and must not contain CR/LF.
@@ -350,6 +428,43 @@ fn has_smtp_password() -> bool {
         .is_some()
 }
 
+// Other credentials (Google OAuth) follow the same rule as the SMTP
+// password: OS credential store only, never the persisted store. The
+// frontend may only touch the names listed here.
+const ALLOWED_SECRETS: &[&str] = &["gcal_refresh_token", "gcal_client_secret"];
+
+fn secret_entry(name: &str) -> Result<keyring::Entry, String> {
+    if !ALLOWED_SECRETS.contains(&name) {
+        return Err("secret_not_allowed".to_string());
+    }
+    keyring::Entry::new(KEYRING_SERVICE, name).map_err(|e| sanitize_err(e, "keyring_error"))
+}
+
+/// Stores `value`; an empty value deletes the entry.
+#[tauri::command]
+fn secret_set(name: String, value: String) -> Result<(), String> {
+    let entry = secret_entry(&name)?;
+    if value.is_empty() {
+        let _ = entry.delete_password();
+        return Ok(());
+    }
+    entry.set_password(&value).map_err(|e| sanitize_err(e, "keyring_store_failed"))
+}
+
+/// Returns an empty string when nothing is stored.
+#[tauri::command]
+fn secret_get(name: String) -> Result<String, String> {
+    let entry = secret_entry(&name)?;
+    Ok(entry.get_password().unwrap_or_default())
+}
+
+#[tauri::command]
+fn secret_clear(name: String) -> Result<(), String> {
+    let entry = secret_entry(&name)?;
+    let _ = entry.delete_password();
+    Ok(())
+}
+
 // ============================================
 // AT-REST ENCRYPTION (AES-256-GCM + Argon2id)
 // ============================================
@@ -384,7 +499,7 @@ fn encryption_is_unlocked() -> bool {
 /// password, writes `encryption.json`, migrates all existing plaintext
 /// files (and document PDFs) to encrypted `.enc` companions, and leaves
 /// the store in the unlocked state ready for immediate use.
-#[tauri::command]
+#[tauri::command(async)]
 fn encryption_setup(app_handle: tauri::AppHandle, password: String) -> Result<(), String> {
     if password.len() < 8 {
         return Err("password_too_short".into());
@@ -418,12 +533,16 @@ fn encryption_setup(app_handle: tauri::AppHandle, password: String) -> Result<()
     migrate_plaintext_to_encrypted(&dir, &key)?;
 
     encryption::set_master_key(key);
+
+    // The snapshot is plaintext — keeping it would defeat the encryption.
+    // It is only needed while the migration runs.
+    let _ = fs::remove_dir_all(&backup_dir);
     Ok(())
 }
 
 /// Unlock the store with a user-supplied password. On success the
 /// derived key is stored in memory for this session.
-#[tauri::command]
+#[tauri::command(async)]
 fn encryption_unlock(app_handle: tauri::AppHandle, password: String) -> Result<(), String> {
     let cfg_path = encryption_config_path(&app_handle);
     let raw = fs::read_to_string(&cfg_path).map_err(|_| "no_encryption_config".to_string())?;
@@ -444,6 +563,7 @@ fn encryption_unlock(app_handle: tauri::AppHandle, password: String) -> Result<(
 #[tauri::command]
 fn encryption_lock() {
     encryption::clear_master_key();
+    clear_viewer_temp_dir();
 }
 
 /// Re-encrypt every file with a new master key. We DO NOT keep both
@@ -451,7 +571,7 @@ fn encryption_lock() {
 /// the old key, encrypt with the new key, and atomically overwrite.
 /// A crash mid-way would leave a mixed state — which is why we take
 /// a backup first.
-#[tauri::command]
+#[tauri::command(async)]
 fn encryption_change_password(
     app_handle: tauri::AppHandle,
     old_password: String,
@@ -495,10 +615,14 @@ fn encryption_change_password(
     };
     let cfg_json = serde_json::to_string(&new_cfg)
         .map_err(|e| sanitize_err(e, "serialize_failed"))?;
-    fs::write(&cfg_path, cfg_json)
+    write_atomic(&cfg_path, cfg_json.as_bytes())
         .map_err(|e| sanitize_err(e, "encryption_config_write_failed"))?;
 
     encryption::set_master_key(new_key);
+
+    // The snapshot is decryptable with the OLD password; drop it now that
+    // every file and the config use the new key.
+    let _ = fs::remove_dir_all(&rekey_backup);
     Ok(())
 }
 
@@ -547,7 +671,6 @@ fn migrate_plaintext_to_encrypted(dir: &Path, key: &[u8; encryption::KEY_LEN]) -
 
         let plain = fs::read(&path).map_err(|e| sanitize_err(e, "migrate_read_failed"))?;
         let ct = encryption::encrypt(&plain, key)?;
-        let enc_path = path.with_extension("json.enc");
         // Store without the double extension to match save_data convention.
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         let target = path.with_file_name(format!("{}.enc", stem));
@@ -556,7 +679,6 @@ fn migrate_plaintext_to_encrypted(dir: &Path, key: &[u8; encryption::KEY_LEN]) -
         fs::write(&tmp, &ct).map_err(|e| sanitize_err(e, "migrate_write_failed"))?;
         fs::rename(&tmp, &target).map_err(|e| sanitize_err(e, "migrate_rename_failed"))?;
         fs::remove_file(&path).map_err(|e| sanitize_err(e, "migrate_remove_failed"))?;
-        let _ = enc_path; // suppress unused
     }
 
     // Document PDFs under documents/<clientId>/*.
@@ -659,14 +781,16 @@ fn resolve_document_path(logical: &str, encrypted: bool) -> PathBuf {
         if p.extension().and_then(|e| e.to_str()) == Some("enc") {
             p.to_path_buf()
         } else {
-            PathBuf::from(format!("{}.enc", logical))
+            let enc = PathBuf::from(format!("{}.enc", logical));
+            // A plaintext file can survive an interrupted migration; keep it reachable.
+            if !enc.exists() && p.exists() { p.to_path_buf() } else { enc }
         }
     } else {
         p.to_path_buf()
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn copy_file_to_documents(
     app_handle: tauri::AppHandle,
     source_path: String,
@@ -717,7 +841,7 @@ fn copy_file_to_documents(
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_file_as_base64(app_handle: tauri::AppHandle, path: String) -> Result<String, String> {
     // Security: only allow reading from documents directory
     let docs_root = get_data_dir(&app_handle).join("documents");
@@ -733,7 +857,8 @@ fn read_file_as_base64(app_handle: tauri::AppHandle, path: String) -> Result<Str
     }
 
     let bytes = fs::read(&real_path).map_err(|e| e.to_string())?;
-    let plaintext = if encrypted {
+    let is_enc_file = real_path.extension().and_then(|e| e.to_str()) == Some("enc");
+    let plaintext = if encrypted && is_enc_file {
         let key_bytes = encryption::current_key()?;
         encryption::decrypt(&bytes, &key_bytes)?
     } else {
@@ -777,7 +902,7 @@ fn delete_documents_directory(app_handle: tauri::AppHandle, client_id: String) -
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn save_bytes_to_documents(
     app_handle: tauri::AppHandle,
     client_id: String,
@@ -786,12 +911,19 @@ fn save_bytes_to_documents(
 ) -> Result<String, String> {
     validate_path_component(&client_id, "client_id")?;
     validate_path_component(&dest_filename, "dest_filename")?;
+    // base64 inflates by 4/3; reject before allocating the decoded buffer.
+    if (base64_data.len() as u64) / 4 * 3 > MAX_DOCUMENT_SIZE {
+        return Err("file_too_large".to_string());
+    }
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(&base64_data)
         .map_err(|e| format!("Base64 decode error: {}", e))?;
 
     if bytes.len() as u64 > MAX_DOCUMENT_SIZE {
         return Err("file_too_large".to_string());
+    }
+    if !bytes.starts_with(b"%PDF-") {
+        return Err("invalid_pdf".to_string());
     }
 
     let dest_dir = get_documents_dir(&app_handle, &client_id);
@@ -817,11 +949,13 @@ fn save_bytes_to_documents(
 }
 
 fn main() {
+    clear_viewer_temp_dir();
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             save_data,
             load_data,
             delete_data,
+            quarantine_data,
             open_file,
             send_email_smtp,
             test_smtp_connection,
@@ -829,6 +963,9 @@ fn main() {
             get_smtp_password,
             clear_smtp_password,
             has_smtp_password,
+            secret_set,
+            secret_get,
+            secret_clear,
             encryption_is_enabled,
             encryption_is_unlocked,
             encryption_setup,

@@ -2761,7 +2761,7 @@ dependencies = [
 
 [[package]]
 name = "nutripolo-app"
-version = "1.0.0"
+version = "1.9.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2775,7 +2775,6 @@ dependencies = [
  "sha2",
  "tauri",
  "tauri-build",
- "tokio",
  "urlencoding",
  "zeroize",
 ]
@@ -4841,19 +4840,7 @@ dependencies = [
  "mio",
  "pin-project-lite",
  "socket2 0.6.2",
- "tokio-macros",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "tokio-macros"
-version = "2.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c55a2eff8b69ce66c84f85e1da1c233edc36ceb85a2058d11b0d6a3c7e7569c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]

@@ -16,6 +16,7 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use argon2::{Algorithm, Argon2, Params, Version};
 use rand::RngCore;
 use std::sync::Mutex;
+use zeroize::Zeroize;
 
 pub const KEY_LEN: usize = 32;
 pub const NONCE_LEN: usize = 12;
@@ -82,9 +83,7 @@ pub fn set_master_key(key: [u8; KEY_LEN]) {
     if let Ok(mut guard) = MASTER_KEY.lock() {
         // Zeroize any previously held key before replacing it.
         if let Some(ref mut prev) = *guard {
-            for b in prev.iter_mut() {
-                *b = 0;
-            }
+            prev.zeroize();
         }
         *guard = Some(key);
     }
@@ -93,11 +92,12 @@ pub fn set_master_key(key: [u8; KEY_LEN]) {
 /// Clear the in-memory key and zeroize it.
 pub fn clear_master_key() {
     if let Ok(mut guard) = MASTER_KEY.lock() {
-        if let Some(mut k) = guard.take() {
-            for b in k.iter_mut() {
-                *b = 0;
-            }
+        // Wipe the key in place before dropping it (taking it out first
+        // would only zeroize a moved copy).
+        if let Some(ref mut k) = *guard {
+            k.zeroize();
         }
+        *guard = None;
     }
 }
 

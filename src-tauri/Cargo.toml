@@ -1,6 +1,6 @@
 [package]
 name = "nutripolo-app"
-version = "1.0.0"
+version = "1.9.0"
 description = "Aplicación de gestión de consulta nutricional"
 authors = ["Javier Polo García"]
 license = "MIT"
@@ -18,7 +18,6 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 base64 = "0.22"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 urlencoding = "2"
-tokio = { version = "1", features = ["net", "macros"] }
 rand = "0.8"
 sha2 = "0.10"
 keyring = "2.3"
