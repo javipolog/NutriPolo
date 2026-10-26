@@ -164,13 +164,19 @@ fn quarantine_data(app_handle: tauri::AppHandle, key: String) -> Result<(), Stri
 }
 
 /// Directory where decrypted copies of encrypted documents are placed so the
-/// system PDF viewer can open them. Wiped on startup and on lock.
-fn viewer_temp_dir() -> PathBuf {
-    std::env::temp_dir().join("nutripolo-view")
+/// system PDF viewer can open them: inside the app's own per-user cache dir
+/// (not a predictable shared path in the global temp dir). Wiped on startup
+/// and on lock.
+fn viewer_temp_dir(app_handle: &tauri::AppHandle) -> PathBuf {
+    app_handle
+        .path_resolver()
+        .app_cache_dir()
+        .unwrap_or_else(|| get_data_dir(app_handle).join("cache"))
+        .join("viewer")
 }
 
-fn clear_viewer_temp_dir() {
-    let _ = fs::remove_dir_all(viewer_temp_dir());
+fn clear_viewer_temp_dir(app_handle: &tauri::AppHandle) {
+    let _ = fs::remove_dir_all(viewer_temp_dir(app_handle));
 }
 
 fn launch_with_default_app(path: &Path) -> Result<(), String> {
@@ -211,11 +217,18 @@ fn open_file(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
             let key_bytes = encryption::current_key()?;
             let ct = fs::read(&real).map_err(|e| e.to_string())?;
             let plain = encryption::decrypt(&ct, &key_bytes)?;
-            let tmp_dir = viewer_temp_dir();
+            let tmp_dir = viewer_temp_dir(&app_handle);
             fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
             let name = p.file_name().ok_or_else(|| "invalid_path".to_string())?;
             let tmp_path = tmp_dir.join(name);
-            fs::write(&tmp_path, plain).map_err(|e| e.to_string())?;
+            let _ = fs::remove_file(&tmp_path);
+            // create_new: never write through a pre-existing file or link.
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp_path)
+                .map_err(|e| e.to_string())?;
+            std::io::Write::write_all(&mut file, &plain).map_err(|e| e.to_string())?;
             return launch_with_default_app(&tmp_path);
         }
     }
@@ -561,9 +574,9 @@ fn encryption_unlock(app_handle: tauri::AppHandle, password: String) -> Result<(
 }
 
 #[tauri::command]
-fn encryption_lock() {
+fn encryption_lock(app_handle: tauri::AppHandle) {
     encryption::clear_master_key();
-    clear_viewer_temp_dir();
+    clear_viewer_temp_dir(&app_handle);
 }
 
 /// Re-encrypt every file with a new master key. We DO NOT keep both
@@ -949,8 +962,11 @@ fn save_bytes_to_documents(
 }
 
 fn main() {
-    clear_viewer_temp_dir();
     tauri::Builder::default()
+        .setup(|app| {
+            clear_viewer_temp_dir(&app.handle());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             save_data,
             load_data,
