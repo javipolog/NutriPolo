@@ -310,7 +310,10 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
                       className={`border-b border-sage-100 transition-colors ${block ? 'bg-sage-200/60 cursor-default' : 'cursor-pointer hover:bg-sage-100/70'}`}
                       onClick={block ? undefined : e => handleSlotClick(e, iso, h)}
                     >
-                      {block?.label && <span className="block px-1 pt-0.5 text-[11px] text-sage-500 italic truncate">{block.label}</span>}
+                      {/* Label once, on the first visible hour of the block */}
+                      {block?.label && h === Math.max(block.startHour, firstHour) && (
+                        <span className="block px-1 pt-0.5 text-[11px] text-sage-500 italic truncate">{block.label}</span>
+                      )}
                     </div>
                   );
                 })}

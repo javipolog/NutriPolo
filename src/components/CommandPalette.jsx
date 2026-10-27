@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, Inbox } from 'lucide-react';
 import useStore, { formatCurrency, formatDateShort } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
-import { useT } from '../i18n';
+import { useT, plural } from '../i18n';
 
 const highlight = (value, query) => {
   const text = value == null ? '' : String(value);
@@ -50,23 +50,23 @@ export const CommandPalette = ({ open, onClose }) => {
   const inboxDescription = useMemo(() => {
     const confirm = patientSuggestions.filter(sg => sg.status === 'pending-confirm').length;
     const review  = patientSuggestions.filter(sg => sg.status === 'pending').length;
-    if (confirm > 0 && review > 0) return `${confirm} por confirmar · ${review} por identificar`;
-    if (confirm > 0) return `${confirm} coincidencia${confirm !== 1 ? 's' : ''} por confirmar`;
-    if (review > 0)  return `${review} paciente${review !== 1 ? 's' : ''} por identificar`;
-    return 'Pacientes de calendarios externos';
-  }, [patientSuggestions]);
+    if (confirm > 0 && review > 0) return t.cmd_inbox_both.replace('{confirm}', confirm).replace('{review}', review);
+    if (confirm > 0) return plural(t, 'cmd_inbox_confirm', confirm);
+    if (review > 0)  return plural(t, 'cmd_inbox_review', review);
+    return t.cmd_inbox_default;
+  }, [patientSuggestions, t]);
 
   const SECTIONS = useMemo(() => [
-    { id: 'dashboard', label: t.nav_dashboard, icon: Home,          description: 'Panel de control y resumen' },
-    { id: 'agenda',    label: t.nav_agenda,    icon: Calendar,      description: 'Citas y calendario' },
-    { id: 'clients',   label: t.nav_clients,   icon: Users,         description: 'Gestión de clientes' },
-    { id: 'inbox',     label: 'Inbox de pacientes', icon: Inbox,    description: inboxDescription },
-    { id: 'plans',     label: t.nav_plans,     icon: ClipboardList, description: 'Planes nutricionales' },
-    { id: 'invoices',  label: t.nav_invoices,  icon: Receipt,       description: 'Facturación y pagos' },
-    { id: 'services',  label: t.nav_services,  icon: Package,       description: 'Catálogo de servicios' },
-    { id: 'settings',  label: t.nav_settings,  icon: Settings,      description: 'Configuración de la app' },
+    { id: 'dashboard', label: t.nav_dashboard, icon: Home,          description: t.cmd_desc_dashboard },
+    { id: 'agenda',    label: t.nav_agenda,    icon: Calendar,      description: t.cmd_desc_agenda },
+    { id: 'clients',   label: t.nav_clients,   icon: Users,         description: t.cmd_desc_clients },
+    { id: 'inbox',     label: t.inbox_title, icon: Inbox,    description: inboxDescription },
+    { id: 'plans',     label: t.nav_plans,     icon: ClipboardList, description: t.cmd_desc_plans },
+    { id: 'invoices',  label: t.nav_invoices,  icon: Receipt,       description: t.cmd_desc_invoices },
+    { id: 'services',  label: t.nav_services,  icon: Package,       description: t.cmd_desc_services },
+    { id: 'settings',  label: t.nav_settings,  icon: Settings,      description: t.cmd_desc_settings },
     ...(config.googleCalendar?.connected
-      ? [{ id: '__sync__', label: 'Sincronizar calendarios', icon: RefreshCw, description: 'Sincronizar con Google Calendar ahora', action: 'sync' }]
+      ? [{ id: '__sync__', label: t.cmd_sync, icon: RefreshCw, description: t.cmd_sync_desc, action: 'sync' }]
       : []),
   ], [t, config.googleCalendar?.connected, inboxDescription]);
 
@@ -86,7 +86,7 @@ export const CommandPalette = ({ open, onClose }) => {
       !q || s.label.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
     );
     if (matchedSections.length > 0) {
-      items.push({ type: 'group', label: 'Secciones' });
+      items.push({ type: 'group', label: t.cmd_group_sections });
       matchedSections.forEach(s => items.push({ type: 'section', ...s }));
     }
 
@@ -99,7 +99,7 @@ export const CommandPalette = ({ open, onClose }) => {
         )
         .slice(0, 5);
       if (matchedClients.length > 0) {
-        items.push({ type: 'group', label: 'Clientes' });
+        items.push({ type: 'group', label: t.nav_clients });
         matchedClients.forEach(c => items.push({
           type: 'client', id: c.id, label: c.nombre,
           description: [c.email, c.telefono].filter(Boolean).join(' · '),
@@ -114,12 +114,12 @@ export const CommandPalette = ({ open, onClose }) => {
         })
         .slice(0, 3);
       if (matchedConsultations.length > 0) {
-        items.push({ type: 'group', label: 'Consultas' });
+        items.push({ type: 'group', label: t.tab_consultations });
         matchedConsultations.forEach(c => {
           const client = clients.find(x => x.id === c.clienteId);
           items.push({
             type: 'consultation', id: c.id,
-            label: client?.nombre || 'Sin cliente',
+            label: client?.nombre || t.calendar_no_client,
             description: `${formatDateShort(c.fecha)} · ${c.tipo || ''} · ${c.estado}`,
             data: c,
           });
@@ -133,7 +133,7 @@ export const CommandPalette = ({ open, onClose }) => {
         })
         .slice(0, 3);
       if (matchedPlans.length > 0) {
-        items.push({ type: 'group', label: 'Planes nutricionales' });
+        items.push({ type: 'group', label: t.cmd_desc_plans });
         matchedPlans.forEach(p => {
           const client = clients.find(x => x.id === p.clienteId);
           items.push({
@@ -151,7 +151,7 @@ export const CommandPalette = ({ open, onClose }) => {
         })
         .slice(0, 3);
       if (matchedInvoices.length > 0) {
-        items.push({ type: 'group', label: 'Facturas' });
+        items.push({ type: 'group', label: t.cmd_group_invoices });
         matchedInvoices.forEach(i => {
           const client = clients.find(x => x.id === i.clienteId);
           items.push({
@@ -222,7 +222,7 @@ export const CommandPalette = ({ open, onClose }) => {
             ref={inputRef}
             value={query}
             onChange={e => { setQuery(e.target.value); setActiveIdx(0); }}
-            placeholder="Buscar clientes, consultas, planes..."
+            placeholder={t.cmd_placeholder}
             className="flex-1 bg-transparent text-sage-900 placeholder-sage-500 outline-none text-sm"
           />
           {query && (
@@ -235,7 +235,7 @@ export const CommandPalette = ({ open, onClose }) => {
 
         <div ref={listRef} className="max-h-80 overflow-y-auto py-2">
           {results.length === 0 ? (
-            <p className="text-center text-sage-500 text-sm py-8">Sin resultados</p>
+            <p className="text-center text-sage-500 text-sm py-8">{t.no_results}</p>
           ) : (
             results.map((item, i) => {
               if (item.type === 'group') {
@@ -274,9 +274,9 @@ export const CommandPalette = ({ open, onClose }) => {
         </div>
 
         <div className="px-4 py-2 border-t border-sage-300 flex items-center gap-4 text-[11px] text-sage-400">
-          <span><kbd className="bg-sage-100 px-1 rounded">↑↓</kbd> Navegar</span>
-          <span><kbd className="bg-sage-100 px-1 rounded">↵</kbd> Seleccionar</span>
-          <span><kbd className="bg-sage-100 px-1 rounded">ESC</kbd> Cerrar</span>
+          <span><kbd className="bg-sage-100 px-1 rounded">↑↓</kbd> {t.cmd_navigate}</span>
+          <span><kbd className="bg-sage-100 px-1 rounded">↵</kbd> {t.select_option}</span>
+          <span><kbd className="bg-sage-100 px-1 rounded">ESC</kbd> {t.close}</span>
         </div>
       </div>
     </div>

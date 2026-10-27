@@ -4,19 +4,12 @@ import { Button, Input, EmptyState, useToast, useConfirm } from './UI';
 import useStore, { formatDate } from '../stores/store';
 import { openWhatsAppChat } from '../services/reminderService';
 import { useT } from '../i18n';
+import { GOALS, optionLabel } from '../clientOptions';
 import { ClientModal } from './ClientModal';
 import { ClientDetailView } from './ClientDetailView';
 import { deleteClientDocumentsDir } from '../services/documentService';
 import { PatientSuggestionsSection } from './PatientSuggestionsInbox';
 
-const OBJETIVO_LABELS = {
-  perdida_grasa: 'Pérdida grasa',
-  ganancia_muscular: 'Ganancia muscular',
-  mejora_digestiva: 'Mejora digestiva',
-  rendimiento_deportivo: 'Deporte',
-  dietoterapia: 'Dietoterapia',
-  relacion_alimentacion: 'Relación alimentación',
-};
 
 export const ClientsView = () => {
   const clients = useStore(s => s.clients);
@@ -56,7 +49,7 @@ export const ClientsView = () => {
   }
 
   const handleDelete = async (client) => {
-    const ok = await confirm(`¿Eliminar a ${client.nombre}? Se eliminarán también sus consultas, mediciones y planes (Ctrl+Z para deshacer). Sus documentos se borrarán definitivamente. Las facturas se conservan.`);
+    const ok = await confirm(t.client_confirm_delete.replace('{name}', client.nombre));
     if (!ok) return;
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);
@@ -65,7 +58,7 @@ export const ClientsView = () => {
 
   const openWhatsApp = async (client) => {
     const result = await openWhatsAppChat(client, config);
-    if (!result.success) toast.error('Sin número de WhatsApp');
+    if (!result.success) toast.error(t.no_phone_number);
   };
 
   return (
@@ -102,7 +95,7 @@ export const ClientsView = () => {
           onChange={e => setClientFilters({ estado: e.target.value })}
           className="px-3 py-2 text-sm bg-white border border-sage-300 rounded-button text-sage-700 focus:outline-none focus:border-wellness-400"
         >
-          <option value="all">Todos los estados</option>
+          <option value="all">{t.all_statuses}</option>
           <option value="activo">{t.client_status_active}</option>
           <option value="inactivo">{t.client_status_inactive}</option>
           <option value="alta">{t.client_status_alta}</option>
@@ -112,9 +105,9 @@ export const ClientsView = () => {
           onChange={e => setClientFilters({ objetivo: e.target.value })}
           className="px-3 py-2 text-sm bg-white border border-sage-300 rounded-button text-sage-700 focus:outline-none focus:border-wellness-400"
         >
-          <option value="all">Todos los objetivos</option>
-          {Object.entries(OBJETIVO_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
+          <option value="all">{t.clients_all_goals}</option>
+          {GOALS.map(([k, key]) => (
+            <option key={k} value={k}>{t[key]}</option>
           ))}
         </select>
       </div>
@@ -162,7 +155,7 @@ export const ClientsView = () => {
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {client.objetivos.slice(0, 3).map(o => (
                       <span key={o} className="text-[11px] px-1.5 py-0.5 bg-wellness-50 text-wellness-600 rounded-badge">
-                        {OBJETIVO_LABELS[o] || o}
+                        {optionLabel(GOALS, t, o)}
                       </span>
                     ))}
                   </div>

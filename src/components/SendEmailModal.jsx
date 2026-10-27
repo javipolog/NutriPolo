@@ -11,10 +11,10 @@ import { getReminderConfig, clientLanguage } from '../services/reminderService';
 import { useT } from '../i18n';
 
 const MODES = [
-  { id: 'plan',         label: 'Enviar plan nutricional' },
-  { id: 'appointment',  label: 'Recordatorio de cita' },
-  { id: 'invoice',      label: 'Enviar factura' },
-  { id: 'document',     label: 'Enviar documento' },
+  { id: 'plan',         labelKey: 'email_mode_plan' },
+  { id: 'appointment',  labelKey: 'email_mode_appointment' },
+  { id: 'invoice',      labelKey: 'email_mode_invoice' },
+  { id: 'document',     labelKey: 'email_mode_document' },
 ];
 
 export const SendEmailModal = ({
@@ -59,7 +59,7 @@ export const SendEmailModal = ({
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             setDocPdfBytes(bytes);
           })
-          .catch(() => { toast.error('Error al cargar el documento adjunto'); });
+          .catch(() => { toast.error(t.email_attachment_error); });
       });
     }
   }, [mode, docRecord]);
@@ -102,7 +102,7 @@ export const SendEmailModal = ({
   const smtpConfig = buildSmtpConfig(config, smtpPassword);
 
   const handleSend = async () => {
-    if (!resolvedClient?.email) { toast.error('El cliente no tiene email registrado'); return; }
+    if (!resolvedClient?.email) { toast.error(t.email_client_no_email); return; }
 
     setSending(true);
     try {
@@ -145,14 +145,14 @@ export const SendEmailModal = ({
       }
 
       if (result?.success !== false) {
-        toast.success(useSmtp ? 'Email enviado' : 'Cliente de correo abierto');
+        toast.success(useSmtp ? t.email_sent : t.email_client_opened);
         onSent?.({ mode, manual: !useSmtp });
         onClose();
       } else {
-        toast.error(result?.error || 'Error al enviar');
+        toast.error(result?.error || t.email_send_error);
       }
     } catch (e) {
-      toast.error(errMsg(e) || 'Error inesperado');
+      toast.error(errMsg(e) || t.error_unknown);
     } finally {
       setSending(false);
     }
@@ -162,7 +162,7 @@ export const SendEmailModal = ({
     <Modal
       open
       onClose={onClose}
-      title="Enviar email"
+      title={t.email_send_title}
       size="lg"
       footer={
         <div className="flex justify-end gap-2">
@@ -173,7 +173,7 @@ export const SendEmailModal = ({
             onClick={handleSend}
             disabled={sending || (!resolvedClient?.email)}
           >
-            {sending ? 'Enviando...' : useSmtp ? 'Enviar' : 'Abrir cliente de correo'}
+            {sending ? t.email_sending : useSmtp ? t.email_send : t.email_open_client}
           </Button>
         </div>
       }
@@ -184,21 +184,21 @@ export const SendEmailModal = ({
           className="w-full [&>button]:flex-1"
           value={mode}
           onChange={id => { setMode(id); resetTemplate(id, lang); }}
-          options={MODES.map(({ id, label }) => ({ value: id, label }))}
+          options={MODES.map(({ id, labelKey }) => ({ value: id, label: t[labelKey] }))}
         />
 
         {/* Client selector (if not pre-set) */}
         {!client && (
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Cliente *</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_client} *</label>
             <select
               value={selectedClientId}
               onChange={e => setSelectedClientId(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
             >
-              <option value="">Seleccionar cliente...</option>
+              <option value="">{t.select_client_placeholder}</option>
               {[...clients].sort((a,b) => a.nombre.localeCompare(b.nombre)).map(c => (
-                <option key={c.id} value={c.id}>{c.nombre} {c.email ? `(${c.email})` : '(sin email)'}</option>
+                <option key={c.id} value={c.id}>{c.nombre} {c.email ? `(${c.email})` : `(${t.email_missing})`}</option>
               ))}
             </select>
           </div>
@@ -208,13 +208,13 @@ export const SendEmailModal = ({
         {resolvedClient && (
           <div className="flex items-center gap-2 text-xs text-sage-500 bg-sage-50 px-3 py-2 rounded-button">
             <Mail size={12} />
-            <span>Para: <strong className="text-sage-800">{resolvedClient.nombre}</strong> &lt;{resolvedClient.email || 'sin email'}&gt;</span>
+            <span>{t.email_to} <strong className="text-sage-800">{resolvedClient.nombre}</strong> &lt;{resolvedClient.email || t.email_missing}&gt;</span>
           </div>
         )}
 
         {/* Language */}
         <div className="flex gap-2 items-center">
-          <span className="text-xs text-sage-500">Idioma:</span>
+          <span className="text-xs text-sage-500">{t.settings_language}:</span>
           <SegmentedControl
             value={lang}
             onChange={l => { setLang(l); resetTemplate(mode, l); }}
@@ -224,20 +224,20 @@ export const SendEmailModal = ({
 
         {/* Subject */}
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Asunto</label>
+          <label className="block text-xs font-medium text-sage-600 mb-1">{t.reminders_subject}</label>
           <Input value={subject} onChange={e => setSubject(e.target.value)} />
         </div>
 
         {/* Body */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <label className="text-xs font-medium text-sage-600">Mensaje</label>
+            <label className="text-xs font-medium text-sage-600">{t.reminders_body}</label>
             <button
               onClick={() => setShowPreview(p => !p)}
               className="flex items-center gap-1 text-xs text-sage-400 hover:text-sage-600"
             >
               {showPreview ? <EyeOff size={11} /> : <Eye size={11} />}
-              {showPreview ? 'Editar' : 'Vista previa'}
+              {showPreview ? t.edit : t.preview}
             </button>
           </div>
           {showPreview ? (
@@ -251,7 +251,7 @@ export const SendEmailModal = ({
 
         {/* Variables hint */}
         <details className="text-xs">
-          <summary className="cursor-pointer text-sage-400 hover:text-sage-600">Variables disponibles</summary>
+          <summary className="cursor-pointer text-sage-400 hover:text-sage-600">{t.email_variables}</summary>
           <div className="mt-2 flex flex-wrap gap-1">
             {AVAILABLE_VARIABLES.map(v => (
               <button
@@ -275,13 +275,13 @@ export const SendEmailModal = ({
               onChange={e => setUseSmtp(e.target.checked)}
               disabled={!smtpConfig}
             />
-            Enviar vía SMTP {!smtpConfig && <span className="text-sage-400">(configura SMTP en Ajustes)</span>}
+            {t.email_via_smtp} {!smtpConfig && <span className="text-sage-400">{t.email_smtp_hint}</span>}
           </label>
         </div>
 
         {(pdfBytes || docPdfBytes) && (
           <p className="text-xs text-wellness-600 bg-wellness-50 px-3 py-1.5 rounded-button">
-            PDF adjunto listo para enviar {docRecord?.fileName ? `(${docRecord.fileName})` : ''}
+            {t.email_pdf_ready} {docRecord?.fileName ? `(${docRecord.fileName})` : ''}
           </p>
         )}
       </div>

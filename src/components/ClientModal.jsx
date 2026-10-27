@@ -2,24 +2,8 @@ import React, { useState } from 'react';
 import { Button, Input, Textarea, Modal, useToast } from './UI';
 import useStore from '../stores/store';
 import { useT } from '../i18n';
+import { GOALS, DIET_RESTRICTIONS } from '../clientOptions';
 
-const OBJECTIVES = [
-  { id: 'perdida_grasa',        label: 'Pérdida de grasa' },
-  { id: 'ganancia_muscular',    label: 'Ganancia muscular' },
-  { id: 'mejora_digestiva',     label: 'Mejora digestiva' },
-  { id: 'rendimiento_deportivo',label: 'Rendimiento deportivo' },
-  { id: 'dietoterapia',         label: 'Dietoterapia' },
-  { id: 'relacion_alimentacion',label: 'Relación con la alimentación' },
-];
-
-const DIET_RESTRICTIONS = [
-  { id: 'vegetariano',  label: 'Vegetariano' },
-  { id: 'vegano',       label: 'Vegano' },
-  { id: 'sin_gluten',   label: 'Sin gluten' },
-  { id: 'sin_lactosa',  label: 'Sin lactosa' },
-  { id: 'sin_cerdo',    label: 'Sin cerdo' },
-  { id: 'halal',        label: 'Halal' },
-];
 
 const MultiSelect = ({ options, value = [], onChange, placeholder }) => {
   const toggle = (id) => {
@@ -81,6 +65,8 @@ export const ClientModal = ({ client, onClose }) => {
   const updateClient = useStore(s => s.updateClient);
   const toast = useToast();
   const t = useT();
+  const goalOptions = GOALS.map(([id, key]) => ({ id, label: t[key] }));
+  const dietOptions = DIET_RESTRICTIONS.map(([id, key]) => ({ id, label: t[key] }));
 
   const isEdit = !!client;
 
@@ -115,26 +101,26 @@ export const ClientModal = ({ client, onClose }) => {
     const data = { ...form, altura: form.altura ? parseFloat(form.altura) : null };
     if (isEdit) {
       updateClient(client.id, data);
-      toast.success('Cliente actualizado');
+      toast.success(t.client_updated);
     } else {
       addClient(data);
-      toast.success('Cliente creado');
+      toast.success(t.client_created);
     }
     onClose();
   };
 
   const SECTIONS = [
-    { id: 'personal', label: 'Datos personales' },
-    { id: 'health',   label: 'Salud' },
-    { id: 'goals',    label: 'Objetivos' },
-    { id: 'notes',    label: 'Notas' },
+    { id: 'personal', label: t.client_personal_data },
+    { id: 'health',   label: t.client_tab_health },
+    { id: 'goals',    label: t.client_goals },
+    { id: 'notes',    label: t.notes },
   ];
 
   return (
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? `Editar — ${client.nombre}` : t.new_client}
+      title={isEdit ? `${t.edit} — ${client.nombre}` : t.new_client}
       size="lg"
       footer={
         <div className="flex justify-end gap-2">
@@ -210,7 +196,7 @@ export const ClientModal = ({ client, onClose }) => {
           </div>
           <div className="col-span-2">
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_street}</label>
-            <Input value={form.calle} onChange={e => set('calle', e.target.value)} placeholder="Calle, número, piso..." />
+            <Input value={form.calle} onChange={e => set('calle', e.target.value)} placeholder={t.client_street_placeholder} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_postal_code}</label>
@@ -235,7 +221,7 @@ export const ClientModal = ({ client, onClose }) => {
               onChange={e => set('genero', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
             >
-              <option value="">Seleccionar</option>
+              <option value="">{t.select_option}</option>
               <option value="M">{t.client_gender_m}</option>
               <option value="F">{t.client_gender_f}</option>
               <option value="otro">{t.client_gender_other}</option>
@@ -279,24 +265,24 @@ export const ClientModal = ({ client, onClose }) => {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_allergies} <span className="text-sage-400">(Enter para añadir)</span></label>
-            <TagInput value={form.alergias} onChange={v => set('alergias', v)} placeholder="Frutos secos, marisco..." />
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_allergies} <span className="text-sage-400">{t.tag_enter_hint}</span></label>
+            <TagInput value={form.alergias} onChange={v => set('alergias', v)} placeholder={t.client_allergies_placeholder} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_intolerances}</label>
-            <TagInput value={form.intolerancias} onChange={v => set('intolerancias', v)} placeholder="Lactosa, gluten..." />
+            <TagInput value={form.intolerancias} onChange={v => set('intolerancias', v)} placeholder={t.client_intolerances_placeholder} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_pathologies}</label>
-            <TagInput value={form.patologias} onChange={v => set('patologias', v)} placeholder="SIBO, hipotiroidismo..." />
+            <TagInput value={form.patologias} onChange={v => set('patologias', v)} placeholder={t.client_pathologies_placeholder} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_medication}</label>
-            <Textarea value={form.medicacion} onChange={e => set('medicacion', e.target.value)} rows={2} placeholder="Medicación actual..." />
+            <Textarea value={form.medicacion} onChange={e => set('medicacion', e.target.value)} rows={2} placeholder={t.client_medication_placeholder} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_exercise}</label>
-            <Textarea value={form.ejercicio} onChange={e => set('ejercicio', e.target.value)} rows={2} placeholder="Tipo de ejercicio y frecuencia..." />
+            <Textarea value={form.ejercicio} onChange={e => set('ejercicio', e.target.value)} rows={2} placeholder={t.client_exercise_placeholder} />
           </div>
         </div>
       )}
@@ -305,11 +291,11 @@ export const ClientModal = ({ client, onClose }) => {
         <div className="space-y-4">
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-2">{t.client_goals}</label>
-            <MultiSelect options={OBJECTIVES} value={form.objetivos} onChange={v => set('objetivos', v)} />
+            <MultiSelect options={goalOptions} value={form.objetivos} onChange={v => set('objetivos', v)} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-2">{t.client_diet_restrictions}</label>
-            <MultiSelect options={DIET_RESTRICTIONS} value={form.restriccionesDieteticas} onChange={v => set('restriccionesDieteticas', v)} />
+            <MultiSelect options={dietOptions} value={form.restriccionesDieteticas} onChange={v => set('restriccionesDieteticas', v)} />
           </div>
         </div>
       )}
@@ -321,7 +307,7 @@ export const ClientModal = ({ client, onClose }) => {
             value={form.notas}
             onChange={e => set('notas', e.target.value)}
             rows={8}
-            placeholder="Observaciones privadas sobre el cliente..."
+            placeholder={t.client_notes_placeholder}
           />
         </div>
       )}

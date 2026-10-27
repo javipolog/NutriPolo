@@ -4,6 +4,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Button, SegmentedControl, useToast, useConfirm } from './UI';
 import useStore, { formatDate, formatDateShort, calcIMC, todayISO } from '../stores/store';
 import { useT } from '../i18n';
+import { useChartTheme } from '../hooks/useChartTheme';
 
 // Y axis fitted to the data with a little headroom, instead of starting at 0
 const FITTED_DOMAIN = [min => Math.floor(min * 0.97), max => Math.ceil(max * 1.03)];
@@ -40,7 +41,7 @@ const MeasurementModal = ({ clientId, onClose }) => {
 
   const handleSave = () => {
     if (!form.peso && !form.grasaCorporal) {
-      toast.error('Introduce al menos peso o grasa corporal');
+      toast.error(t.measurement_need_value);
       return;
     }
     const data = { ...form, clienteId: clientId };
@@ -50,7 +51,7 @@ const MeasurementModal = ({ clientId, onClose }) => {
       }
     });
     addMeasurement(data);
-    toast.success('Medición guardada');
+    toast.success(t.measurement_saved);
     onClose();
   };
 
@@ -76,7 +77,7 @@ const MeasurementModal = ({ clientId, onClose }) => {
             {field(t.measurement_visceral_fat, 'grasaVisceral', '')}
           </div>
           <div>
-            <p className="text-xs font-medium text-sage-600 mb-2">Perímetros corporales</p>
+            <p className="text-xs font-medium text-sage-600 mb-2">{t.measurement_perimeters}</p>
             <div className="grid grid-cols-3 gap-3">
               {field(t.measurement_waist, 'cintura', 'cm')}
               {field(t.measurement_chest, 'pecho', 'cm')}
@@ -107,6 +108,7 @@ const MeasurementModal = ({ clientId, onClose }) => {
 export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
   const deleteMeasurement = useStore(s => s.deleteMeasurement);
   const t = useT();
+  const c = useChartTheme();
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const [showModal, setShowModal] = useState(false);
@@ -124,8 +126,8 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
   const hasSecondary = !!secondaryKey && chartData.some(d => d[secondaryKey] != null);
 
   const handleDelete = async (id) => {
-    const ok = await confirm('¿Eliminar esta medición?');
-    if (ok) { deleteMeasurement(id); toast.success('Medición eliminada'); }
+    const ok = await confirm(t.measurement_confirm_delete);
+    if (ok) { deleteMeasurement(id); toast.success(t.measurement_deleted); }
   };
 
   return (
@@ -135,9 +137,9 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
           value={chartType}
           onChange={setChartType}
           options={[
-            { value: 'weight', label: 'Peso' },
-            { value: 'bodyfat', label: 'Grasa' },
-            { value: 'circumferences', label: 'Perímetros' },
+            { value: 'weight', label: t.chart_weight_short },
+            { value: 'bodyfat', label: t.chart_fat },
+            { value: 'circumferences', label: t.chart_perimeters },
           ]}
         />
         <Button variant="primary" size="sm" onClick={() => setShowModal(true)} icon={Plus}>
@@ -157,30 +159,30 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
             <div className="bg-white border border-sage-200 rounded-soft p-4 h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E6E2D8" />
-                  <XAxis dataKey="fecha" tick={{ fontSize: 10, fill: '#75726A' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={c.grid} />
+                  <XAxis dataKey="fecha" tick={{ fontSize: 10, fill: c.axis }} />
                   {/* Each series gets its own axis fitted to its range: on a 0-based
                       axis a 82 → 78 kg change looks like a flat line. */}
-                  <YAxis yAxisId="left" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#75726A' }} width={36} />
+                  <YAxis yAxisId="left" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: c.axis }} width={36} />
                   {hasSecondary && (
-                    <YAxis yAxisId="right" orientation="right" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#75726A' }} width={36} />
+                    <YAxis yAxisId="right" orientation="right" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: c.axis }} width={36} />
                   )}
-                  <Tooltip contentStyle={{ fontSize: 12, borderColor: '#DEDAD0', borderRadius: 6 }} />
+                  <Tooltip contentStyle={{ fontSize: 12, borderColor: c.tooltipBorder, backgroundColor: c.tooltipBg, color: c.tooltipText, borderRadius: 6 }} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   {chartType === 'weight' && (
                     <>
-                      <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#3E6B52" strokeWidth={2} dot={{ r: 3 }} name="Peso (kg)" connectNulls />
-                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="imc" stroke="#C15F3C" strokeWidth={2} dot={{ r: 3 }} name="IMC" connectNulls />}
+                      <Line yAxisId="left" type="monotone" dataKey="peso" stroke={c.primary} strokeWidth={2} dot={{ r: 3 }} name={t.measurement_weight} connectNulls />
+                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="imc" stroke={c.accent} strokeWidth={2} dot={{ r: 3 }} name="IMC" connectNulls />}
                     </>
                   )}
                   {chartType === 'bodyfat' && (
                     <>
-                      <Line yAxisId="left" type="monotone" dataKey="grasa" stroke="#C15F3C" strokeWidth={2} dot={{ r: 3 }} name="Grasa (%)" connectNulls />
-                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="musculo" stroke="#3E6B52" strokeWidth={2} dot={{ r: 3 }} name="Músculo (kg)" connectNulls />}
+                      <Line yAxisId="left" type="monotone" dataKey="grasa" stroke={c.accent} strokeWidth={2} dot={{ r: 3 }} name={t.measurement_body_fat} connectNulls />
+                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="musculo" stroke={c.primary} strokeWidth={2} dot={{ r: 3 }} name={t.measurement_muscle} connectNulls />}
                     </>
                   )}
                   {chartType === 'circumferences' && (
-                    <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#3E6B52" strokeWidth={2} dot={{ r: 3 }} name="Peso ref." connectNulls />
+                    <Line yAxisId="left" type="monotone" dataKey="peso" stroke={c.primary} strokeWidth={2} dot={{ r: 3 }} name={t.chart_weight_ref} connectNulls />
                   )}
                 </LineChart>
               </ResponsiveContainer>
@@ -195,10 +197,10 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
                   <p className="text-xs font-bold text-wellness-500">{formatDate(m.fecha)}</p>
                 </div>
                 <div className="flex-1 grid grid-cols-4 gap-2 text-center">
-                  {m.peso && <div><p className="text-xs text-sage-400">Peso</p><p className="text-sm font-semibold text-sage-800">{m.peso}kg</p></div>}
+                  {m.peso && <div><p className="text-xs text-sage-400">{t.chart_weight_short}</p><p className="text-sm font-semibold text-sage-800">{m.peso}kg</p></div>}
                   {m.imc && <div><p className="text-xs text-sage-400">IMC</p><p className="text-sm font-semibold text-sage-800">{m.imc}</p></div>}
-                  {m.grasaCorporal && <div><p className="text-xs text-sage-400">Grasa</p><p className="text-sm font-semibold text-sage-800">{m.grasaCorporal}%</p></div>}
-                  {m.cintura && <div><p className="text-xs text-sage-400">Cintura</p><p className="text-sm font-semibold text-sage-800">{m.cintura}cm</p></div>}
+                  {m.grasaCorporal && <div><p className="text-xs text-sage-400">{t.chart_fat}</p><p className="text-sm font-semibold text-sage-800">{m.grasaCorporal}%</p></div>}
+                  {m.cintura && <div><p className="text-xs text-sage-400">{t.chart_waist}</p><p className="text-sm font-semibold text-sage-800">{m.cintura}cm</p></div>}
                 </div>
                 <button
                   onClick={() => handleDelete(m.id)}

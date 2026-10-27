@@ -4,6 +4,7 @@ import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText, Calendar,
 import { Button, StatusBadge, useToast } from './UI';
 import useStore, { formatDate, formatCurrency, calcIMC } from '../stores/store';
 import { useT, useLocale } from '../i18n';
+import { GOALS, DIET_RESTRICTIONS, ACTIVITY_LEVELS, optionLabel } from '../clientOptions';
 import { ClientModal } from './ClientModal';
 import { ConsultationModal } from './ConsultationModal';
 import { InvoiceModal } from './InvoiceModal';
@@ -14,11 +15,6 @@ import { SendEmailModal } from './SendEmailModal';
 import { openWhatsAppChat } from '../services/reminderService';
 import { useReminderActions } from '../hooks/useReminderActions';
 
-const OBJETIVO_LABELS = {
-  perdida_grasa: 'Pérdida grasa', ganancia_muscular: 'Ganancia muscular',
-  mejora_digestiva: 'Mejora digestiva', rendimiento_deportivo: 'Deporte',
-  dietoterapia: 'Dietoterapia', relacion_alimentacion: 'Relación alimentación',
-};
 
 const InfoRow = ({ label, value }) => {
   if (!value) return null;
@@ -125,7 +121,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
               <div className="flex flex-wrap gap-1 mt-2">
                 {(client.objetivos || []).map(o => (
                   <span key={o} className="text-[11px] px-2 py-0.5 bg-wellness-50 text-wellness-600 rounded-badge">
-                    {OBJETIVO_LABELS[o] || o}
+                    {optionLabel(GOALS, t, o)}
                   </span>
                 ))}
               </div>
@@ -199,25 +195,25 @@ export const ClientDetailView = ({ clientId, onBack }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="bg-white border border-sage-200 rounded-soft p-4">
               <h3 className="text-sm font-semibold text-sage-700 mb-3">{t.client_personal_data}</h3>
-              <InfoRow label="Email" value={client.email} />
-              <InfoRow label="Teléfono" value={client.telefono} />
+              <InfoRow label={t.email} value={client.email} />
+              <InfoRow label={t.phone} value={client.telefono} />
               <InfoRow label="NIF" value={client.nif} />
               <InfoRow label={t.client_street} value={client.calle} />
               <InfoRow label={t.client_city} value={[client.codigoPostal, client.ciudad, client.provincia].filter(Boolean).join(', ')} />
-              <InfoRow label="Fecha nacimiento" value={formatDate(client.fechaNacimiento)} />
-              <InfoRow label="Género" value={client.genero === 'M' ? 'Hombre' : client.genero === 'F' ? 'Mujer' : client.genero} />
-              <InfoRow label="Altura" value={altura ? `${altura} cm` : null} />
-              <InfoRow label="Nivel actividad" value={client.nivelActividad} />
+              <InfoRow label={t.client_birth} value={formatDate(client.fechaNacimiento)} />
+              <InfoRow label={t.client_gender} value={client.genero === 'M' ? t.client_gender_m : client.genero === 'F' ? t.client_gender_f : client.genero} />
+              <InfoRow label={t.client_height} value={altura} />
+              <InfoRow label={t.client_activity} value={client.nivelActividad && optionLabel(ACTIVITY_LEVELS, t, client.nivelActividad)} />
             </div>
             <div className="bg-white border border-sage-200 rounded-soft p-4">
               <h3 className="text-sm font-semibold text-sage-700 mb-3">{t.client_health_profile}</h3>
               {!hasHealthData && <p className="text-xs text-sage-500">{t.client_health_empty}</p>}
-              {(client.alergias || []).length > 0 && <InfoRow label="Alergias" value={client.alergias.join(', ')} />}
-              {(client.intolerancias || []).length > 0 && <InfoRow label="Intolerancias" value={client.intolerancias.join(', ')} />}
-              {(client.patologias || []).length > 0 && <InfoRow label="Patologías" value={client.patologias.join(', ')} />}
-              {client.medicacion && <InfoRow label="Medicación" value={client.medicacion} />}
-              {client.ejercicio && <InfoRow label="Ejercicio" value={client.ejercicio} />}
-              {(client.restriccionesDieteticas || []).length > 0 && <InfoRow label="Restricciones" value={client.restriccionesDieteticas.join(', ')} />}
+              {(client.alergias || []).length > 0 && <InfoRow label={t.client_allergies} value={client.alergias.join(', ')} />}
+              {(client.intolerancias || []).length > 0 && <InfoRow label={t.client_intolerances} value={client.intolerancias.join(', ')} />}
+              {(client.patologias || []).length > 0 && <InfoRow label={t.client_pathologies} value={client.patologias.join(', ')} />}
+              {client.medicacion && <InfoRow label={t.client_medication} value={client.medicacion} />}
+              {client.ejercicio && <InfoRow label={t.client_exercise} value={client.ejercicio} />}
+              {(client.restriccionesDieteticas || []).length > 0 && <InfoRow label={t.client_diet_restrictions} value={client.restriccionesDieteticas.map(r => optionLabel(DIET_RESTRICTIONS, t, r)).join(', ')} />}
             </div>
             {client.notas && (
               <div className="col-span-full bg-warning-light border border-warning/20 rounded-soft p-4">

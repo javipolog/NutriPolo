@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Package, Plus, Edit2, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { Button, Modal, Input, Textarea, EmptyState, useToast, useConfirm } from './UI';
 import useStore, { formatCurrency } from '../stores/store';
-import { useT } from '../i18n';
+import { useT, plural } from '../i18n';
 
 const ServiceModal = ({ service, onClose }) => {
   const addService = useStore(s => s.addService);
@@ -20,12 +20,12 @@ const ServiceModal = ({ service, onClose }) => {
 
   const handleSave = () => {
     const e = {};
-    if (!form.nombre.trim()) e.nombre = 'Requerido';
-    if (!form.precio) e.precio = 'Requerido';
+    if (!form.nombre.trim()) e.nombre = t.error_required;
+    if (!form.precio) e.precio = t.error_required;
     if (Object.keys(e).length) { setErrors(e); return; }
     const data = { ...form, precio: parseFloat(form.precio), numSesiones: parseInt(form.numSesiones) || 1, duracion: parseInt(form.duracion) || 45 };
-    if (isEdit) { updateService(service.id, data); toast.success('Servicio actualizado'); }
-    else { addService(data); toast.success('Servicio creado'); }
+    if (isEdit) { updateService(service.id, data); toast.success(t.service_updated); }
+    else { addService(data); toast.success(t.service_created); }
     onClose();
   };
 
@@ -33,7 +33,7 @@ const ServiceModal = ({ service, onClose }) => {
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? 'Editar servicio' : 'Nuevo servicio'}
+      title={isEdit ? t.service_edit : t.new_service}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
@@ -80,10 +80,10 @@ export const ServicesView = () => {
   const [editService, setEditService] = useState(null);
 
   const handleDelete = async (svc) => {
-    const ok = await confirm(`¿Eliminar servicio "${svc.nombre}"?`);
+    const ok = await confirm(t.service_confirm_delete.replace('{name}', svc.nombre));
     if (!ok) return;
     deleteService(svc.id);
-    toast.success('Servicio eliminado');
+    toast.success(t.service_deleted);
   };
 
   return (
@@ -108,7 +108,7 @@ export const ServicesView = () => {
                 <p className="font-medium text-sage-900">{svc.nombre}</p>
                 {svc.descripcion && <p className="text-xs text-sage-400 mt-0.5 truncate">{svc.descripcion}</p>}
                 <div className="flex items-center gap-3 mt-1 text-xs text-sage-500">
-                  <span>{svc.numSesiones > 1 ? `${svc.numSesiones} sesiones` : '1 sesión'}</span>
+                  <span>{plural(t, 'service_session_count', Number(svc.numSesiones) || 1)}</span>
                   <span>·</span>
                   <span>{svc.duracion} min</span>
                 </div>

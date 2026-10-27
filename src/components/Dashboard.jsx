@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
     ResponsiveContainer, AreaChart, Area
@@ -11,6 +11,7 @@ import {
 import { Card, StatCard, Button, Badge, EmptyState, StatusBadge } from './UI';
 import useStore, { formatCurrency, formatDate, formatDateShort, filterVisibleConsultations } from '../stores/store';
 import { RemindersPanel } from './RemindersPanel';
+import { useChartTheme } from '../hooks/useChartTheme';
 import { ConsultationModal } from './ConsultationModal';
 import { ClientModal } from './ClientModal';
 import { InvoiceModal } from './InvoiceModal';
@@ -345,10 +346,11 @@ const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, p
    SECTION: ACTIVITY CHARTS
    ============================================ */
 
-const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark }) => {
+const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart }) => {
     const t = useT();
-    const axisColor = isDark ? '#6A6860' : '#9C9A91';
-    const gridColor = isDark ? '#3A3530' : '#E8E5DD';
+    const c = useChartTheme();
+    const axisColor = c.axis;
+    const gridColor = c.grid;
 
     const axisProps = {
         stroke: axisColor,
@@ -368,8 +370,8 @@ const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark
                         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
                         <XAxis dataKey="label" {...axisProps} dy={8} />
                         <YAxis {...axisProps} allowDecimals={false} />
-                        <Tooltip content={<ChartTooltip formatter={(v) => v} />} cursor={{ fill: isDark ? '#2A2520' : '#F4F3EE' }} />
-                        <Bar dataKey="value" name={t.consultations_title} fill="#C15F3C" radius={[4, 4, 0, 0]} animationDuration={600} />
+                        <Tooltip content={<ChartTooltip formatter={(v) => v} />} cursor={{ fill: c.cursor }} />
+                        <Bar dataKey="value" name={t.consultations_title} fill={c.accent} radius={[4, 4, 0, 0]} animationDuration={600} />
                     </BarChart>
                 </ResponsiveContainer>
             </Card>
@@ -382,15 +384,15 @@ const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark
                     <AreaChart data={clientsChart} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                         <defs>
                             <linearGradient id="colorClients" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#3A6591" stopOpacity={0.2} />
-                                <stop offset="95%" stopColor="#3A6591" stopOpacity={0} />
+                                <stop offset="5%" stopColor={c.info} stopOpacity={0.2} />
+                                <stop offset="95%" stopColor={c.info} stopOpacity={0} />
                             </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
                         <XAxis dataKey="label" {...axisProps} dy={8} />
                         <YAxis {...axisProps} allowDecimals={false} />
-                        <Tooltip content={<ChartTooltip formatter={(v) => v} />} cursor={{ stroke: '#3A6591', strokeDasharray: '4 4', strokeWidth: 1 }} />
-                        <Area type="monotone" dataKey="value" name={t.nav_clients} stroke="#3A6591" strokeWidth={2.5} fill="url(#colorClients)" activeDot={{ r: 4, strokeWidth: 0, fill: '#3A6591' }} animationDuration={600} />
+                        <Tooltip content={<ChartTooltip formatter={(v) => v} />} cursor={{ stroke: c.info, strokeDasharray: '4 4', strokeWidth: 1 }} />
+                        <Area type="monotone" dataKey="value" name={t.nav_clients} stroke={c.info} strokeWidth={2.5} fill="url(#colorClients)" activeDot={{ r: 4, strokeWidth: 0, fill: c.info }} animationDuration={600} />
                     </AreaChart>
                 </ResponsiveContainer>
             </Card>
@@ -404,8 +406,8 @@ const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark
                         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
                         <XAxis dataKey="label" {...axisProps} dy={8} />
                         <YAxis {...axisProps} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
-                        <Tooltip content={<ChartTooltip formatter={(v) => formatCurrency(v)} />} cursor={{ fill: isDark ? '#2A2520' : '#F4F3EE' }} />
-                        <Bar dataKey="value" name={t.dashboard_revenue} fill="#3E6B52" radius={[4, 4, 0, 0]} animationDuration={600} />
+                        <Tooltip content={<ChartTooltip formatter={(v) => formatCurrency(v)} />} cursor={{ fill: c.cursor }} />
+                        <Bar dataKey="value" name={t.dashboard_revenue} fill={c.primary} radius={[4, 4, 0, 0]} animationDuration={600} />
                     </BarChart>
                 </ResponsiveContainer>
             </Card>
@@ -585,18 +587,6 @@ export const Dashboard = () => {
     const getPendingFollowUps     = useStore(s => s.getPendingFollowUps);
     const getExpiringPlans        = useStore(s => s.getExpiringPlans);
 
-    // Dark mode detection
-    const [isDark, setIsDark] = useState(() =>
-        document.documentElement.getAttribute('data-theme') === 'dark'
-    );
-    useEffect(() => {
-        const obs = new MutationObserver(() =>
-            setIsDark(document.documentElement.getAttribute('data-theme') === 'dark')
-        );
-        obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-        return () => obs.disconnect();
-    }, []);
-
     // Today's consultations
     const todayConsultations = useMemo(() => getTodayConsultations(), [consultations]);
 
@@ -732,7 +722,6 @@ export const Dashboard = () => {
                 consultationsChart={consultationsChart}
                 clientsChart={clientsChart}
                 revenueChart={revenueChart}
-                isDark={isDark}
             />
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">

@@ -6,7 +6,7 @@ import {
 import { Button, Modal, Input, Textarea, EmptyState, SegmentedControl, useToast, useConfirm } from './UI';
 import { invoke } from '@tauri-apps/api/tauri';
 import useStore, { formatDate, todayISO, generateId, errMsg } from '../stores/store';
-import { useT } from '../i18n';
+import { useT, plural } from '../i18n';
 import { SendEmailModal } from './SendEmailModal';
 
 // ─────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
             className="text-xs text-sage-500 bg-transparent border-none outline-none focus:ring-0"
           />
         </div>
-        <span className="text-xs text-sage-400">{(meal.opciones || []).length} opción{(meal.opciones || []).length !== 1 ? 'es' : ''}</span>
+        <span className="text-xs text-sage-400">{plural(t, 'plan_option_count', (meal.opciones || []).length)}</span>
         <button onClick={onDelete} aria-label={t.plan_delete_meal} title={t.plan_delete_meal} className="p-1 text-sage-300 hover:text-danger transition-colors">
           <Trash2 size={13} />
         </button>
@@ -103,14 +103,14 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
                 value={opt.descripcion}
                 onChange={e => updateOption(opt.id, { descripcion: e.target.value })}
                 className="w-full text-sm text-sage-800 bg-white border border-sage-200 rounded-button px-3 py-1.5 focus:outline-none focus:border-wellness-400"
-                placeholder="Descripción corta (ej. Opción con lactosa)"
+                placeholder={t.plan_option_desc_placeholder}
               />
               <textarea
                 value={opt.alimentos}
                 onChange={e => updateOption(opt.id, { alimentos: e.target.value })}
                 rows={2}
                 className="w-full text-sm text-sage-700 bg-white border border-sage-200 rounded-button px-3 py-1.5 focus:outline-none focus:border-wellness-400 resize-none"
-                placeholder="Alimentos y cantidades&#10;ej. 40g avena, 200ml leche semidesnatada, 1 plátano..."
+                placeholder={t.plan_option_foods_placeholder}
               />
               <div className="flex gap-3">
                 <div className="w-28">
@@ -126,7 +126,7 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
                   value={opt.notas}
                   onChange={e => updateOption(opt.id, { notas: e.target.value })}
                   className="flex-1 text-xs bg-white border border-sage-200 rounded-button px-2 py-1 focus:outline-none focus:border-wellness-400"
-                  placeholder="Notas adicionales..."
+                  placeholder={t.plan_option_notes_placeholder}
                 />
               </div>
             </div>
@@ -135,7 +135,7 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
             onClick={addOption}
             className="text-xs text-wellness-500 hover:text-wellness-600 flex items-center gap-1 transition-colors"
           >
-            <Plus size={12} /> Añadir opción
+            <Plus size={12} /> {t.plan_add_option}
           </button>
         </div>
       )}
@@ -163,11 +163,11 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
     objetivos: '',
     kcalObjetivo: '',
     comidas: [
-      { id: generateId(), nombre: 'Desayuno', hora: '08:00', opciones: [] },
-      { id: generateId(), nombre: 'Media mañana', hora: '11:00', opciones: [] },
-      { id: generateId(), nombre: 'Comida', hora: '14:00', opciones: [] },
-      { id: generateId(), nombre: 'Merienda', hora: '17:00', opciones: [] },
-      { id: generateId(), nombre: 'Cena', hora: '21:00', opciones: [] },
+      { id: generateId(), nombre: t.meal_breakfast, hora: '08:00', opciones: [] },
+      { id: generateId(), nombre: t.meal_mid_morning, hora: '11:00', opciones: [] },
+      { id: generateId(), nombre: t.meal_lunch, hora: '14:00', opciones: [] },
+      { id: generateId(), nombre: t.meal_snack, hora: '17:00', opciones: [] },
+      { id: generateId(), nombre: t.meal_dinner, hora: '21:00', opciones: [] },
     ],
     recomendaciones: '',
     suplementos: '',
@@ -181,7 +181,7 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
 
   const addMeal = () => set('comidas', [
     ...form.comidas,
-    { id: generateId(), nombre: 'Nueva comida', hora: '', opciones: [] },
+    { id: generateId(), nombre: t.meal_new, hora: '', opciones: [] },
   ]);
 
   const updateMeal = (id, data) => set('comidas', form.comidas.map(m => m.id === id ? data : m));
@@ -189,8 +189,8 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
 
   const validate = () => {
     const e = {};
-    if (!form.clienteId) e.clienteId = 'Selecciona un cliente';
-    if (!form.nombre.trim()) e.nombre = 'Requerido';
+    if (!form.clienteId) e.clienteId = t.select_client_error;
+    if (!form.nombre.trim()) e.nombre = t.error_required;
     return e;
   };
 
@@ -209,10 +209,10 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
     };
     if (isEdit) {
       updateNutritionPlan(plan.id, data);
-      toast.success('Plan actualizado');
+      toast.success(t.plan_updated);
     } else {
       addNutritionPlan(data);
-      toast.success('Plan creado');
+      toast.success(t.plan_created);
     }
     onClose();
   };
@@ -221,7 +221,7 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? 'Editar plan nutricional' : 'Nuevo plan nutricional'}
+      title={isEdit ? t.plan_edit : t.plan_new_title}
       size="xl"
       footer={
         <div className="flex items-center justify-between">
@@ -247,13 +247,13 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
         {/* Header info */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Cliente *</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_client} *</label>
             <select
               value={form.clienteId}
               onChange={e => set('clienteId', e.target.value)}
               className={`w-full px-3 py-2 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors.clienteId ? 'border-danger' : 'border-sage-300'}`}
             >
-              <option value="">Seleccionar cliente...</option>
+              <option value="">{t.select_client_placeholder}</option>
               {[...clients].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(c => (
                 <option key={c.id} value={c.id}>{c.nombre}</option>
               ))}
@@ -261,41 +261,41 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
             {errors.clienteId && <p className="text-xs text-danger mt-1">{errors.clienteId}</p>}
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Nombre del plan *</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_name} *</label>
             <Input
               value={form.nombre}
               onChange={e => set('nombre', e.target.value)}
               error={errors.nombre}
-              placeholder="ej. Plan pérdida de grasa — Marzo 2026"
+              placeholder={t.plan_name_placeholder}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Fecha inicio</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_start}</label>
             <Input type="date" value={form.fechaInicio} onChange={e => set('fechaInicio', e.target.value)} />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Fecha fin</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_end}</label>
             <Input type="date" value={form.fechaFin} onChange={e => set('fechaFin', e.target.value)} />
           </div>
         </div>
 
         {/* Objectives */}
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Objetivos del plan</label>
+          <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_objectives}</label>
           <Textarea
             value={form.objetivos}
             onChange={e => set('objetivos', e.target.value)}
             rows={2}
-            placeholder="Describe los objetivos principales del plan..."
+            placeholder={t.plan_objectives_placeholder}
           />
         </div>
 
         {/* Macros */}
         <div>
-          <h3 className="text-xs font-semibold text-sage-700 mb-3">Distribución de macros</h3>
+          <h3 className="text-xs font-semibold text-sage-700 mb-3">{t.plan_macros}</h3>
           <div className="grid grid-cols-4 gap-3">
             <div>
-              <label className="block text-xs text-sage-500 mb-1">Kcal objetivo/día</label>
+              <label className="block text-xs text-sage-500 mb-1">{t.plan_kcal_day}</label>
               <Input
                 type="number"
                 value={form.kcalObjetivo}
@@ -303,7 +303,7 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
                 placeholder="1800"
               />
             </div>
-            {[['proteinas', 'Proteínas (g)'], ['carbohidratos', 'Carbohidratos (g)'], ['grasas', 'Grasas (g)']].map(([k, label]) => (
+            {[['proteinas', t.plan_macros_protein], ['carbohidratos', t.plan_macros_carbs], ['grasas', t.plan_macros_fats]].map(([k, label]) => (
               <div key={k}>
                 <label className="block text-xs text-sage-500 mb-1">{label}</label>
                 <Input
@@ -321,12 +321,12 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
         {/* Meals */}
         <div>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold text-sage-700">Comidas del día</h3>
+            <h3 className="text-xs font-semibold text-sage-700">{t.plan_meals}</h3>
             <button
               onClick={addMeal}
               className="text-xs text-wellness-500 hover:text-wellness-600 flex items-center gap-1"
             >
-              <Plus size={12} /> Añadir comida
+              <Plus size={12} /> {t.plan_add_meal}
             </button>
           </div>
           <div className="space-y-3">
@@ -345,32 +345,32 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
         {/* Recommendations + Supplements */}
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Recomendaciones generales</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_recommendations}</label>
             <Textarea
               value={form.recomendaciones}
               onChange={e => set('recomendaciones', e.target.value)}
               rows={4}
-              placeholder="Consejos de hábitos, hidratación, masticación, horarios..."
+              placeholder={t.plan_recommendations_placeholder}
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Suplementación</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_supplements}</label>
             <Textarea
               value={form.suplementos}
               onChange={e => set('suplementos', e.target.value)}
               rows={4}
-              placeholder="Suplementos recomendados, dosis, timing..."
+              placeholder={t.plan_supplements_placeholder}
             />
           </div>
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Observaciones internas</label>
+          <label className="block text-xs font-medium text-sage-600 mb-1">{t.plan_internal_notes}</label>
           <Textarea
             value={form.observaciones}
             onChange={e => set('observaciones', e.target.value)}
             rows={2}
-            placeholder="Solo visible para ti..."
+            placeholder={t.only_you_placeholder}
           />
         </div>
       </div>
@@ -411,10 +411,10 @@ export const NutritionPlanEditor = () => {
   }, [nutritionPlans, filterEstado]);
 
   const handleDelete = async (plan) => {
-    const ok = await confirm(`¿Eliminar el plan "${plan.nombre}"?`);
+    const ok = await confirm(t.plan_confirm_delete.replace('{name}', plan.nombre));
     if (!ok) return;
     deleteNutritionPlan(plan.id);
-    toast.success('Plan eliminado');
+    toast.success(t.plan_deleted);
   };
 
   return (
@@ -489,8 +489,8 @@ export const NutritionPlanEditor = () => {
                         if (!filePath) return;
                         await writeBinaryFile(filePath, bytes);
                         invoke('open_file', { path: filePath }).catch(() => {});
-                        toast.success('PDF guardado');
-                      } catch (e) { toast.error('Error al generar PDF: ' + errMsg(e)); }
+                        toast.success(t.pdf_saved);
+                      } catch (e) { toast.error(t.pdf_error.replace('{error}', errMsg(e))); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
                     title={t.download_pdf}
@@ -512,7 +512,7 @@ export const NutritionPlanEditor = () => {
                         const addDoc = useStore.getState().addClientDocument;
                         addDoc({
                           clienteId: plan.clienteId,
-                          nombre: plan.nombre || 'Plan nutricional',
+                          nombre: plan.nombre || t.plan_pdf_title,
                           tipo: 'plan_nutricional',
                           fileName,
                           storedFileName,
@@ -520,7 +520,7 @@ export const NutritionPlanEditor = () => {
                           fechaDocumento: todayISO(),
                           notas: '',
                         });
-                        toast.success(t.doc_saved_to_client || 'Plan guardado en documentos del cliente');
+                        toast.success(t.doc_saved_to_client);
                       } catch (e) { toast.error('Error: ' + errMsg(e)); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
@@ -536,7 +536,7 @@ export const NutritionPlanEditor = () => {
                         const { generateNutritionPlanPDF } = await import('../services/pdfPlanGenerator');
                         const pdfBytes = await generateNutritionPlanPDF(plan, client, config);
                         setEmailPlan({ plan, pdfBytes });
-                      } catch (e) { toast.error('Error al generar PDF: ' + errMsg(e)); }
+                      } catch (e) { toast.error(t.pdf_error.replace('{error}', errMsg(e))); }
                     }}
                     className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
                     title={t.send_by_email}

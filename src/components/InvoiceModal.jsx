@@ -108,7 +108,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
       ...f,
       items: [...f.items, {
         id: generateId(),
-        descripcion: `${consultation.tipo || 'Consulta'} — ${formatDate(consultation.fecha)}`,
+        descripcion: `${consultation.tipo || t.consultation_default} — ${formatDate(consultation.fecha)}`,
         cantidad: 1,
         precioUnitario: svc ? svc.precio.toString() : '',
         servicioId: svc ? svc.id : null,
@@ -139,13 +139,13 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
   // ── Validation ───────────────────────────────────────────────
   const validate = () => {
     const e = {};
-    if (!form.clienteId) e.clienteId = 'Selecciona un cliente';
-    if (form.items.length === 0) e.items = 'Añade al menos un concepto';
+    if (!form.clienteId) e.clienteId = t.select_client_error;
+    if (form.items.length === 0) e.items = t.invoice_need_item;
     form.items.forEach((item, idx) => {
-      if (!item.descripcion.trim()) e[`item_desc_${idx}`] = 'Requerido';
+      if (!item.descripcion.trim()) e[`item_desc_${idx}`] = t.error_required;
       const qty = parseFloat(item.cantidad);
       if (!qty || qty <= 0) e[`item_qty_${idx}`] = '> 0';
-      if (item.precioUnitario === '' || isNaN(parseFloat(item.precioUnitario))) e[`item_price_${idx}`] = 'Requerido';
+      if (item.precioUnitario === '' || isNaN(parseFloat(item.precioUnitario))) e[`item_price_${idx}`] = t.error_required;
     });
     return e;
   };
@@ -201,14 +201,14 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
       if (filePath) {
         await writeBinaryFile(filePath, pdfBytes);
         try { await invoke('open_file', { path: filePath }); } catch (_) { /* optional */ }
-        toast.success(isEdit ? 'Factura actualizada y PDF generado' : 'Factura creada y PDF generado');
+        toast.success(isEdit ? t.invoice_updated_pdf : t.invoice_created_pdf);
       } else {
-        toast.success(isEdit ? 'Factura actualizada' : 'Factura creada');
+        toast.success(isEdit ? t.invoice_updated : t.invoice_created);
       }
     } catch (pdfErr) {
       if (import.meta.env.DEV) console.error('PDF generation failed:', pdfErr);
-      toast.success(isEdit ? 'Factura actualizada' : 'Factura creada');
-      toast.error(`Error generando PDF: ${errMsg(pdfErr) || 'error desconocido'}`);
+      toast.success(isEdit ? t.invoice_updated : t.invoice_created);
+      toast.error(t.pdf_error.replace('{error}', errMsg(pdfErr) || t.error_unknown));
     }
 
     onClose();
@@ -220,7 +220,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? 'Editar factura' : t.new_invoice}
+      title={isEdit ? t.invoice_edit : t.new_invoice}
       size="lg"
       footer={
         <div className="flex justify-end gap-2">
@@ -234,7 +234,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
         {/* Invoice number + Client + Date + Payment + Location */}
         <div className="grid grid-cols-5 gap-3">
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Nº Factura</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.invoice_number}</label>
             <input
               type="text"
               value={form.numero}
@@ -244,13 +244,13 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Cliente *</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.invoice_client} *</label>
             <select
               value={form.clienteId}
               onChange={e => { setField('clienteId', e.target.value); setShowConsultations(false); }}
               className={`w-full px-3 py-2 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors.clienteId ? 'border-danger' : 'border-sage-300'}`}
             >
-              <option value="">Seleccionar cliente...</option>
+              <option value="">{t.select_client_placeholder}</option>
               {[...clients].sort((a, b) => a.nombre.localeCompare(b.nombre)).map(c => (
                 <option key={c.id} value={c.id}>{c.nombre}</option>
               ))}
@@ -258,7 +258,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
             {errors.clienteId && <p className="text-xs text-danger mt-1">{errors.clienteId}</p>}
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Fecha</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.invoice_date}</label>
             <input
               type="date"
               value={form.fecha}
@@ -267,27 +267,27 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Método de pago</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.invoice_payment_method}</label>
             <select
               value={form.metodoPago}
               onChange={e => setField('metodoPago', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
             >
-              <option value="">Sin especificar</option>
-              <option value="efectivo">Efectivo</option>
-              <option value="transferencia">Transferencia</option>
+              <option value="">{t.not_specified}</option>
+              <option value="efectivo">{t.payment_cash}</option>
+              <option value="transferencia">{t.payment_transfer}</option>
               <option value="bizum">Bizum</option>
-              <option value="tarjeta">Tarjeta</option>
+              <option value="tarjeta">{t.payment_card}</option>
             </select>
           </div>
           <div>
-            <label className="block text-xs font-medium text-sage-600 mb-1">Lugar de atención</label>
+            <label className="block text-xs font-medium text-sage-600 mb-1">{t.invoice_location}</label>
             <select
               value={form.locationId}
               onChange={e => setField('locationId', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
             >
-              <option value="">Sin especificar</option>
+              <option value="">{t.not_specified}</option>
               {(config?.locations || []).map(loc => (
                 <option key={loc.id} value={loc.id}>{loc.name}</option>
               ))}
@@ -297,7 +297,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
 
         {/* Estado chips */}
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Estado</label>
+          <label className="block text-xs font-medium text-sage-600 mb-1">{t.invoice_status}</label>
           <SegmentedControl
             ariaLabel={t.invoice_status}
             value={form.estado}
@@ -312,15 +312,15 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
 
         {/* Items table */}
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-2">Conceptos *</label>
+          <label className="block text-xs font-medium text-sage-600 mb-2">{t.invoice_items} *</label>
           {errors.items && <p className="text-xs text-danger mb-2">{errors.items}</p>}
           <div className="border border-sage-200 rounded-soft overflow-hidden">
             {/* Table header */}
             <div className="grid grid-cols-[1fr_56px_96px_80px_32px] gap-0 bg-sage-50 border-b border-sage-200 px-2 py-1.5">
-              <span className="text-xs font-medium text-sage-500">Descripción</span>
-              <span className="text-xs font-medium text-sage-500 text-center">Cant.</span>
-              <span className="text-xs font-medium text-sage-500 text-right">Precio unit.</span>
-              <span className="text-xs font-medium text-sage-500 text-right">Importe</span>
+              <span className="text-xs font-medium text-sage-500">{t.invoice_description}</span>
+              <span className="text-xs font-medium text-sage-500 text-center">{t.invoice_quantity_short}</span>
+              <span className="text-xs font-medium text-sage-500 text-right">{t.invoice_unit_price_short}</span>
+              <span className="text-xs font-medium text-sage-500 text-right">{t.invoice_line_total}</span>
               <span />
             </div>
 
@@ -337,7 +337,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
                       type="text"
                       value={item.descripcion}
                       onChange={e => updateItem(item.id, 'descripcion', e.target.value)}
-                      placeholder="Descripción del servicio..."
+                      placeholder={t.invoice_item_placeholder}
                       className={`w-full px-2 py-1 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors[`item_desc_${idx}`] ? 'border-danger' : 'border-sage-200'}`}
                     />
                     {errors[`item_desc_${idx}`] && <p className="text-[11px] text-danger mt-0.5">{errors[`item_desc_${idx}`]}</p>}
@@ -398,7 +398,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
                 onChange={e => { if (e.target.value) { addServiceItem(e.target.value); e.target.value = ''; } }}
                 className="px-2.5 py-1 text-xs border border-sage-300 rounded-button bg-white text-sage-600 hover:bg-sage-50 focus:outline-none focus:border-wellness-400 cursor-pointer"
               >
-                <option value="" disabled>+ Añadir servicio...</option>
+                <option value="" disabled>+ {t.invoice_add_service}...</option>
                 {activeServices.map(svc => (
                   <option key={svc.id} value={svc.id}>{svc.nombre} — {svc.precio.toFixed(2)} €</option>
                 ))}
@@ -419,23 +419,23 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
           {/* Unbilled consultations checklist */}
           {showConsultations && unbilledConsultations.length > 0 && (
             <div className="mt-2 border border-wellness-200 rounded-soft bg-wellness-50 p-3 space-y-1.5 max-h-40 overflow-y-auto">
-              <p className="text-xs font-medium text-wellness-700 mb-2">Consultas completadas sin facturar:</p>
+              <p className="text-xs font-medium text-wellness-700 mb-2">{t.invoice_unbilled_title}</p>
               {unbilledConsultations.sort((a, b) => b.fecha.localeCompare(a.fecha)).map(c => {
                 const alreadyAdded = form.items.some(item => item.consultationId === c.id);
                 return (
                   <div key={c.id} className="flex items-center justify-between gap-2">
                     <span className="text-xs text-sage-700">
-                      {c.tipo || 'Consulta'} — {formatDate(c.fecha)}{c.hora ? ` ${c.hora}` : ''}
+                      {c.tipo || t.consultation_default} — {formatDate(c.fecha)}{c.hora ? ` ${c.hora}` : ''}
                     </span>
                     {alreadyAdded ? (
-                      <span className="text-[11px] text-success font-medium">Añadida</span>
+                      <span className="text-[11px] text-success font-medium">{t.invoice_item_added}</span>
                     ) : (
                       <button
                         type="button"
                         onClick={() => addConsultationItem(c)}
                         className="text-[11px] px-2 py-0.5 bg-wellness-400 text-white rounded-badge hover:bg-wellness-500 transition-colors"
                       >
-                        Añadir
+                        {t.add}
                       </button>
                     )}
                   </div>
@@ -450,7 +450,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
           {/* Tax inputs */}
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-sage-600 whitespace-nowrap">IVA %</label>
+              <label className="text-xs font-medium text-sage-600 whitespace-nowrap">{t.invoice_iva} %</label>
               <input
                 type="number"
                 min="0"
@@ -462,7 +462,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
               />
             </div>
             <div className="flex items-center gap-2">
-              <label className="text-xs font-medium text-sage-600 whitespace-nowrap">IRPF %</label>
+              <label className="text-xs font-medium text-sage-600 whitespace-nowrap">{t.invoice_irpf} %</label>
               <input
                 type="number"
                 min="0"
@@ -492,7 +492,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
           {/* Totals */}
           <div className="border-t border-sage-200 pt-2 space-y-1">
             <div className="flex justify-between text-xs text-sage-600">
-              <span>Base imponible</span>
+              <span>{t.invoice_base_amount}</span>
               <span className="tabular-nums">{fmt(totals.baseImponible)} €</span>
             </div>
             {form.ivaPct > 0 && (
@@ -503,7 +503,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
             )}
             {form.ivaPct === 0 && (
               <div className="flex justify-between text-xs text-sage-400 italic">
-                <span>Exento de IVA</span>
+                <span>{t.invoice_vat_exempt}</span>
                 <span className="tabular-nums">0,00 €</span>
               </div>
             )}
@@ -514,7 +514,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
               </div>
             )}
             <div className="flex justify-between text-sm font-bold text-sage-900 border-t border-sage-300 pt-1.5 mt-1">
-              <span>TOTAL</span>
+              <span>{t.invoice_total.toUpperCase()}</span>
               <span className="tabular-nums text-terra-500">{fmt(totals.total)} €</span>
             </div>
           </div>
@@ -522,12 +522,12 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
 
         {/* Notes */}
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">Notas</label>
+          <label className="block text-xs font-medium text-sage-600 mb-1">{t.notes}</label>
           <Textarea
             value={form.notas}
             onChange={e => setField('notas', e.target.value)}
             rows={2}
-            placeholder="Observaciones..."
+            placeholder={t.invoice_notes_placeholder}
           />
         </div>
       </div>

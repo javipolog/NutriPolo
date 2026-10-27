@@ -47,10 +47,10 @@ export const Invoices = () => {
   const totalPagado = filtered.filter(i => i.estado === 'pagada').reduce((s, i) => s + (i.total || i.importe || 0), 0);
 
   const handleDelete = async (inv) => {
-    const ok = await confirm(`¿Eliminar factura ${inv.numero}?`);
+    const ok = await confirm(t.invoice_confirm_delete.replace('{number}', inv.numero));
     if (!ok) return;
     deleteInvoice(inv.id);
-    toast.success('Factura eliminada');
+    toast.success(t.invoice_deleted);
   };
 
   const handleDownloadPDF = async (inv) => {
@@ -67,11 +67,11 @@ export const Invoices = () => {
       if (filePath) {
         await writeBinaryFile(filePath, pdfBytes);
         try { await invoke('open_file', { path: filePath }); } catch (_) { /* optional */ }
-        toast.success('PDF guardado');
+        toast.success(t.pdf_saved);
       }
     } catch (err) {
       if (import.meta.env.DEV) console.error('PDF download failed:', err);
-      toast.error?.('No se pudo generar el PDF');
+      toast.error?.(t.pdf_error_generic);
     }
   };
 

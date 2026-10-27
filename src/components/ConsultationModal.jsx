@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast } from './UI';
 import useStore, { todayISO } from '../stores/store';
-import { useT } from '../i18n';
+import { useT, useLocale } from '../i18n';
 import { AlertTriangle, CheckCircle2, Mail, MessageCircle } from 'lucide-react';
 import { googleCalendar } from '../services/googleCalendarService';
 import { reminderSlot } from '../services/reminderService';
@@ -17,6 +17,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const patientSuggestions = useStore(s => s.patientSuggestions);
   const config = useStore(s => s.config);
   const t = useT();
+  const locale = useLocale();
   const toast = useToast();
   const isEdit = !!consultation;
   // Phone or email as a hint, to tell apart clients with the same name
@@ -77,7 +78,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
 
   const validate = () => {
     const e = {};
-    if (!form.clienteId) e.clienteId = 'Selecciona un cliente';
+    if (!form.clienteId) e.clienteId = t.select_client_error;
     if (!form.fecha) e.fecha = 'Requerido';
     return e;
   };
@@ -109,7 +110,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
 
     if (isEdit) {
       updateConsultation(consultation.id, form);
-      toast.success('Consulta actualizada');
+      toast.success(t.consultation_updated);
       pushToGoogle(consultation.id);
       onClose();
     } else {
@@ -124,7 +125,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           cintura: measureForm.cintura ? parseFloat(measureForm.cintura) : null,
         });
       }
-      toast.success('Consulta creada');
+      toast.success(t.consultation_created);
       pushToGoogle(newC.id);
       onClose();
     }
@@ -134,7 +135,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? 'Editar consulta' : t.new_consultation}
+      title={isEdit ? t.consultation_edit : t.new_consultation}
       size="lg"
       footer={
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -159,7 +160,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             <span>
               {t.consultation_readonly_warning
                 ? t.consultation_readonly_warning.replace('{cal}', sourceCal?.name || 'calendario externo')
-                : `Esta cita viene de "${sourceCal?.name || 'calendario externo'}" (solo lectura). Fecha, hora y duración no se pueden editar desde aquí.`}
+                : t.consultation_readonly_external.replace('{calendar}', sourceCal?.name || t.calendar_external)}
             </span>
           </div>
         )}
@@ -273,11 +274,11 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_private_notes}</label>
-            <Textarea value={form.notasPrivadas} onChange={e => set('notasPrivadas', e.target.value)} rows={3} placeholder="Solo visible para ti..." />
+            <Textarea value={form.notasPrivadas} onChange={e => set('notasPrivadas', e.target.value)} rows={3} placeholder={t.only_you_placeholder} />
           </div>
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_client_notes}</label>
-            <Textarea value={form.notasCliente} onChange={e => set('notasCliente', e.target.value)} rows={3} placeholder="Instrucciones para el cliente..." />
+            <Textarea value={form.notasCliente} onChange={e => set('notasCliente', e.target.value)} rows={3} placeholder={t.consultation_client_notes_placeholder} />
           </div>
         </div>
 
@@ -301,7 +302,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             </label>
             {takeMeasurement && (
               <div className="grid grid-cols-3 gap-3">
-                {[['peso','Peso (kg)'],['grasaCorporal','Grasa (%)'],['cintura','Cintura (cm)']].map(([field, label]) => (
+                {[['peso', t.measurement_weight], ['grasaCorporal', t.measurement_body_fat], ['cintura', t.measurement_waist]].map(([field, label]) => (
                   <div key={field}>
                     <label className="block text-xs text-sage-500 mb-1">{label}</label>
                     <input
@@ -322,8 +323,8 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
       {isEdit && consultation?.matchedAt && (
         <p className="text-xs text-sage-400 text-center mt-3">
           {consultation.matchedBy === 'user'
-            ? `Confirmado por usuario el ${new Date(consultation.matchedByAt || consultation.matchedAt).toLocaleDateString('es-ES')} · detectado el ${new Date(consultation.matchedAt).toLocaleDateString('es-ES')}`
-            : `Detectado automáticamente · ${new Date(consultation.matchedAt).toLocaleDateString('es-ES')}`
+            ? t.consultation_matched_user.replace('{confirmed}', new Date(consultation.matchedByAt || consultation.matchedAt).toLocaleDateString(locale)).replace('{detected}', new Date(consultation.matchedAt).toLocaleDateString(locale))
+            : t.consultation_matched_auto.replace('{date}', new Date(consultation.matchedAt).toLocaleDateString(locale))
           }
         </p>
       )}
