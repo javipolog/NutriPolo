@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Button, Modal, Input, Textarea, useToast } from './UI';
+import { Button, Modal, Input, Textarea, SegmentedControl, useToast } from './UI';
 import useStore, { todayISO } from '../stores/store';
 import { useT } from '../i18n';
 import { AlertTriangle, CheckCircle2, Mail, MessageCircle } from 'lucide-react';
@@ -150,7 +150,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
       <div className="space-y-4">
         {/* Readonly warning */}
         {isReadonly && (
-          <div className="flex items-start gap-2 px-3 py-2.5 bg-amber-50 border border-amber-200 rounded-soft text-xs text-amber-800">
+          <div className="flex items-start gap-2 px-3 py-2.5 bg-warning-light border border-warning/30 rounded-soft text-xs text-warning-dark">
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
             <span>
               {t.consultation_readonly_warning
@@ -226,7 +226,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           const blocked = (config.blockedHours || []).some(b => b.dayOfWeek === dow && h >= b.startHour && h < b.endHour);
           if (!blocked) return null;
           return (
-            <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-soft text-xs text-amber-700">
+            <div className="flex items-center gap-2 px-3 py-2 bg-warning-light border border-warning/30 rounded-soft text-xs text-warning">
               <AlertTriangle size={14} className="shrink-0" />
               <span>{t.blocked_hours_warning}</span>
             </div>
@@ -258,20 +258,12 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
         {/* Status */}
         <div>
           <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_status}</label>
-          <div className="flex gap-2">
-            {['programada','completada','cancelada','no_show'].map(s => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => set('estado', s)}
-                className={`px-3 py-1 text-xs rounded-badge transition-colors ${
-                  form.estado === s ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
-                }`}
-              >
-                {t[`status_${s}`] || s}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            ariaLabel={t.consultation_status}
+            value={form.estado}
+            onChange={v => set('estado', v)}
+            options={['programada', 'completada', 'cancelada', 'no_show'].map(s => ({ value: s, label: t[`status_${s}`] || s }))}
+          />
         </div>
 
         {/* Notes */}

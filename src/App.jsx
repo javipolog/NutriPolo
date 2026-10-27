@@ -42,8 +42,8 @@ const WhatsNewModal = () => {
             <p className="text-xs text-sage-600 mt-1">{t.whats_new_reminders_desc}</p>
           </div>
         </div>
-        <div className="flex items-start gap-3 p-3 bg-sand-50 border border-sand-200 rounded-soft">
-          <ShieldCheck size={18} className="text-sand-500 mt-0.5 shrink-0" />
+        <div className="flex items-start gap-3 p-3 bg-sage-50 border border-sage-200 rounded-soft">
+          <ShieldCheck size={18} className="text-sage-500 mt-0.5 shrink-0" />
           <div>
             <p className="text-sm font-semibold text-sage-800">{t.whats_new_reliability_title}</p>
             <p className="text-xs text-sage-600 mt-1">{t.whats_new_reliability_desc}</p>
@@ -51,12 +51,7 @@ const WhatsNewModal = () => {
         </div>
 
         <div className="flex justify-end">
-          <button
-            onClick={handleClose}
-            className="px-4 py-2 bg-wellness-400 text-white text-sm font-medium rounded-button hover:bg-wellness-500 transition-colors"
-          >
-            {t.got_it}
-          </button>
+          <Button onClick={handleClose}>{t.got_it}</Button>
         </div>
       </div>
     </Modal>
@@ -130,17 +125,10 @@ const UpdateChecker = () => {
           </button>
         </div>
         <div className="flex gap-2 justify-end">
-          <button
-            onClick={() => setDismissed(true)}
-            className="px-3 py-1.5 text-xs text-sage-600 hover:text-sage-800 transition-colors"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setDismissed(true)}>
             {t.update_later}
-          </button>
-          <button
-            onClick={handleInstall}
-            disabled={installing}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-wellness-400 text-white text-xs font-medium rounded-button hover:bg-wellness-500 transition-colors disabled:opacity-60"
-          >
+          </Button>
+          <Button size="sm" onClick={handleInstall} disabled={installing}>
             {installing ? (
               <>
                 <RefreshCw size={12} className="animate-spin" />
@@ -149,7 +137,7 @@ const UpdateChecker = () => {
             ) : (
               t.update_now
             )}
-          </button>
+          </Button>
         </div>
       </div>
     </div>
@@ -529,7 +517,7 @@ function AppContent() {
                     <item.icon size={17} className="shrink-0" />
                     {/* Badge dot on collapsed sidebar */}
                     {sidebarCollapsed && item.badge > 0 && (
-                      <span className="absolute top-1 right-1 min-w-[14px] h-3.5 flex items-center justify-center px-1 rounded-full bg-terra-500 text-white text-[9px] font-bold leading-none">
+                      <span className="absolute top-1 right-1 min-w-[14px] h-3.5 flex items-center justify-center px-1 rounded-full bg-terra-500 text-white text-[11px] font-bold leading-none">
                         {item.badge > 99 ? '99+' : item.badge}
                       </span>
                     )}
@@ -538,7 +526,7 @@ function AppContent() {
                         <span className="flex-1 text-left text-sm font-medium">{item.label}</span>
                         {/* Badge pill takes priority over keyboard shortcut */}
                         {item.badge > 0 ? (
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                          <span className={`text-[11px] px-1.5 py-0.5 rounded-full font-semibold ${
                             currentView === item.id
                               ? 'bg-white/30 text-white'
                               : 'bg-terra-500 text-white'
@@ -546,7 +534,7 @@ function AppContent() {
                             {item.badge > 99 ? '99+' : item.badge}
                           </span>
                         ) : item.shortcut ? (
-                          <kbd className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                          <kbd className={`text-[11px] px-1.5 py-0.5 rounded border ${
                             currentView === item.id
                               ? 'bg-wellness-500/40 text-wellness-100 border-wellness-300/30'
                               : 'bg-sage-200 text-sage-500 border-sage-300 group-hover:bg-sage-300'
@@ -575,7 +563,7 @@ function AppContent() {
               >
                 <Search size={12} />
                 <span className="flex-1 text-left">{t.search_placeholder}</span>
-                <kbd className="text-[10px] px-1.5 py-0.5 bg-sage-200 rounded border border-sage-300 text-sage-500">Ctrl+K</kbd>
+                <kbd className="text-[11px] px-1.5 py-0.5 bg-sage-200 rounded border border-sage-300 text-sage-500">Ctrl+K</kbd>
               </button>
             </div>
           ) : (
@@ -595,9 +583,12 @@ function AppContent() {
         {/* Main content */}
         {/* relative: absolutely positioned children (sr-only text, chart tooltips) stay inside the scroll area */}
         <main className="relative flex-1 p-4 md:p-6 lg:p-8 overflow-auto bg-sage-50">
-          <ErrorBoundary key={currentView}>
-            <ViewLoader view={currentView} />
-          </ErrorBoundary>
+          {/* Readable line length on wide monitors; h-full keeps the Agenda's fitted height */}
+          <div className="mx-auto w-full max-w-[1440px] h-full">
+            <ErrorBoundary key={currentView}>
+              <ViewLoader view={currentView} />
+            </ErrorBoundary>
+          </div>
         </main>
       </div>
 

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Mail, MessageCircle, RotateCcw, AlertTriangle } from 'lucide-react';
-import { Input, Textarea, Button } from '../UI';
+import { Input, Textarea, Button, SegmentedControl } from '../UI';
 import useStore from '../../stores/store';
 import { useT } from '../../i18n';
 import { AVAILABLE_VARIABLES, DEFAULT_APPOINTMENT_TEMPLATES, resolveTemplate } from '../../services/emailService';
@@ -213,28 +213,16 @@ export const RemindersSection = ({ onGoToSmtp }) => {
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium text-sage-800">{t.reminders_templates}</p>
           <div className="flex gap-2">
-            <div className="flex gap-1 bg-sage-100 p-0.5 rounded-button">
-              {[['email', 'Email'], ['whatsapp', 'WhatsApp']].map(([id, label]) => (
-                <button
-                  key={id}
-                  onClick={() => setChannel(id)}
-                  className={`px-2.5 py-1 text-xs rounded ${channel === id ? 'bg-white text-sage-800 shadow-sm' : 'text-sage-500 hover:text-sage-700'}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-1">
-              {LANGS.map(([code, label]) => (
-                <button
-                  key={code}
-                  onClick={() => setLang(code)}
-                  className={`px-2 py-1 text-xs rounded-badge ${lang === code ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'}`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              value={channel}
+              onChange={setChannel}
+              options={[{ value: 'email', label: 'Email' }, { value: 'whatsapp', label: 'WhatsApp' }]}
+            />
+            <SegmentedControl
+              value={lang}
+              onChange={setLang}
+              options={LANGS.map(([code, label]) => ({ value: code, label }))}
+            />
           </div>
         </div>
 

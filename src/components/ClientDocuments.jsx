@@ -15,8 +15,8 @@ import {
 const TYPE_COLORS = {
   plan_nutricional: 'bg-wellness-100 text-wellness-700',
   informe:          'bg-info/10 text-info',
-  analitica:        'bg-purple-100 text-purple-700',
-  receta:           'bg-amber-100 text-amber-700',
+  analitica:        'bg-info-light text-info',
+  receta:           'bg-warning-light text-warning',
   otro:             'bg-sage-100 text-sage-600',
 };
 
@@ -158,7 +158,7 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
                   <span className="text-sm font-medium text-sage-800 dark:text-sage-100 truncate">
                     {doc.nombre || doc.fileName}
                   </span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-badge font-medium ${TYPE_COLORS[doc.tipo] || TYPE_COLORS.otro}`}>
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded-badge font-medium ${TYPE_COLORS[doc.tipo] || TYPE_COLORS.otro}`}>
                     {t[TYPE_LABEL_KEYS[doc.tipo]] || doc.tipo}
                   </span>
                 </div>

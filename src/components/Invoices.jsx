@@ -78,7 +78,7 @@ export const Invoices = () => {
   return (
     <div className="space-y-5 animate-fadeIn">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-sage-900">{t.invoices_title}</h1>
+        <h1 className="font-serif text-title text-sage-900">{t.invoices_title}</h1>
         <Button variant="primary" icon={Plus} onClick={() => { setEditInvoice(null); setShowModal(true); }}>
           {t.new_invoice}
         </Button>
@@ -164,16 +164,16 @@ export const Invoices = () => {
                     <td className="px-4 py-3 font-mono text-xs text-sage-600">{inv.numero}</td>
                     <td className="px-4 py-3">
                       <span className="font-medium text-sage-900">{client?.nombre || '—'}</span>
-                      {loc && <span className="block text-[10px] text-sage-400">{loc.name}</span>}
+                      {loc && <span className="block text-[11px] text-sage-400">{loc.name}</span>}
                     </td>
                     <td className="px-4 py-3 text-xs text-sage-500">{formatDate(inv.fecha)}</td>
                     <td className="px-4 py-3 text-xs text-sage-600 max-w-xs truncate">
                       {inv.items?.[0]?.descripcion || inv.concepto || '—'}
                       {inv.items?.length > 1 && (
-                        <span className="ml-1.5 text-[10px] bg-sage-100 text-sage-500 px-1.5 py-0.5 rounded-badge">+{inv.items.length - 1}</span>
+                        <span className="ml-1.5 text-[11px] bg-sage-100 text-sage-500 px-1.5 py-0.5 rounded-badge">+{inv.items.length - 1}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono font-semibold text-sage-800">{formatCurrency(inv.total || inv.importe)}</td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-sage-800">{formatCurrency(inv.total || inv.importe)}</td>
                     <td className="px-4 py-3 text-center">
                       {/* StatusBadge calls a pending invoice "emitida" */}
                       <StatusBadge status={inv.estado === 'pendiente' ? 'emitida' : inv.estado} />

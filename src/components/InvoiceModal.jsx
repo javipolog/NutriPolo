@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
-import { Modal, Textarea, Button, useToast } from './UI';
+import { Modal, Textarea, Button, SegmentedControl, useToast } from './UI';
 import useStore, { todayISO, generateId, computeInvoiceTotals, formatDate, errMsg } from '../stores/store';
 import { useT } from '../i18n';
 import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
@@ -240,7 +240,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
               value={form.numero}
               onChange={e => setField('numero', e.target.value)}
               placeholder="NP-2026-001"
-              className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 font-mono"
+              className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 tabular-nums"
             />
           </div>
           <div>
@@ -298,20 +298,16 @@ export const InvoiceModal = ({ invoice, onClose }) => {
         {/* Estado chips */}
         <div>
           <label className="block text-xs font-medium text-sage-600 mb-1">Estado</label>
-          <div className="flex gap-2">
-            {['pendiente', 'pagada', 'anulada'].map(s => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setField('estado', s)}
-                className={`px-3 py-1 text-xs rounded-badge transition-colors ${
-                  form.estado === s ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
-                }`}
-              >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            ariaLabel={t.invoice_status}
+            value={form.estado}
+            onChange={v => setField('estado', v)}
+            options={[
+              { value: 'pendiente', label: t.invoice_status_pending },
+              { value: 'pagada',    label: t.invoice_status_paid },
+              { value: 'anulada',   label: t.invoice_status_cancelled },
+            ]}
+          />
         </div>
 
         {/* Items table */}
@@ -344,7 +340,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
                       placeholder="Descripción del servicio..."
                       className={`w-full px-2 py-1 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors[`item_desc_${idx}`] ? 'border-danger' : 'border-sage-200'}`}
                     />
-                    {errors[`item_desc_${idx}`] && <p className="text-[10px] text-danger mt-0.5">{errors[`item_desc_${idx}`]}</p>}
+                    {errors[`item_desc_${idx}`] && <p className="text-[11px] text-danger mt-0.5">{errors[`item_desc_${idx}`]}</p>}
                   </div>
                   <div className="px-1">
                     <input
@@ -368,7 +364,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
                     />
                   </div>
                   <div className="text-right pr-1">
-                    <span className="text-sm font-mono text-sage-700">{fmt(lineTotal)}</span>
+                    <span className="text-sm tabular-nums text-sage-700">{fmt(lineTotal)}</span>
                   </div>
                   <div className="flex justify-center">
                     <button
@@ -432,12 +428,12 @@ export const InvoiceModal = ({ invoice, onClose }) => {
                       {c.tipo || 'Consulta'} — {formatDate(c.fecha)}{c.hora ? ` ${c.hora}` : ''}
                     </span>
                     {alreadyAdded ? (
-                      <span className="text-[10px] text-success font-medium">Añadida</span>
+                      <span className="text-[11px] text-success font-medium">Añadida</span>
                     ) : (
                       <button
                         type="button"
                         onClick={() => addConsultationItem(c)}
-                        className="text-[10px] px-2 py-0.5 bg-wellness-400 text-white rounded-badge hover:bg-wellness-500 transition-colors"
+                        className="text-[11px] px-2 py-0.5 bg-wellness-400 text-white rounded-badge hover:bg-wellness-500 transition-colors"
                       >
                         Añadir
                       </button>
@@ -482,7 +478,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
                     key={pct}
                     type="button"
                     onClick={() => setField('irpfPct', pct)}
-                    className={`px-2 py-0.5 text-[10px] rounded-badge transition-colors ${
+                    className={`px-2 py-0.5 text-[11px] rounded-badge transition-colors ${
                       form.irpfPct === pct ? 'bg-sage-700 text-white' : 'bg-sage-200 text-sage-600 hover:bg-sage-300'
                     }`}
                   >
@@ -497,29 +493,29 @@ export const InvoiceModal = ({ invoice, onClose }) => {
           <div className="border-t border-sage-200 pt-2 space-y-1">
             <div className="flex justify-between text-xs text-sage-600">
               <span>Base imponible</span>
-              <span className="font-mono">{fmt(totals.baseImponible)} €</span>
+              <span className="tabular-nums">{fmt(totals.baseImponible)} €</span>
             </div>
             {form.ivaPct > 0 && (
               <div className="flex justify-between text-xs text-sage-600">
                 <span>IVA ({form.ivaPct}%)</span>
-                <span className="font-mono">+{fmt(totals.ivaImporte)} €</span>
+                <span className="tabular-nums">+{fmt(totals.ivaImporte)} €</span>
               </div>
             )}
             {form.ivaPct === 0 && (
               <div className="flex justify-between text-xs text-sage-400 italic">
                 <span>Exento de IVA</span>
-                <span className="font-mono">0,00 €</span>
+                <span className="tabular-nums">0,00 €</span>
               </div>
             )}
             {form.irpfPct > 0 && (
               <div className="flex justify-between text-xs text-sage-600">
                 <span>IRPF (-{form.irpfPct}%)</span>
-                <span className="font-mono text-danger">-{fmt(totals.irpfImporte)} €</span>
+                <span className="tabular-nums text-danger">-{fmt(totals.irpfImporte)} €</span>
               </div>
             )}
             <div className="flex justify-between text-sm font-bold text-sage-900 border-t border-sage-300 pt-1.5 mt-1">
               <span>TOTAL</span>
-              <span className="font-mono text-terra-500">{fmt(totals.total)} €</span>
+              <span className="tabular-nums text-terra-500">{fmt(totals.total)} €</span>
             </div>
           </div>
         </div>

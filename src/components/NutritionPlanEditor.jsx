@@ -3,7 +3,7 @@ import {
   ClipboardList, Plus, Edit2, Trash2, X, ChevronDown, ChevronRight,
   Leaf, Download, Mail, FolderDown
 } from 'lucide-react';
-import { Button, Modal, Input, Textarea, EmptyState, useToast, useConfirm } from './UI';
+import { Button, Modal, Input, Textarea, EmptyState, SegmentedControl, useToast, useConfirm } from './UI';
 import { invoke } from '@tauri-apps/api/tauri';
 import useStore, { formatDate, todayISO, generateId, errMsg } from '../stores/store';
 import { useT } from '../i18n';
@@ -23,13 +23,13 @@ const MacroBar = ({ proteinas, carbohidratos, grasas }) => {
     <div className="mt-2">
       <div className="flex h-3 rounded-full overflow-hidden gap-0.5">
         <div style={{ width: `${pct(p)}%` }} className="bg-wellness-400 transition-all" title={`Proteínas ${pct(p)}%`} />
-        <div style={{ width: `${pct(c)}%` }} className="bg-orange-400 transition-all" title={`Carbohidratos ${pct(c)}%`} />
-        <div style={{ width: `${pct(g)}%` }} className="bg-yellow-400 transition-all" title={`Grasas ${pct(g)}%`} />
+        <div style={{ width: `${pct(c)}%` }} className="bg-terra-500 transition-all" title={`Carbohidratos ${pct(c)}%`} />
+        <div style={{ width: `${pct(g)}%` }} className="bg-warning transition-all" title={`Grasas ${pct(g)}%`} />
       </div>
-      <div className="flex gap-3 mt-1 text-[10px] text-sage-500">
+      <div className="flex gap-3 mt-1 text-[11px] text-sage-500">
         <span><span className="inline-block w-2 h-2 rounded-full bg-wellness-400 mr-1" />P {pct(p)}%</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-orange-400 mr-1" />C {pct(c)}%</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-yellow-400 mr-1" />G {pct(g)}%</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-terra-500 mr-1" />C {pct(c)}%</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-warning mr-1" />G {pct(g)}%</span>
       </div>
     </div>
   );
@@ -225,20 +225,16 @@ const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
       size="xl"
       footer={
         <div className="flex items-center justify-between">
-          <div className="flex gap-2">
-            {['borrador', 'activo', 'completado'].map(s => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => set('estado', s)}
-                className={`px-3 py-1 text-xs rounded-badge transition-colors ${
-                  form.estado === s ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
-                }`}
-              >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            ariaLabel={t.plan_status}
+            value={form.estado}
+            onChange={v => set('estado', v)}
+            options={[
+              { value: 'borrador',   label: t.plan_status_draft },
+              { value: 'activo',     label: t.plan_status_active },
+              { value: 'completado', label: t.plan_status_completed },
+            ]}
+          />
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
             <Button variant="primary" onClick={() => handleSave()}>{t.save}</Button>
@@ -424,26 +420,23 @@ export const NutritionPlanEditor = () => {
   return (
     <div className="space-y-5 animate-fadeIn">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-sage-900">{t.plans_title}</h1>
+        <h1 className="font-serif text-title text-sage-900">{t.plans_title}</h1>
         <Button variant="primary" icon={Plus} onClick={() => { setEditPlan(null); setShowModal(true); }}>
           {t.new_plan}
         </Button>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-1 bg-sage-100 p-1 rounded-button w-fit">
-        {[['all', 'Todos'], ['borrador', 'Borrador'], ['activo', 'Activo'], ['completado', 'Completado']].map(([id, label]) => (
-          <button
-            key={id}
-            onClick={() => setFilterEstado(id)}
-            className={`px-3 py-1 text-xs rounded transition-colors ${
-              filterEstado === id ? 'bg-white text-sage-800 shadow-sm' : 'text-sage-500 hover:text-sage-700'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        value={filterEstado}
+        onChange={setFilterEstado}
+        options={[
+          { value: 'all',        label: t.all },
+          { value: 'borrador',   label: t.plan_status_draft },
+          { value: 'activo',     label: t.plan_status_active },
+          { value: 'completado', label: t.plan_status_completed },
+        ]}
+      />
 
       <p className="text-xs text-sage-500">{filtered.length} plan{filtered.length !== 1 ? 'es' : ''}</p>
 

@@ -10,6 +10,9 @@ import { Button, Input, Textarea, Modal, useToast, useConfirm } from './UI';
 import useStore, { generateId, inferCalendarPurpose, flushAllPending, errMsg } from '../stores/store';
 import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
 import { testSmtpConnection } from '../services/emailService';
+// Invoice design preview fonts, loaded only with this view
+import '@fontsource/work-sans/latin-700.css';
+import '@fontsource/roboto/latin-700.css';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { RemindersSection } from './settings/RemindersSection';
@@ -764,7 +767,7 @@ const GoogleCalendarSection = () => {
       <div className="space-y-4">
         {/* Connected badge */}
         <div className="flex items-center gap-2">
-          <span className="flex items-center gap-1.5 px-3 py-1.5 bg-green-100 text-green-700 rounded-badge text-xs font-medium">
+          <span className="flex items-center gap-1.5 px-3 py-1.5 bg-success-light text-success-dark rounded-badge text-xs font-medium">
             <Wifi size={12} />
             {t.gcal_connected_as.replace('{email}', gcal.userEmail || 'Google Calendar')}
           </span>
@@ -788,10 +791,10 @@ const GoogleCalendarSection = () => {
                 const purpose = stored?.purpose || inferCalendarPurpose({ id: cal.id, name: cal.summary, syncMode });
                 const isReader = cal.access_role === 'reader';
                 const purposeBadge = {
-                  primary:           { label: t.gcal_badge_primary,  cls: 'bg-green-100 text-green-700' },
-                  'external-clinic': { label: t.gcal_badge_clinic,   cls: 'bg-purple-100 text-purple-700' },
+                  primary:           { label: t.gcal_badge_primary,  cls: 'bg-success-light text-success-dark' },
+                  'external-clinic': { label: t.gcal_badge_clinic,   cls: 'bg-info-light text-info' },
                   personal:          { label: t.gcal_badge_personal, cls: 'bg-sage-200 text-sage-700' },
-                  holidays:          { label: t.gcal_badge_holidays, cls: 'bg-amber-100 text-amber-600' },
+                  holidays:          { label: t.gcal_badge_holidays, cls: 'bg-warning-light text-warning' },
                   other:             { label: '',          cls: '' },
                 }[purpose] || { label: '', cls: '' };
                 return (
@@ -804,20 +807,20 @@ const GoogleCalendarSection = () => {
                       />
                       <span className="flex-1 text-sm text-sage-700 truncate">{cal.summary || cal.id}</span>
                       {purposeBadge.label && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-badge whitespace-nowrap ${purposeBadge.cls}`}>
+                        <span className={`text-[11px] px-1.5 py-0.5 rounded-badge whitespace-nowrap ${purposeBadge.cls}`}>
                           {purposeBadge.label}
                         </span>
                       )}
                       {isReader && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded-badge whitespace-nowrap">{t.gcal_badge_readonly}</span>
+                        <span className="text-[11px] px-1.5 py-0.5 bg-warning-light text-warning rounded-badge whitespace-nowrap">{t.gcal_badge_readonly}</span>
                       )}
                       {gcal.defaultPushCalendarId === cal.id && (
-                        <span className="text-[10px] px-1.5 py-0.5 bg-wellness-100 text-wellness-600 rounded-badge whitespace-nowrap">{t.gcal_badge_target}</span>
+                        <span className="text-[11px] px-1.5 py-0.5 bg-wellness-100 text-wellness-600 rounded-badge whitespace-nowrap">{t.gcal_badge_target}</span>
                       )}
                     </div>
                     {/* Bottom row: purpose + sync mode selectors */}
                     <div className="flex items-center gap-2 pl-5">
-                      <label htmlFor={`cal-purpose-${cal.id}`} className="text-[10px] text-sage-500 whitespace-nowrap">{t.purpose_label}:</label>
+                      <label htmlFor={`cal-purpose-${cal.id}`} className="text-[11px] text-sage-500 whitespace-nowrap">{t.purpose_label}:</label>
                       <select
                         id={`cal-purpose-${cal.id}`}
                         value={purpose}
@@ -844,10 +847,10 @@ const GoogleCalendarSection = () => {
 
                     {/* Mass-delete pending resolution panel */}
                     {stored?.massDeletePending && (
-                      <div className="ml-5 mt-1 p-2.5 bg-red-50 border border-red-200 rounded-button space-y-2">
+                      <div className="ml-5 mt-1 p-2.5 bg-danger-light border border-danger/30 rounded-button space-y-2">
                         <div className="flex items-start gap-2">
-                          <AlertTriangle size={13} className="text-red-500 shrink-0 mt-0.5" />
-                          <p className="text-xs text-red-800 leading-snug">
+                          <AlertTriangle size={13} className="text-danger shrink-0 mt-0.5" />
+                          <p className="text-xs text-danger-dark leading-snug">
                             <strong>{t.gcal_mass_delete_label}</strong>{' '}
                             {t.gcal_mass_delete_detail
                               .replace('{prev}', stored.massDeletePending.prevCount)
@@ -858,7 +861,7 @@ const GoogleCalendarSection = () => {
                         <div className="flex gap-1.5 flex-wrap">
                           <button
                             onClick={() => { ignoreMassDeleteOnce(stored.id); toast.info(t.gcal_sync_resumed); }}
-                            className="px-2 py-1 text-[11px] font-medium bg-white border border-red-300 text-red-700 rounded-button hover:bg-red-50 transition-colors"
+                            className="px-2 py-1 text-[11px] font-medium bg-white border border-danger/30 text-danger-dark rounded-button hover:bg-danger-light transition-colors"
                           >
                             {t.mass_delete_ignore}
                           </button>
@@ -870,7 +873,7 @@ const GoogleCalendarSection = () => {
                           </button>
                           <button
                             onClick={() => handleCalendarSyncMode(cal, 'disabled')}
-                            className="px-2 py-1 text-[11px] text-red-500 hover:text-red-700 transition-colors"
+                            className="px-2 py-1 text-[11px] text-danger hover:text-danger-dark transition-colors"
                           >
                             {t.mass_delete_suspend}
                           </button>
@@ -966,7 +969,7 @@ const GoogleCalendarSection = () => {
                     <p className="text-[11px] font-medium text-sage-600">{c.name}</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <label htmlFor={`fuzzy-auto-${c.id}`} className="block text-[10px] text-sage-500 mb-1">
+                        <label htmlFor={`fuzzy-auto-${c.id}`} className="block text-[11px] text-sage-500 mb-1">
                           {t.gcal_auto_threshold.replace('{p}', Math.round((c.fuzzyAutoThreshold ?? 0.92) * 100))}
                         </label>
                         <input
@@ -976,10 +979,10 @@ const GoogleCalendarSection = () => {
                           onChange={e => updateStoredCal(c.id, { fuzzyAutoThreshold: parseInt(e.target.value) / 100 })}
                           className="w-full accent-wellness-400"
                         />
-                        <p className="text-[10px] text-sage-400 mt-0.5">{t.gcal_auto_threshold_hint}</p>
+                        <p className="text-[11px] text-sage-400 mt-0.5">{t.gcal_auto_threshold_hint}</p>
                       </div>
                       <div>
-                        <label htmlFor={`fuzzy-suggest-${c.id}`} className="block text-[10px] text-sage-500 mb-1">
+                        <label htmlFor={`fuzzy-suggest-${c.id}`} className="block text-[11px] text-sage-500 mb-1">
                           {t.gcal_suggest_threshold.replace('{p}', Math.round((c.fuzzySuggestThreshold ?? 0.75) * 100))}
                         </label>
                         <input
@@ -989,7 +992,7 @@ const GoogleCalendarSection = () => {
                           onChange={e => updateStoredCal(c.id, { fuzzySuggestThreshold: parseInt(e.target.value) / 100 })}
                           className="w-full accent-wellness-400"
                         />
-                        <p className="text-[10px] text-sage-400 mt-0.5">{t.gcal_suggest_threshold_hint}</p>
+                        <p className="text-[11px] text-sage-400 mt-0.5">{t.gcal_suggest_threshold_hint}</p>
                       </div>
                     </div>
                   </div>
@@ -1473,7 +1476,7 @@ const InvoiceDesignSection = () => {
             <span key={i} className="w-4 h-4 rounded-full border border-sage-200" style={{ backgroundColor: c }} />
           ))}
         </div>
-        <span className="text-[10px] font-medium text-sage-600">{t[`design_preset_${id}`] || preset.label}</span>
+        <span className="text-[11px] font-medium text-sage-600">{t[`design_preset_${id}`] || preset.label}</span>
       </button>
     );
   };
@@ -1489,7 +1492,7 @@ const InvoiceDesignSection = () => {
         className="w-8 h-8 rounded border border-sage-200 cursor-pointer p-0.5"
       />
       <span className="text-xs text-sage-600 flex-1">{label}</span>
-      <span className="text-[10px] font-mono text-sage-400">{design.colors[colorKey]}</span>
+      <span className="text-[11px] font-mono text-sage-400">{design.colors[colorKey]}</span>
     </div>
   );
 
@@ -1615,7 +1618,7 @@ const InvoiceDesignSection = () => {
                   <span key={i} className="w-4 h-4 rounded-full border border-sage-200" style={{ backgroundColor: c }} />
                 ))}
               </div>
-              <span className="text-[10px] font-medium text-sage-600">{t.design_preset_custom}</span>
+              <span className="text-[11px] font-medium text-sage-600">{t.design_preset_custom}</span>
             </div>
           )}
         </div>
@@ -1802,7 +1805,7 @@ export const SettingsView = () => {
 
   return (
     <div className="space-y-5 animate-fadeIn max-w-2xl">
-      <h1 className="text-2xl font-bold text-sage-900">{t.settings_title}</h1>
+      <h1 className="font-serif text-title text-sage-900">{t.settings_title}</h1>
 
       {/* Personal data */}
       <Section title={t.settings_personal}>
@@ -2024,7 +2027,7 @@ export const SettingsView = () => {
       <Section title={t.settings_diagnostics}>
         {lastError ? (
           <div className="space-y-3">
-            <div className="bg-danger-light border border-danger/30 rounded-card p-3">
+            <div className="bg-danger-light border border-danger/30 rounded-soft p-3">
               <div className="flex items-start gap-2">
                 <AlertCircle size={16} className="text-danger shrink-0 mt-0.5" />
                 <div className="flex-1 min-w-0">

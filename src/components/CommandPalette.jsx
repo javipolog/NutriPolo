@@ -230,7 +230,7 @@ export const CommandPalette = ({ open, onClose }) => {
               <X size={16} />
             </button>
           )}
-          <kbd className="text-[10px] px-1.5 py-0.5 bg-sage-100 text-sage-500 rounded border border-sage-300">ESC</kbd>
+          <kbd className="text-[11px] px-1.5 py-0.5 bg-sage-100 text-sage-500 rounded border border-sage-300">ESC</kbd>
         </div>
 
         <div ref={listRef} className="max-h-80 overflow-y-auto py-2">
@@ -241,7 +241,7 @@ export const CommandPalette = ({ open, onClose }) => {
               if (item.type === 'group') {
                 return (
                   <div key={`group-${i}`} className="px-4 py-1.5 mt-1">
-                    <p className="text-[10px] font-semibold text-sage-500 uppercase tracking-wider">{item.label}</p>
+                    <p className="text-[11px] font-semibold text-sage-500 uppercase tracking-wider">{item.label}</p>
                   </div>
                 );
               }
@@ -265,7 +265,7 @@ export const CommandPalette = ({ open, onClose }) => {
                     <p className="text-sm font-medium truncate">{highlight(item.label, query)}</p>
                     {item.description && <p className="text-xs text-sage-500 truncate">{item.description}</p>}
                   </div>
-                  {item.meta && <span className="text-xs font-mono text-sage-600 shrink-0">{item.meta}</span>}
+                  {item.meta && <span className="text-xs tabular-nums text-sage-600 shrink-0">{item.meta}</span>}
                   {isActive && <ArrowRight size={14} className="text-wellness-400 shrink-0" />}
                 </button>
               );
@@ -273,7 +273,7 @@ export const CommandPalette = ({ open, onClose }) => {
           )}
         </div>
 
-        <div className="px-4 py-2 border-t border-sage-300 flex items-center gap-4 text-[10px] text-sage-400">
+        <div className="px-4 py-2 border-t border-sage-300 flex items-center gap-4 text-[11px] text-sage-400">
           <span><kbd className="bg-sage-100 px-1 rounded">↑↓</kbd> Navegar</span>
           <span><kbd className="bg-sage-100 px-1 rounded">↵</kbd> Seleccionar</span>
           <span><kbd className="bg-sage-100 px-1 rounded">ESC</kbd> Cerrar</span>

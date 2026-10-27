@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Plus, Trash2 } from 'lucide-react';
-import { Button, useToast, useConfirm } from './UI';
+import { Button, SegmentedControl, useToast, useConfirm } from './UI';
 import useStore, { formatDate, formatDateShort, calcIMC, todayISO } from '../stores/store';
 import { useT } from '../i18n';
 
@@ -131,19 +131,15 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <div className="flex gap-1">
-          {[['weight','Peso'], ['bodyfat','Grasa'], ['circumferences','Perímetros']].map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => setChartType(id)}
-              className={`px-3 py-1.5 text-xs rounded-button transition-colors ${
-                chartType === id ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          value={chartType}
+          onChange={setChartType}
+          options={[
+            { value: 'weight', label: 'Peso' },
+            { value: 'bodyfat', label: 'Grasa' },
+            { value: 'circumferences', label: 'Perímetros' },
+          ]}
+        />
         <Button variant="primary" size="sm" onClick={() => setShowModal(true)} icon={Plus}>
           {t.new_measurement}
         </Button>
@@ -161,30 +157,30 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
             <div className="bg-white border border-sage-200 rounded-soft p-4 h-56">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E2E5DC" />
-                  <XAxis dataKey="fecha" tick={{ fontSize: 10, fill: '#7A816F' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E6E2D8" />
+                  <XAxis dataKey="fecha" tick={{ fontSize: 10, fill: '#75726A' }} />
                   {/* Each series gets its own axis fitted to its range: on a 0-based
                       axis a 82 → 78 kg change looks like a flat line. */}
-                  <YAxis yAxisId="left" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#7A816F' }} width={36} />
+                  <YAxis yAxisId="left" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#75726A' }} width={36} />
                   {hasSecondary && (
-                    <YAxis yAxisId="right" orientation="right" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#7A816F' }} width={36} />
+                    <YAxis yAxisId="right" orientation="right" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#75726A' }} width={36} />
                   )}
-                  <Tooltip contentStyle={{ fontSize: 12, borderColor: '#D4D8CD', borderRadius: 6 }} />
+                  <Tooltip contentStyle={{ fontSize: 12, borderColor: '#DEDAD0', borderRadius: 6 }} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   {chartType === 'weight' && (
                     <>
-                      <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Peso (kg)" connectNulls />
-                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="imc" stroke="#E8846A" strokeWidth={2} dot={{ r: 3 }} name="IMC" connectNulls />}
+                      <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#3E6B52" strokeWidth={2} dot={{ r: 3 }} name="Peso (kg)" connectNulls />
+                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="imc" stroke="#C15F3C" strokeWidth={2} dot={{ r: 3 }} name="IMC" connectNulls />}
                     </>
                   )}
                   {chartType === 'bodyfat' && (
                     <>
-                      <Line yAxisId="left" type="monotone" dataKey="grasa" stroke="#E8846A" strokeWidth={2} dot={{ r: 3 }} name="Grasa (%)" connectNulls />
-                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="musculo" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Músculo (kg)" connectNulls />}
+                      <Line yAxisId="left" type="monotone" dataKey="grasa" stroke="#C15F3C" strokeWidth={2} dot={{ r: 3 }} name="Grasa (%)" connectNulls />
+                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="musculo" stroke="#3E6B52" strokeWidth={2} dot={{ r: 3 }} name="Músculo (kg)" connectNulls />}
                     </>
                   )}
                   {chartType === 'circumferences' && (
-                    <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Peso ref." connectNulls />
+                    <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#3E6B52" strokeWidth={2} dot={{ r: 3 }} name="Peso ref." connectNulls />
                   )}
                 </LineChart>
               </ResponsiveContainer>

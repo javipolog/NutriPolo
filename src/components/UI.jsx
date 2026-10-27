@@ -149,13 +149,7 @@ const ErrorFallback = ({ error, onRetry }) => {
         <p className="text-sage-500 mb-6 text-xs">
           {t.error_boundary_hint}
         </p>
-        <button
-          onClick={onRetry}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-wellness-400 hover:bg-wellness-500 text-white rounded-button transition-colors text-sm font-medium"
-        >
-          <RefreshCw size={14} />
-          {t.retry}
-        </button>
+        <Button icon={RefreshCw} onClick={onRetry}>{t.retry}</Button>
       </div>
     </div>
   );
@@ -321,7 +315,7 @@ export const useConfirm = () => {
 export const Button = React.forwardRef(({ children, variant = 'primary', size = 'md', icon: Icon, className = '', ...props }, ref) => {
   const variants = {
     primary:   'bg-wellness-400 hover:bg-wellness-500 text-white shadow-sm',
-    secondary: 'bg-sage-200 hover:bg-sage-300 text-sage-700 border border-sage-300',
+    secondary: 'bg-white hover:bg-sage-50 text-sage-800 border border-sage-300 hover:border-sage-400 shadow-sm',
     ghost:     'bg-transparent hover:bg-sage-100 text-sage-700',
     danger:    'bg-danger hover:bg-danger-dark text-white',
     success:   'bg-success hover:bg-success-dark text-white',
@@ -510,9 +504,9 @@ export const StatCard = ({ icon: Icon, label, value, subValue, trend, trendUp, c
     emerald: 'bg-success-light text-success',
     amber:   'bg-warning-light text-warning',
     red:     'bg-danger-light text-danger',
-    purple:  'bg-purple-50 text-purple-600',
+    purple:  'bg-info-light text-info',
     indigo:  'bg-info-light text-info',
-    pink:    'bg-pink-50 text-pink-600',
+    pink:    'bg-terra-50 text-terra-500',
   };
 
   return (
@@ -524,7 +518,7 @@ export const StatCard = ({ icon: Icon, label, value, subValue, trend, trendUp, c
       <div className="flex items-start justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-sage-600 mb-1">{label}</p>
-          <h3 className="font-mono text-2xl text-sage-950 tracking-tight leading-none truncate" title={value}>{value}</h3>
+          <h3 className="tabular-nums text-[1.75rem] font-semibold text-sage-950 tracking-tight leading-none truncate" title={value}>{value}</h3>
           {subValue && <p className="text-sage-500 text-xs mt-1.5">{subValue}</p>}
         </div>
         <div className={`p-3 rounded-full ${iconColors[color] || iconColors.wellness} shrink-0 ml-4`}>
@@ -550,14 +544,9 @@ export const StatCard = ({ icon: Icon, label, value, subValue, trend, trendUp, c
 // ============================================
 export const StatusBadge = ({ status }) => {
   const t = useT();
-  const styles = {
-    borrador:     'bg-sage-100 text-sage-600 border border-sage-300',
-    emitida:      'bg-warning-light text-warning border border-warning/20',
-    pagada:       'bg-success-light text-success border border-success/20',
-    anulada:      'bg-danger-light text-danger border border-danger/20',
-    parcial:      'bg-info-light text-info border border-info/20',
-    presupuesto:  'bg-sage-200 text-sage-700 border border-sage-400',
-    rectificativa:'bg-wellness-50 text-wellness-500 border border-wellness-200',
+  const tones = {
+    borrador: 'neutral', emitida: 'warning', pagada: 'success', anulada: 'danger',
+    parcial: 'info', presupuesto: 'neutral', rectificativa: 'primary',
   };
   const labels = {
     borrador: t.invoice_status_draft, emitida: t.invoice_status_pending, pagada: t.invoice_status_paid,
@@ -565,12 +554,55 @@ export const StatusBadge = ({ status }) => {
     presupuesto: t.invoice_status_quote, rectificativa: t.invoice_status_corrective,
   };
 
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-badge text-xs font-medium ${styles[status] || styles.borrador}`}>
-      {labels[status] || status}
-    </span>
-  );
+  return <Badge tone={tones[status] || 'neutral'}>{labels[status] || status}</Badge>;
 };
+
+// ============================================
+// SEGMENTED CONTROL
+// One choice out of a few (view mode, status, language).
+// options: [{ value, label }]
+// ============================================
+export const SegmentedControl = ({ options, value, onChange, ariaLabel, className = '' }) => (
+  <div role="radiogroup" aria-label={ariaLabel} className={`inline-flex flex-wrap gap-0.5 p-0.5 bg-sage-100 border border-sage-200 rounded-button ${className}`}>
+    {options.map(opt => {
+      const active = opt.value === value;
+      return (
+        <button
+          key={opt.value}
+          type="button"
+          role="radio"
+          aria-checked={active}
+          onClick={() => onChange(opt.value)}
+          className={`px-3 py-1 text-xs font-medium rounded-[5px] transition-colors ${
+            active ? 'bg-white text-sage-900 shadow-sm ring-1 ring-sage-200' : 'text-sage-600 hover:text-sage-900'
+          }`}
+        >
+          {opt.label}
+        </button>
+      );
+    })}
+  </div>
+);
+
+// ============================================
+// BADGE
+// ============================================
+const BADGE_TONES = {
+  neutral: 'bg-sage-100 text-sage-600 border-sage-200',
+  primary: 'bg-wellness-50 text-wellness-500 border-wellness-200',
+  success: 'bg-success-light text-success border-success/20',
+  warning: 'bg-warning-light text-warning border-warning/20',
+  danger:  'bg-danger-light text-danger border-danger/20',
+  info:    'bg-info-light text-info border-info/20',
+  accent:  'bg-terra-50 text-terra-500 border-terra-200',
+};
+
+export const Badge = ({ tone = 'neutral', icon: Icon, children, className = '' }) => (
+  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-badge border text-xs font-medium whitespace-nowrap ${BADGE_TONES[tone] || BADGE_TONES.neutral} ${className}`}>
+    {Icon && <Icon size={11} aria-hidden="true" />}
+    {children}
+  </span>
+);
 
 // ============================================
 // SPINNER
@@ -592,7 +624,7 @@ export const EmptyState = ({ icon: Icon, title, description, action }) => (
     <h3 className="text-lg font-medium text-sage-700 mb-2">{title}</h3>
     {description && <p className="text-sage-500 text-sm mb-5">{description}</p>}
     {action && (typeof action === 'object' && action.label
-      ? <button onClick={action.onClick} className="mt-2 px-4 py-2 text-sm bg-wellness-400 text-white rounded-button hover:bg-wellness-500 transition-colors">{action.label}</button>
+      ? <Button onClick={action.onClick} className="mt-2">{action.label}</Button>
       : action
     )}
   </div>

@@ -72,7 +72,7 @@ export const ClientsView = () => {
 
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-sage-900">{t.clients_title}</h1>
+        <h1 className="font-serif text-title text-sage-900">{t.clients_title}</h1>
         <Button
           variant="primary"
           onClick={() => { setEditClient(null); setShowModal(true); }}
@@ -141,7 +141,7 @@ export const ClientsView = () => {
               <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setSelectedClientId(client.id)}>
                 <div className="flex items-center gap-2">
                   <p className="font-medium text-sage-900 truncate">{client.nombre}</p>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-badge font-medium ${
+                  <span className={`text-[11px] px-1.5 py-0.5 rounded-badge font-medium ${
                     client.estado === 'activo'   ? 'bg-success-light text-success' :
                     client.estado === 'alta'     ? 'bg-warning-light text-warning' :
                     'bg-sage-100 text-sage-500'
@@ -157,7 +157,7 @@ export const ClientsView = () => {
                 {(client.objetivos || []).length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">
                     {client.objetivos.slice(0, 3).map(o => (
-                      <span key={o} className="text-[10px] px-1.5 py-0.5 bg-wellness-50 text-wellness-600 rounded-badge">
+                      <span key={o} className="text-[11px] px-1.5 py-0.5 bg-wellness-50 text-wellness-600 rounded-badge">
                         {OBJETIVO_LABELS[o] || o}
                       </span>
                     ))}

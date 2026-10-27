@@ -80,7 +80,7 @@ const ChartTooltip = ({ active, payload, label, formatter }) => {
                 <div key={i} className="flex items-center gap-2 text-xs font-medium">
                     <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: entry.color }} />
                     <span className="text-sage-700">{entry.name}:</span>
-                    <span className="text-sage-900 font-mono font-bold ml-auto pl-3">
+                    <span className="text-sage-900 tabular-nums font-bold ml-auto pl-3">
                         {formatter ? formatter(entry.value, entry.name) : entry.value}
                     </span>
                 </div>
@@ -193,7 +193,7 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                         const dotColor = CONSULTATION_STATUS_DOT[c.estado] || 'bg-sage-300';
                         return (
                             <div key={c.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
-                                <span className="font-mono text-sm text-sage-900 font-semibold w-14 shrink-0">
+                                <span className="tabular-nums text-sm text-sage-900 font-semibold w-14 shrink-0">
                                     {c.hora || '—'}
                                 </span>
                                 <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
@@ -282,7 +282,7 @@ const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, p
     ].filter(Boolean);
 
     const colorMap = {
-        orange:  { bg: 'bg-orange-50',     border: 'border-orange-200', text: 'text-orange-600' },
+        orange:  { bg: 'bg-terra-50',     border: 'border-terra-200', text: 'text-terra-500' },
         warning: { bg: 'bg-warning-light', border: 'border-warning/20', text: 'text-warning' },
         danger:  { bg: 'bg-danger-light',  border: 'border-danger/20',  text: 'text-danger'  },
         amber:   { bg: 'bg-warning-light', border: 'border-warning/20', text: 'text-warning' },
@@ -387,7 +387,7 @@ const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark
                         <XAxis dataKey="label" {...axisProps} dy={8} />
                         <YAxis {...axisProps} allowDecimals={false} />
                         <Tooltip content={<ChartTooltip formatter={(v) => v} />} cursor={{ fill: isDark ? '#2A2520' : '#F4F3EE' }} />
-                        <Bar dataKey="value" name={t.consultations_title} fill="#C15F3C" radius={[4, 4, 0, 0]} animationDuration={1200} />
+                        <Bar dataKey="value" name={t.consultations_title} fill="#C15F3C" radius={[4, 4, 0, 0]} animationDuration={600} />
                     </BarChart>
                 </ResponsiveContainer>
             </Card>
@@ -400,15 +400,15 @@ const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark
                     <AreaChart data={clientsChart} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
                         <defs>
                             <linearGradient id="colorClients" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#4A7FB5" stopOpacity={0.2} />
-                                <stop offset="95%" stopColor="#4A7FB5" stopOpacity={0} />
+                                <stop offset="5%" stopColor="#3A6591" stopOpacity={0.2} />
+                                <stop offset="95%" stopColor="#3A6591" stopOpacity={0} />
                             </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke={gridColor} vertical={false} />
                         <XAxis dataKey="label" {...axisProps} dy={8} />
                         <YAxis {...axisProps} allowDecimals={false} />
-                        <Tooltip content={<ChartTooltip formatter={(v) => v} />} cursor={{ stroke: '#4A7FB5', strokeDasharray: '4 4', strokeWidth: 1 }} />
-                        <Area type="monotone" dataKey="value" name={t.nav_clients} stroke="#4A7FB5" strokeWidth={2.5} fill="url(#colorClients)" activeDot={{ r: 4, strokeWidth: 0, fill: '#4A7FB5' }} animationDuration={1400} />
+                        <Tooltip content={<ChartTooltip formatter={(v) => v} />} cursor={{ stroke: '#3A6591', strokeDasharray: '4 4', strokeWidth: 1 }} />
+                        <Area type="monotone" dataKey="value" name={t.nav_clients} stroke="#3A6591" strokeWidth={2.5} fill="url(#colorClients)" activeDot={{ r: 4, strokeWidth: 0, fill: '#3A6591' }} animationDuration={600} />
                     </AreaChart>
                 </ResponsiveContainer>
             </Card>
@@ -423,7 +423,7 @@ const ActivityCharts = ({ consultationsChart, clientsChart, revenueChart, isDark
                         <XAxis dataKey="label" {...axisProps} dy={8} />
                         <YAxis {...axisProps} tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : v} />
                         <Tooltip content={<ChartTooltip formatter={(v) => formatCurrency(v)} />} cursor={{ fill: isDark ? '#2A2520' : '#F4F3EE' }} />
-                        <Bar dataKey="value" name={t.dashboard_revenue} fill="#2D7A4F" radius={[4, 4, 0, 0]} animationDuration={1200} />
+                        <Bar dataKey="value" name={t.dashboard_revenue} fill="#3E6B52" radius={[4, 4, 0, 0]} animationDuration={600} />
                     </BarChart>
                 </ResponsiveContainer>
             </Card>
@@ -483,7 +483,7 @@ const RecentInvoices = ({ invoices, clients, onNavigate }) => {
                                         <td className="py-3 px-6 font-mono text-sm text-sage-700">{inv.numero}</td>
                                         <td className="py-3 px-6 text-sm font-medium text-sage-800">{client?.nombre || '—'}</td>
                                         <td className="py-3 px-6 text-sm text-sage-500">{formatDate(inv.fecha)}</td>
-                                        <td className="py-3 px-6 text-right font-mono font-bold text-sage-900">{formatCurrency(inv.total)}</td>
+                                        <td className="py-3 px-6 text-right tabular-nums font-bold text-sage-900">{formatCurrency(inv.total)}</td>
                                         <td className="py-3 px-6 text-center">
                                             <StatusBadge status={inv.estado === 'pendiente' ? 'emitida' : inv.estado} />
                                         </td>

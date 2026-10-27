@@ -4,20 +4,20 @@ import {
   ChevronDown, ChevronUp, ArrowRight, AlertCircle,
 } from 'lucide-react';
 import useStore from '../stores/store';
-import { useToast, useConfirm } from './UI';
+import { Button, useToast, useConfirm } from './UI';
 import { useT, plural } from '../i18n';
 
 // ── Score bar ─────────────────────────────────────────────────────────────────
 
 function scoreBarColor(score) {
-  if (score >= 0.90) return 'bg-green-500';
-  if (score >= 0.75) return 'bg-yellow-400';
+  if (score >= 0.90) return 'bg-success';
+  if (score >= 0.75) return 'bg-warning';
   return 'bg-sage-300';
 }
 
 function scoreTextColor(score) {
-  if (score >= 0.90) return 'text-green-700';
-  if (score >= 0.75) return 'text-yellow-700';
+  if (score >= 0.90) return 'text-success-dark';
+  if (score >= 0.75) return 'text-warning';
   return 'text-sage-500';
 }
 
@@ -72,7 +72,7 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
               <ArrowRight size={12} className="text-sage-400 shrink-0" />
               <span className="text-sm font-semibold text-info">{proposedClient.nombre}</span>
               {suggestion.topScore != null && (
-                <span className="text-xs font-medium text-green-700 bg-green-100 px-1.5 py-0.5 rounded-full">
+                <span className="text-xs font-medium text-success-dark bg-success-light px-1.5 py-0.5 rounded-full">
                   {Math.round(suggestion.topScore * 100)}%
                 </span>
               )}
@@ -110,7 +110,7 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
             )}
             <button
               onClick={() => onDismiss(suggestion.id)}
-              className="p-1.5 text-sage-400 hover:text-red-500 transition-colors rounded"
+              className="p-1.5 text-sage-400 hover:text-danger transition-colors rounded"
               title={t.suggestion_dismiss}
               aria-label={t.suggestion_dismiss}
             >
@@ -194,7 +194,7 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
           </div>
           <button
             onClick={() => onDismiss(suggestion.id)}
-            className="p-1.5 text-sage-400 hover:text-red-500 transition-colors flex-shrink-0 rounded"
+            className="p-1.5 text-sage-400 hover:text-danger transition-colors flex-shrink-0 rounded"
             title={t.inbox_dismiss_forever}
             aria-label={t.inbox_dismiss_forever}
           >
@@ -247,16 +247,12 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
 
       {!showCreateForm ? (
         <div className="px-4 py-3 bg-sage-50 border-t border-sage-100 flex items-center gap-2">
-          <button
-            onClick={() => setShowCreateForm(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-wellness-400 text-white text-xs font-medium rounded-button hover:bg-wellness-500 transition-colors"
-          >
-            <Plus size={12} />
+          <Button size="sm" icon={Plus} onClick={() => setShowCreateForm(true)}>
             {t.suggestion_create}
-          </button>
+          </Button>
           <button
             onClick={() => onDismiss(suggestion.id)}
-            className="px-3 py-1.5 text-xs text-sage-500 hover:text-red-600 transition-colors"
+            className="px-3 py-1.5 text-xs text-sage-500 hover:text-danger transition-colors"
           >
             {t.suggestion_dismiss}
           </button>
@@ -299,7 +295,7 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
             >
               {t.cancel}
             </button>
-            <button
+            <Button
               disabled={!newClientName.trim()}
               onClick={() =>
                 onCreate(suggestion.id, {
@@ -308,11 +304,11 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
                   email:    newClientEmail.trim() || '',
                 })
               }
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-wellness-400 text-white text-xs font-medium rounded-button hover:bg-wellness-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              size="sm"
+              icon={UserPlus}
             >
-              <UserPlus size={12} />
               {t.inbox_create_and_link}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -427,7 +423,7 @@ export const PatientSuggestionsInbox = () => {
 
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-sage-900 flex items-center gap-2.5">
+        <h1 className="font-serif text-title text-sage-900 flex items-center gap-2.5">
           <UserPlus size={22} className="text-wellness-500" />
           {t.inbox_title}
         </h1>
@@ -442,7 +438,7 @@ export const PatientSuggestionsInbox = () => {
       {/* Empty state */}
       {totalPending === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
-          <CheckCircle size={44} className="text-green-400" />
+          <CheckCircle size={44} className="text-success" />
           <div>
             <p className="text-sage-700 font-semibold">{t.dashboard_all_clear}</p>
             <p className="text-sage-500 text-sm mt-1 max-w-sm">
@@ -494,7 +490,7 @@ export const PatientSuggestionsInbox = () => {
             icon={AlertCircle}
             label={t.inbox_section_review}
             count={pendingReview.length}
-            colorClass="text-orange-600"
+            colorClass="text-terra-500"
           />
           {(() => {
             const groups = {};

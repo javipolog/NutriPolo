@@ -235,7 +235,7 @@ export const RemindersPanel = ({ onNavigate }) => {
               <div key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-2.5">
                 <div className="w-24 shrink-0">
                   <p className="text-xs text-sage-500">{dayLabel(row.start, t)}</p>
-                  <p className="font-mono text-sm font-semibold text-sage-900">{c.hora || '—'}</p>
+                  <p className="tabular-nums text-sm font-semibold text-sage-900">{c.hora || '—'}</p>
                 </div>
                 <div className="flex-1 min-w-[10rem]">
                   {row.client ? (

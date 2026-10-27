@@ -89,7 +89,7 @@ export const ServicesView = () => {
   return (
     <div className="space-y-5 animate-fadeIn">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-sage-900">{t.services_title}</h1>
+        <h1 className="font-serif text-title text-sage-900">{t.services_title}</h1>
         <Button variant="primary" icon={Plus} onClick={() => { setEditService(null); setShowModal(true); }}>
           {t.new_service}
         </Button>

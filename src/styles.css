@@ -5,34 +5,35 @@
 /* ============================================
    CSS CUSTOM PROPERTIES — SISTEMA DE TEMA
    ============================================ */
+/* Paleta:
+   - sage     → neutres càlids (fons, vores, text). Des de 400, text AA sobre blanc.
+   - wellness → color principal (verd sàlvia fosc); 400 porta text blanc a 6:1.
+   - terra    → accent (comptadors, imports destacats, gràfics).
+   - success / warning / danger / info → semàntics (tailwind.config.js).
+   Tots com a canals RGB perquè Tailwind hi pugui aplicar opacitat. */
 :root {
   --bg: #FAF9F6;
   --surface: #F4F3EE;
-  --surface-alt: #EDEAE3;
-  --border: #E8E5DD;
-  --border-strong: #D4D0C8;
-  --text: #1A1915;
+  --surface-alt: #EAE7DF;
+  --border: #DEDAD0;
+  --border-strong: #C9C5BA;
+  --text: #1C1B18;
   --text-secondary: #65635B;
-  --text-muted: #9C9A91;
-  --accent: #C15F3C;
-  --accent-hover: #A84E30;
-  --accent-light: #FDF4EF;
+  --text-muted: #75726A;
   --font-ui: 'Inter', system-ui, sans-serif;
   color-scheme: light;
-  /* sage / wellness palettes as RGB channels (see tailwind.config.js).
-     sage-400 and up pass WCAG AA (4.5:1) as text on white; wellness-400 is the
-     primary colour and carries white text at 6:1. */
-  --sage-50: 248 250 248;
-  --sage-100: 241 244 241;
-  --sage-200: 226 231 226;
-  --sage-300: 201 209 201;
-  --sage-400: 108 118 108;
-  --sage-500: 92 102 92;
-  --sage-600: 80 89 80;
-  --sage-700: 66 74 66;
-  --sage-800: 53 59 53;
-  --sage-900: 36 41 36;
-  --sage-950: 24 28 24;
+  --card: 255 255 255;
+  --sage-50: 250 249 246;
+  --sage-100: 244 243 238;
+  --sage-200: 234 231 223;
+  --sage-300: 222 218 208;
+  --sage-400: 117 114 106;
+  --sage-500: 101 99 91;
+  --sage-600: 87 85 78;
+  --sage-700: 71 69 63;
+  --sage-800: 56 54 49;
+  --sage-900: 42 41 35;
+  --sage-950: 28 27 24;
   --wellness-50: 241 246 242;
   --wellness-100: 226 237 229;
   --wellness-200: 199 218 205;
@@ -43,52 +44,64 @@
   --wellness-700: 33 63 47;
   --wellness-800: 27 52 39;
   --wellness-900: 21 41 31;
+  --terra-50: 253 244 239;
+  --terra-100: 250 220 201;
+  --terra-200: 240 191 160;
+  --terra-300: 212 132 95;
+  --terra-400: 193 95 60;
+  --terra-500: 168 78 48;
+  --terra-600: 143 64 40;
+  --terra-700: 107 48 30;
+  --terra-800: 74 33 21;
+  --terra-900: 45 20 13;
   --focus-ring: 62 107 82;
 }
 
 [data-theme="dark"] {
   --bg: #1C1B18;
-  --surface: #2A2923;
-  --surface-alt: #353430;
-  --border: #3D3C36;
-  --border-strong: #4A4840;
+  --surface: #22211D;
+  --surface-alt: #302F2A;
+  --border: #3E3C36;
+  --border-strong: #4D4B44;
   --text: #F0EDE6;
-  --text-secondary: #A09D94;
-  --text-muted: #6B6960;
-  --accent: #D4845F;
-  --accent-hover: #C15F3C;
-  --accent-light: #352520;
+  --text-secondary: #B9B6AD;
+  --text-muted: #918E85;
   color-scheme: dark;
-  --sage-50: 23 26 23;
-  --sage-100: 30 34 30;
-  --sage-200: 42 48 42;
-  --sage-300: 56 64 56;
-  --sage-400: 128 139 128;
-  --sage-500: 150 160 150;
-  --sage-600: 172 182 172;
-  --sage-700: 195 204 195;
-  --sage-800: 220 227 220;
-  --sage-900: 238 242 238;
-  --sage-950: 248 250 248;
+  --card: 38 37 32;
+  --sage-50: 28 27 24;
+  --sage-100: 34 33 29;
+  --sage-200: 48 47 42;
+  --sage-300: 62 60 54;
+  --sage-400: 145 142 133;
+  --sage-500: 165 162 153;
+  --sage-600: 185 182 173;
+  --sage-700: 205 202 194;
+  --sage-800: 225 222 214;
+  --sage-900: 240 237 230;
+  --sage-950: 248 246 241;
   /* 400/500 stay dark enough to carry white text (buttons, active nav);
      as text colours they are lightened by the overrides below. */
-  --wellness-50: 24 36 29;
-  --wellness-100: 29 45 36;
-  --wellness-200: 38 62 48;
-  --wellness-300: 52 86 66;
+  --wellness-50: 30 38 32;
+  --wellness-100: 35 47 39;
+  --wellness-200: 44 64 52;
+  --wellness-300: 58 88 70;
   --wellness-400: 62 120 88;
   --wellness-500: 52 104 76;
   --wellness-600: 140 205 165;
   --wellness-700: 170 222 190;
   --wellness-800: 198 235 211;
   --wellness-900: 226 245 232;
+  --terra-50: 53 37 32;
+  --terra-100: 70 45 35;
+  --terra-200: 90 48 32;
+  --terra-300: 150 80 52;
+  --terra-400: 200 112 80;
+  --terra-500: 176 95 58;
+  --terra-600: 224 154 120;
+  --terra-700: 234 180 152;
+  --terra-800: 242 205 184;
+  --terra-900: 248 228 216;
   --focus-ring: 140 205 165;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
 }
 
 html,
@@ -101,77 +114,35 @@ body,
 }
 
 /* ============================================
-   DARK MODE — OVERRIDES TAILWIND CLASSES
+   DARK MODE — classes that can't follow a variable
    ============================================ */
 
-/* Backgrounds */
-[data-theme="dark"] .bg-white      { background-color: #1E221E; }
-[data-theme="dark"] .border-white  { border-color: #2A302A; }
-[data-theme="dark"] .bg-sand-50    { background-color: #1C1B18; }
-[data-theme="dark"] .bg-sand-100   { background-color: #2A2923; }
-[data-theme="dark"] .bg-sand-200   { background-color: #3D3B35; }
-[data-theme="dark"] .bg-sand-300   { background-color: #4A4840; }
-[data-theme="dark"] .bg-sand-400   { background-color: #5A5750; }
+/* Cards are bg-white across the app */
+[data-theme="dark"] .bg-white      { background-color: rgb(var(--card)); }
+[data-theme="dark"] .border-white  { border-color: rgb(var(--sage-300)); }
 
-/* Semantic tints (alerts, badges) — dark versions */
-[data-theme="dark"] .bg-success-light { background-color: #16301F; }
+/* Semantic tints (alerts, badges). The DEFAULT tones stay dark for solid
+   backgrounds with white text, so as text they switch to light variants. */
+[data-theme="dark"] .bg-success-light { background-color: #1B3024; }
 [data-theme="dark"] .bg-warning-light { background-color: #33290F; }
 [data-theme="dark"] .bg-danger-light  { background-color: #3A1B1B; }
 [data-theme="dark"] .bg-info-light    { background-color: #182A3D; }
+[data-theme="dark"] .text-warning,
 [data-theme="dark"] .text-warning-dark { color: #E9C46A; }
+[data-theme="dark"] .text-success,
 [data-theme="dark"] .text-success-dark { color: #7FD3A0; }
+[data-theme="dark"] .text-danger,
 [data-theme="dark"] .text-danger-dark  { color: #F08A8A; }
+[data-theme="dark"] .text-info,
 [data-theme="dark"] .text-info-dark    { color: #8DB8E8; }
-[data-theme="dark"] .text-warning { color: #E9C46A; }
-[data-theme="dark"] .text-success { color: #7FD3A0; }
-[data-theme="dark"] .text-danger  { color: #F08A8A; }
-[data-theme="dark"] .text-info    { color: #8DB8E8; }
 
-/* Primary green as text/icon colour on dark surfaces */
+/* Primary and accent as text/icon colours on dark surfaces */
 [data-theme="dark"] .text-wellness-400,
-[data-theme="dark"] .text-wellness-500 { color: rgb(140 205 165); }
+[data-theme="dark"] .text-wellness-500 { color: rgb(var(--wellness-600)); }
+[data-theme="dark"] .text-terra-400,
+[data-theme="dark"] .text-terra-500    { color: rgb(var(--terra-600)); }
 
-/* Terra (accent) en dark mode — lleugerament més clar */
-[data-theme="dark"] .bg-terra-50   { background-color: #352520; }
-[data-theme="dark"] .bg-terra-400  { background-color: #C87050; }
-[data-theme="dark"] .bg-terra-500  { background-color: #B05F3A; }
-
-/* Text */
-[data-theme="dark"] .text-sand-950 { color: #F0EDE6; }
-[data-theme="dark"] .text-sand-900 { color: #E8E5DE; }
-[data-theme="dark"] .text-sand-800 { color: #D4D1C8; }
-[data-theme="dark"] .text-sand-700 { color: #C0BDB4; }
-[data-theme="dark"] .text-sand-600 { color: #B8B5AC; }
-[data-theme="dark"] .text-sand-500 { color: #9C9A91; }
-[data-theme="dark"] .text-sand-400 { color: #C0BDB4; }
-[data-theme="dark"] .text-terra-400 { color: #D4845F; }
-[data-theme="dark"] .text-terra-500 { color: #C15F3C; }
-
-/* Borders */
-[data-theme="dark"] .border-sand-200  { border-color: #353430; }
-[data-theme="dark"] .border-sand-300  { border-color: #3D3C36; }
-[data-theme="dark"] .border-sand-400  { border-color: #4A4840; }
-[data-theme="dark"] .border-terra-200 { border-color: #5A3020; }
-[data-theme="dark"] .border-terra-400 { border-color: #A85030; }
-
-/* Hover states */
-[data-theme="dark"] .hover\:bg-sand-50:hover    { background-color: #222118; }
-[data-theme="dark"] .hover\:bg-sand-100:hover   { background-color: #353430; }
-[data-theme="dark"] .hover\:bg-sand-200:hover   { background-color: #3D3B35; }
-[data-theme="dark"] .hover\:text-sand-700:hover  { color: #B8B5AC; }
-[data-theme="dark"] .hover\:text-sand-800:hover  { color: #D4D1C8; }
-[data-theme="dark"] .hover\:text-sand-900:hover  { color: #F0EDE6; }
-
-/* Divide colors */
-[data-theme="dark"] .divide-sand-200 > * + * { border-color: #353430; }
-[data-theme="dark"] .divide-sand-300 > * + * { border-color: #3D3C36; }
-
-/* Ring / shadow fix */
-[data-theme="dark"] .ring-sand-200 { --tw-ring-color: #353430; }
-[data-theme="dark"] .ring-sand-300 { --tw-ring-color: #3D3C36; }
-
-/* Sidebar i panels */
-[data-theme="dark"] .shadow-sidebar { box-shadow: 1px 0 0 0 #3D3C36; }
+[data-theme="dark"] .shadow-sidebar { box-shadow: 1px 0 0 0 rgb(var(--sage-300)); }
 
 /* Les tres famílies són configurables a Settings (--font-ui, --font-heading,
    --font-mono, definides a App.jsx); els valors per defecte coincideixen amb
@@ -284,7 +255,7 @@ select option {
    ============================================ */
 input[type="checkbox"] {
   cursor: pointer;
-  accent-color: var(--accent, #C15F3C);
+  accent-color: rgb(var(--wellness-400));
 }
 
 /* ============================================
@@ -379,6 +350,15 @@ input[type="checkbox"] {
 .animate-shake     { animation: shake     0.4s  ease-in-out; }
 .toast-enter       { animation: slideInRight 0.25s ease-out; }
 .toast-exit        { animation: slideOutRight 0.25s ease-in; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ============================================
    VALIDATION STATES

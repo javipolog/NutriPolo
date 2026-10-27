@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Send, Loader2, Eye, EyeOff, Mail } from 'lucide-react';
-import { Modal, Button, Input, Textarea, useToast } from './UI';
+import { Modal, Button, Input, Textarea, SegmentedControl, useToast } from './UI';
 import useStore, { errMsg } from '../stores/store';
 import {
   resolveTemplate, AVAILABLE_VARIABLES,
@@ -180,19 +180,12 @@ export const SendEmailModal = ({
     >
       <div className="space-y-4">
         {/* Mode selector */}
-        <div className="flex gap-1 bg-sage-100 p-1 rounded-button">
-          {MODES.map(({ id, label }) => (
-            <button
-              key={id}
-              onClick={() => { setMode(id); resetTemplate(id, lang); }}
-              className={`flex-1 px-2 py-1 text-xs rounded transition-colors ${
-                mode === id ? 'bg-white text-sage-800 shadow-sm' : 'text-sage-500 hover:text-sage-700'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          className="w-full [&>button]:flex-1"
+          value={mode}
+          onChange={id => { setMode(id); resetTemplate(id, lang); }}
+          options={MODES.map(({ id, label }) => ({ value: id, label }))}
+        />
 
         {/* Client selector (if not pre-set) */}
         {!client && (
@@ -222,17 +215,11 @@ export const SendEmailModal = ({
         {/* Language */}
         <div className="flex gap-2 items-center">
           <span className="text-xs text-sage-500">Idioma:</span>
-          {['es','ca','en'].map(l => (
-            <button
-              key={l}
-              onClick={() => { setLang(l); resetTemplate(mode, l); }}
-              className={`px-2 py-0.5 text-xs rounded-badge transition-colors ${
-                lang === l ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
-              }`}
-            >
-              {l === 'es' ? 'ES' : l === 'ca' ? 'CA' : 'EN'}
-            </button>
-          ))}
+          <SegmentedControl
+            value={lang}
+            onChange={l => { setLang(l); resetTemplate(mode, l); }}
+            options={[{ value: 'es', label: 'ES' }, { value: 'ca', label: 'CA' }, { value: 'en', label: 'EN' }]}
+          />
         </div>
 
         {/* Subject */}

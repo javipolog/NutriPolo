@@ -53,7 +53,7 @@ export const UnlockScreen = ({ onUnlocked }) => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-sage-50 via-sage-100 to-wellness-50 flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
-        <div className="bg-white rounded-card shadow-lg border border-sage-200 p-8">
+        <div className="bg-white rounded-soft shadow-lg border border-sage-200 p-8">
           <div className="flex flex-col items-center text-center mb-6">
             <div className="w-14 h-14 rounded-full bg-wellness-100 flex items-center justify-center mb-3">
               <Lock size={24} className="text-wellness-600" />
@@ -129,7 +129,7 @@ export const UnlockScreen = ({ onUnlocked }) => {
             </button>
           </form>
 
-          <p className="mt-6 text-[10px] text-sage-400 text-center leading-relaxed">
+          <p className="mt-6 text-[11px] text-sage-400 text-center leading-relaxed">
             Tus datos están cifrados con AES-256-GCM y Argon2id. La contraseña
             nunca sale de tu dispositivo.
           </p>

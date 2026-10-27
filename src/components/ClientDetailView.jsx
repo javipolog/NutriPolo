@@ -82,7 +82,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
               {client.nombre.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h1 className="text-xl font-bold text-sage-900">{client.nombre}</h1>
+              <h1 className="font-serif text-heading text-sage-900">{client.nombre}</h1>
               <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-sage-500">
                 {client.email && <span className="flex items-center gap-1"><Mail size={11} />{client.email}</span>}
                 {client.telefono && <span className="flex items-center gap-1"><Phone size={11} />{client.telefono}</span>}
@@ -90,7 +90,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
               </div>
               <div className="flex flex-wrap gap-1 mt-2">
                 {(client.objetivos || []).map(o => (
-                  <span key={o} className="text-[10px] px-2 py-0.5 bg-wellness-50 text-wellness-600 rounded-badge">
+                  <span key={o} className="text-[11px] px-2 py-0.5 bg-wellness-50 text-wellness-600 rounded-badge">
                     {OBJETIVO_LABELS[o] || o}
                   </span>
                 ))}
@@ -297,7 +297,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                       {inv.items?.length > 1 && ` +${inv.items.length - 1}`}
                     </p>
                   </div>
-                  <p className="font-mono font-semibold text-sage-800">{(inv.total ?? inv.importe ?? 0).toFixed(2)} €</p>
+                  <p className="tabular-nums font-semibold text-sage-800">{(inv.total ?? inv.importe ?? 0).toFixed(2)} €</p>
                   <span className={`text-xs px-2 py-0.5 rounded-badge ${
                     inv.estado === 'pagada' ? 'bg-success-light text-success' :
                     inv.estado === 'anulada' ? 'bg-danger-light text-danger' :

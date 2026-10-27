@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Plus, MapPin, Calendar, List, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
-import { Button, useToast, useConfirm, clickableProps } from './UI';
+import { ChevronLeft, ChevronRight, Plus, MapPin, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
+import { Button, SegmentedControl, useToast, useConfirm, clickableProps } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
@@ -49,8 +49,8 @@ function startOfMonth(date) {
 
 const STATUS_BG = {
   programada: 'bg-wellness-100 border-wellness-400 text-wellness-700',
-  completada:  'bg-green-100 border-green-500 text-green-800',
-  cancelada:   'bg-red-100 border-red-400 text-red-700',
+  completada:  'bg-success-light border-success text-success-dark',
+  cancelada:   'bg-danger-light border-danger/50 text-danger-dark',
   no_show:     'bg-sage-100 border-sage-400 text-sage-600',
 };
 
@@ -77,9 +77,9 @@ function consultationMatchVisual(c, t) {
     case 'auto-pending-review':
       return { cls: 'bg-info-light border-l-info text-info', Icon: CheckCircle2, tooltip: t.calendar_match_auto_tooltip };
     case 'suggested':
-      return { cls: 'bg-orange-50 border-l-orange-400 text-orange-700', Icon: AlertCircle, tooltip: t.calendar_match_suggested_tooltip };
+      return { cls: 'bg-terra-50 border-l-orange-400 text-terra-700', Icon: AlertCircle, tooltip: t.calendar_match_suggested_tooltip };
     case 'unknown':
-      return { cls: 'bg-red-50 border-l-danger text-danger', Icon: UserPlus, tooltip: t.calendar_match_unknown_tooltip };
+      return { cls: 'bg-danger-light border-l-danger text-danger', Icon: UserPlus, tooltip: t.calendar_match_unknown_tooltip };
     case 'dismissed':
       return { cls: 'bg-sage-100 border-l-sage-400 text-sage-500 opacity-60', Icon: XIcon, tooltip: t.match_status_dismissed };
     default:
@@ -174,7 +174,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
         <div className="relative flex-1 flex flex-col">
           {hours.map(h => (
             <div key={h} className="grid grid-cols-[48px_repeat(7,1fr)] border-b border-sage-100 flex-1 min-h-[40px]">
-              <div className="text-right pr-2 pt-1 text-[10px] text-sage-400 shrink-0">{h}:00</div>
+              <div className="text-right pr-2 pt-1 text-[11px] text-sage-400 shrink-0">{h}:00</div>
               {days.map(d => {
                 const iso = toISO(d);
                 const isToday = iso === today;
@@ -189,7 +189,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
                     onClick={() => !blocked && onNewConsultation({ fecha: iso, hora: `${String(h).padStart(2, '0')}:00` })}
                   >
                     {blocked && slots.length === 0 && blockedLabel && (
-                      <span className="text-[9px] text-sage-400 italic">{blockedLabel}</span>
+                      <span className="text-[11px] text-sage-400 italic">{blockedLabel}</span>
                     )}
                     {slots.map(c => {
                       const client = clients.find(x => x.id === c.clienteId);
@@ -201,7 +201,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
                         <div
                           key={c.id}
                           {...clickableProps(e => { e.stopPropagation(); onEditConsultation(c); })}
-                          className={`text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 cursor-pointer truncate hover:opacity-80 ${
+                          className={`text-[11px] rounded px-1 py-0.5 mb-0.5 border-l-2 cursor-pointer truncate hover:opacity-80 ${
                             matchVisual
                               ? matchVisual.cls
                               : cStyle
@@ -226,7 +226,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
                       <div
                         key={e.id}
                         onClick={ev => ev.stopPropagation()}
-                        className="text-[10px] rounded px-1 py-0.5 mb-0.5 border-l-2 border-l-sage-500 bg-sage-200/50 text-sage-700 italic truncate cursor-default"
+                        className="text-[11px] rounded px-1 py-0.5 mb-0.5 border-l-2 border-l-sage-500 bg-sage-200/50 text-sage-700 italic truncate cursor-default"
                         title={`[${t.personal_event_prefix}] ${e.title}${e.duracion ? ` — ${e.duracion}min` : ''}`}
                       >
                         <span className="font-medium">{e.hora}</span> {e.title}
@@ -314,7 +314,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                       <div
                         key={item.id}
                         onClick={e => e.stopPropagation()}
-                        className="text-[10px] px-1 rounded truncate bg-sage-200/50 text-sage-700 italic cursor-default border border-sage-300"
+                        className="text-[11px] px-1 rounded truncate bg-sage-200/50 text-sage-700 italic cursor-default border border-sage-300"
                         title={`[${t.personal_event_prefix}] ${item.title}`}
                       >
                         {!item.allDay && item.hora && <span className="font-medium mr-0.5">{item.hora}</span>}
@@ -331,7 +331,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                     <div
                       key={c.id}
                       {...clickableProps(e => { e.stopPropagation(); onEditConsultation(c); })}
-                      className={`text-[10px] px-1 rounded truncate cursor-pointer hover:opacity-80 ${
+                      className={`text-[11px] px-1 rounded truncate cursor-pointer hover:opacity-80 ${
                         matchVisual
                           ? matchVisual.cls + ' border border-l-2'
                           : cStyle
@@ -350,7 +350,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                   );
                 })}
                 {dayConsults.length > 3 && (
-                  <p className="text-[10px] text-sage-400 pl-1">{t.calendar_more.replace('{n}', dayConsults.length - 3)}</p>
+                  <p className="text-[11px] text-sage-400 pl-1">{t.calendar_more.replace('{n}', dayConsults.length - 3)}</p>
                 )}
               </div>
             </div>
@@ -399,7 +399,7 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
                       <p className="text-sm font-bold" style={cColor ? { color: cColor } : undefined}>
                         {c.hora}
                       </p>
-                      {c.duracion && <p className="text-[10px] text-sage-400">{c.duracion}m</p>}
+                      {c.duracion && <p className="text-[11px] text-sage-400">{c.duracion}m</p>}
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
@@ -611,7 +611,7 @@ export const CalendarView = () => {
     <div className="flex flex-col gap-4 animate-fadeIn h-full">
       {/* Toolbar */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-2xl font-bold text-sage-900">{t.agenda_title}</h1>
+        <h1 className="font-serif text-title text-sage-900">{t.agenda_title}</h1>
         <div className="flex items-center gap-2">
           {config.googleCalendar?.connected && (
             <div className="flex flex-col items-end gap-0.5">
@@ -630,15 +630,15 @@ export const CalendarView = () => {
                   disabled={resetting || syncing}
                   title={t.calendar_reset_button}
                   aria-label={t.calendar_reset_button}
-                  className="p-1.5 rounded-button text-red-400 hover:bg-red-50 transition-colors disabled:opacity-50"
+                  className="p-1.5 rounded-button text-danger hover:bg-danger-light transition-colors disabled:opacity-50"
                 >
                   <Trash2 size={15} />
                 </button>
               </div>
               {syncError ? (
-                <p className="text-[10px] text-red-500 leading-tight">{t.calendar_sync_failed}</p>
+                <p className="text-[11px] text-danger leading-tight">{t.calendar_sync_failed}</p>
               ) : lastSyncTime ? (
-                <p className="text-[10px] text-sage-400 leading-tight">
+                <p className="text-[11px] text-sage-400 leading-tight">
                   {t.calendar_last_sync.replace('{time}', `${lastSyncTime.getHours().toString().padStart(2, '0')}:${lastSyncTime.getMinutes().toString().padStart(2, '0')}`)}
                 </p>
               ) : null}
@@ -684,32 +684,27 @@ export const CalendarView = () => {
           )}
 
           {/* View toggle */}
-          <div className="flex gap-1 bg-sage-100 p-1 rounded-button">
-            {[['week', Calendar, t.week_view], ['month', Calendar, t.month_view], ['list', List, t.view_list]].map(([id, Icon, label]) => (
-              <button
-                key={id}
-                onClick={() => setViewMode(id)}
-                aria-pressed={viewMode === id}
-                className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-colors ${
-                  viewMode === id ? 'bg-white text-sage-800 shadow-sm' : 'text-sage-500 hover:text-sage-700'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            value={viewMode}
+            onChange={setViewMode}
+            options={[
+              { value: 'week',  label: t.week_view },
+              { value: 'month', label: t.month_view },
+              { value: 'list',  label: t.view_list },
+            ]}
+          />
         </div>
       </div>
 
       {/* Mass-delete banners — one per suspended calendar */}
       {massDeleteCalendars.map(cal => (
-        <div key={cal.id} className="flex items-start gap-3 px-4 py-3 bg-red-50 border border-red-300 rounded-soft text-sm">
-          <AlertTriangle size={16} className="text-red-500 shrink-0 mt-0.5" />
+        <div key={cal.id} className="flex items-start gap-3 px-4 py-3 bg-danger-light border border-danger/30 rounded-soft text-sm">
+          <AlertTriangle size={16} className="text-danger shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-red-800">
+            <p className="font-semibold text-danger-dark">
               {t.mass_delete_title} "{cal.name || cal.id}"
             </p>
-            <p className="text-red-700 text-xs mt-0.5">
+            <p className="text-danger-dark text-xs mt-0.5">
               {t.calendar_mass_delete_detail
                 .replace('{prev}', cal.massDeletePending.prevCount)
                 .replace('{new}', cal.massDeletePending.newCount)
@@ -719,7 +714,7 @@ export const CalendarView = () => {
           <div className="flex gap-1.5 flex-shrink-0">
             <button
               onClick={() => ignoreMassDeleteOnce(cal.id)}
-              className="px-2.5 py-1 text-xs font-medium bg-white border border-red-300 text-red-700 rounded-button hover:bg-red-50 transition-colors"
+              className="px-2.5 py-1 text-xs font-medium bg-white border border-danger/30 text-danger-dark rounded-button hover:bg-danger-light transition-colors"
             >
               {t.mass_delete_ignore}
             </button>
@@ -736,7 +731,7 @@ export const CalendarView = () => {
                 );
                 updateConfig({ googleCalendar: { ...config.googleCalendar, calendars: cals } });
               }}
-              className="px-2.5 py-1 text-xs text-red-500 hover:text-red-700 transition-colors"
+              className="px-2.5 py-1 text-xs text-danger hover:text-danger-dark transition-colors"
             >
               {t.mass_delete_suspend}
             </button>
@@ -761,15 +756,15 @@ export const CalendarView = () => {
         </div>
       )}
       {pendingReviewCount > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-orange-50 border border-orange-200 rounded-soft text-sm">
+        <div className="flex items-center gap-3 px-4 py-2.5 bg-terra-50 border border-terra-200 rounded-soft text-sm">
           <AlertCircle size={16} className="text-terra-500 shrink-0" />
-          <span className="flex-1 text-orange-800">
+          <span className="flex-1 text-terra-700">
             <strong>{pendingReviewCount}</strong>{' '}
             {plural(t, 'calendar_banner_review', pendingReviewCount)}
           </span>
           <button
             onClick={() => setCurrentView('inbox')}
-            className="px-3 py-1 text-xs font-medium bg-terra-500 text-white rounded-button hover:bg-terra-600 transition-colors whitespace-nowrap"
+            className="px-3 py-1 text-xs font-medium bg-terra-500 text-white rounded-button hover:brightness-90 transition-colors whitespace-nowrap"
           >
             {t.new_patients_review} →
           </button>

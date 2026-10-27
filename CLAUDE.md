@@ -85,7 +85,7 @@ nutripolo-app/
 │   ├── App.jsx                       # Component arrel + navegacio per vistes
 │   ├── i18n.js                       # Traduccions ES/CA/EN (fallback per clau a ES)
 │   ├── main.jsx                      # Punt d'entrada React
-│   └── styles.css                    # Estils globals Tailwind
+│   └── styles.css                    # Variables de tema (paleta clar/fosc) i estils globals
 │
 ├── src-tauri/                        # Backend Rust
 │   ├── src/
@@ -203,9 +203,13 @@ fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
 - Email automatic per SMTP des de `useBackgroundJobs` (cada 5 min, nomes amb l'app oberta); WhatsApp semiautomatic via wa.me
 
 ### Estils
-- **Tailwind CSS** amb paleta personalitzada (sand, terra, wellness, sage)
-- Suport dark mode
-- Classes utilitaries sense CSS custom
+- **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)
+- `sage`, `wellness` i `terra` són variables CSS a `styles.css` (clar i fosc); no feu servir colors de Tailwind (`red-*`, `orange-*`…) ni hex als components
+- Contrast WCAG AA: `sage-400`+ com a text; `wellness-400` / `terra-500` porten text blanc
+- Dark mode via `data-theme` a `<html>`; les excepcions (`bg-white`, text semàntic) són a `styles.css`
+- Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Modal` (prop `footer` fora del scroll)
+- Tipografia: títols de vista `font-serif text-title`; xifres amb `tabular-nums`; res per sota d'11 px
+- Fonts empaquetades amb @fontsource (`main.jsx`), sense peticions a Google Fonts
 
 ### Nomenclatura
 - **Components:** PascalCase (`InvoiceModal.jsx`)
