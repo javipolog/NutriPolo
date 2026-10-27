@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback, useId, useRef, createContext, useContext } from 'react';
-import { X, TrendingUp, TrendingDown, CheckCircle, AlertCircle, AlertTriangle, Info, RefreshCw } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useId, useMemo, useRef, createContext, useContext } from 'react';
+import { X, TrendingUp, TrendingDown, CheckCircle, AlertCircle, AlertTriangle, Info, RefreshCw, Search } from 'lucide-react';
 import { useT } from '../i18n';
 
 // ============================================
@@ -511,23 +511,22 @@ export const StatCard = ({ icon: Icon, label, value, subValue, trend, trendUp, c
 
   return (
     <Card
-      className="p-6"
+      className="p-5"
       hover={!!onClick}
       onClick={onClick}
     >
-      <div className="flex items-start justify-between">
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-sage-600 mb-1">{label}</p>
-          <h3 className="tabular-nums text-[1.75rem] font-semibold text-sage-950 tracking-tight leading-none truncate" title={value}>{value}</h3>
-          {subValue && <p className="text-sage-500 text-xs mt-1.5">{subValue}</p>}
-        </div>
-        <div className={`p-3 rounded-full ${iconColors[color] || iconColors.wellness} shrink-0 ml-4`}>
-          <Icon size={20} />
-        </div>
+      {/* Icon sits next to the label so the value gets the full card width */}
+      <div className="flex items-center gap-2.5 mb-3">
+        <span className={`p-1.5 rounded-button ${iconColors[color] || iconColors.wellness} shrink-0`}>
+          <Icon size={15} aria-hidden="true" />
+        </span>
+        <p className="text-sm font-medium text-sage-600 truncate">{label}</p>
       </div>
+      <p className="tabular-nums text-[1.75rem] font-semibold text-sage-950 tracking-tight leading-none whitespace-nowrap">{value}</p>
+      {subValue && <p className="text-sage-500 text-xs mt-2">{subValue}</p>}
 
       {trend && (
-        <div className="mt-4 flex items-center gap-2">
+        <div className="mt-3 flex items-center gap-2">
           <span className={`flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-badge ${trendUp ? 'bg-success-light text-success' : 'bg-danger-light text-danger'}`}>
             {trendUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
             {trend}
@@ -583,6 +582,115 @@ export const SegmentedControl = ({ options, value, onChange, ariaLabel, classNam
     })}
   </div>
 );
+
+// ============================================
+// COMBOBOX
+// Searchable single choice for long lists (clients).
+// options: [{ value, label, hint? }] — matches label and hint, ignoring accents.
+// ============================================
+const normalize = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+export const Combobox = ({ options, value, onChange, placeholder, emptyText, error, id, autoFocus }) => {
+  const generated = useId();
+  const inputId = id || generated;
+  const listId = `${inputId}-list`;
+  const selected = options.find(o => o.value === value);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const listRef = useRef(null);
+
+  const matches = useMemo(() => {
+    const q = normalize(query.trim());
+    if (!q) return options;
+    return options.filter(o => normalize(o.label).includes(q) || normalize(o.hint).includes(q));
+  }, [options, query]);
+
+  useEffect(() => { setHighlight(0); }, [query]);
+  useEffect(() => {
+    if (open) listRef.current?.children[highlight]?.scrollIntoView({ block: 'nearest' });
+  }, [highlight, open]);
+
+  const choose = (opt) => {
+    onChange(opt.value);
+    setQuery('');
+    setOpen(false);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!open) setOpen(true);
+      else setHighlight(h => Math.min(h + 1, matches.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight(h => Math.max(h - 1, 0));
+    } else if (e.key === 'Enter' && open && matches[highlight]) {
+      e.preventDefault();
+      choose(matches[highlight]);
+    } else if (e.key === 'Escape' && open) {
+      // Close the list only; preventDefault keeps the surrounding dialog open
+      e.preventDefault();
+      setOpen(false);
+      setQuery('');
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-500 pointer-events-none" aria-hidden="true" />
+      <input
+        id={inputId}
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={open && matches[highlight] ? `${listId}-${highlight}` : undefined}
+        aria-invalid={error ? true : undefined}
+        autoFocus={autoFocus}
+        autoComplete="off"
+        value={open ? query : (selected?.label || '')}
+        placeholder={selected ? selected.label : placeholder}
+        onChange={e => { setQuery(e.target.value); setOpen(true); }}
+        // Selecting the shown name makes typing replace it instead of appending to it.
+        // The list does not open on focus: dialogs focus this field on open.
+        onFocus={e => e.target.select()}
+        onClick={() => setOpen(true)}
+        onBlur={() => { setOpen(false); setQuery(''); }}
+        onKeyDown={onKeyDown}
+        className={`w-full pl-9 pr-3 py-2 text-sm border rounded-button bg-white text-sage-800 placeholder-sage-500 focus:outline-none focus:border-wellness-400 focus:ring-2 focus:ring-wellness-400/10 ${error ? 'border-danger' : 'border-sage-300'}`}
+      />
+      {open && (
+        <ul
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          className="absolute z-30 mt-1 w-full max-h-60 overflow-y-auto bg-white border border-sage-300 rounded-soft shadow-modal py-1"
+        >
+          {matches.length === 0 ? (
+            <li className="px-3 py-2 text-sm text-sage-500">{emptyText}</li>
+          ) : matches.map((opt, i) => (
+            <li
+              key={opt.value}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={opt.value === value}
+              // mousedown keeps focus in the input so onBlur does not close first
+              onMouseDown={e => { e.preventDefault(); choose(opt); }}
+              onMouseEnter={() => setHighlight(i)}
+              className={`flex items-center justify-between gap-3 px-3 py-2 text-sm cursor-pointer ${
+                i === highlight ? 'bg-sage-100' : ''
+              } ${opt.value === value ? 'font-medium text-wellness-500' : 'text-sage-800'}`}
+            >
+              <span className="truncate">{opt.label}</span>
+              {opt.hint && <span className="text-xs text-sage-500 truncate">{opt.hint}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
 
 // ============================================
 // BADGE

@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText } from 'lucide-react';
-import { Button, useToast } from './UI';
-import useStore, { formatDate, calcIMC } from '../stores/store';
-import { useT } from '../i18n';
+import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText, Calendar, ClipboardList, Receipt } from 'lucide-react';
+import { Button, StatusBadge, useToast } from './UI';
+import useStore, { formatDate, formatCurrency, calcIMC } from '../stores/store';
+import { useT, useLocale } from '../i18n';
 import { ClientModal } from './ClientModal';
+import { ConsultationModal } from './ConsultationModal';
+import { InvoiceModal } from './InvoiceModal';
+import { PlanEditorModal } from './NutritionPlanEditor';
 import { MeasurementChart } from './MeasurementChart';
 import { ClientDocuments } from './ClientDocuments';
 import { SendEmailModal } from './SendEmailModal';
@@ -17,12 +20,34 @@ const OBJETIVO_LABELS = {
   dietoterapia: 'Dietoterapia', relacion_alimentacion: 'Relación alimentación',
 };
 
-const InfoRow = ({ label, value }) => (
-  <div className="flex justify-between py-1.5 border-b border-sage-100 last:border-0">
-    <span className="text-xs text-sage-500">{label}</span>
-    <span className="text-xs text-sage-800 font-medium text-right max-w-xs">{value || '—'}</span>
-  </div>
-);
+const InfoRow = ({ label, value }) => {
+  if (!value) return null;
+  return (
+    <div className="flex justify-between gap-4 py-1.5 border-b border-sage-100 last:border-0">
+      <span className="text-xs text-sage-500">{label}</span>
+      <span className="text-xs text-sage-800 font-medium text-right max-w-xs">{value}</span>
+    </div>
+  );
+};
+
+/** Latest value of a measurement plus its change since the first one. */
+const MetricStat = ({ label, value, unit, delta, since, locale }) => {
+  const t = useT();
+  const fmt = n => n.toLocaleString(locale, { maximumFractionDigits: 1 });
+  return (
+    <div>
+      <p className="text-xs text-sage-500">{label}</p>
+      <p className="text-xl font-semibold text-sage-900 tabular-nums">
+        {fmt(value)}{unit && <span className="text-xs font-normal text-sage-500"> {unit}</span>}
+      </p>
+      {delta != null && delta !== 0 && (
+        <p className="text-xs text-sage-500 tabular-nums">
+          {t.client_change_since.replace('{delta}', `${delta > 0 ? '+' : '−'}${fmt(Math.abs(delta))}${unit ? ` ${unit}` : ''}`).replace('{date}', formatDate(since))}
+        </p>
+      )}
+    </div>
+  );
+};
 
 export const ClientDetailView = ({ clientId, onBack }) => {
   const client = useStore(s => s.clients.find(c => c.id === clientId));
@@ -40,14 +65,23 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const [tab, setTab] = useState('profile');
   const [showEdit, setShowEdit] = useState(false);
   const [emailDoc, setEmailDoc] = useState(null);
+  const [creating, setCreating] = useState(null); // 'consultation' | 'plan' | 'invoice'
+  const locale = useLocale();
   const { sendWhatsApp } = useReminderActions();
 
   // Client deleted while open: leave the view (side effect, not during render).
   useEffect(() => { if (!client) onBack(); }, [client, onBack]);
   if (!client) return null;
 
+  const firstMeasurement = measurements[0];
   const lastMeasurement = measurements[measurements.length - 1];
-  const currentIMC = lastMeasurement?.imc || (lastMeasurement?.peso && client.altura ? calcIMC(lastMeasurement.peso, client.altura) : null);
+  const altura = client.altura || lastMeasurement?.altura;
+  const currentIMC = lastMeasurement?.imc || (lastMeasurement?.peso && altura ? calcIMC(lastMeasurement.peso, altura) : null);
+  const deltaOf = key => (measurements.length > 1 && firstMeasurement[key] != null && lastMeasurement[key] != null)
+    ? Number(lastMeasurement[key]) - Number(firstMeasurement[key])
+    : null;
+  const hasHealthData = ['alergias', 'intolerancias', 'patologias', 'restriccionesDieteticas'].some(k => (client[k] || []).length > 0)
+    || client.medicacion || client.ejercicio;
 
   const openWhatsApp = async () => {
     const result = await openWhatsAppChat(client, config);
@@ -97,37 +131,31 @@ export const ClientDetailView = ({ clientId, onBack }) => {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button variant="ghost" size="sm" onClick={openWhatsApp} icon={MessageCircle}>WhatsApp</Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowEdit(true)} icon={Edit2}>{t.edit}</Button>
+          <div className="flex flex-col items-end gap-2 shrink-0">
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="sm" onClick={openWhatsApp} icon={MessageCircle}>WhatsApp</Button>
+              <Button variant="ghost" size="sm" onClick={() => setShowEdit(true)} icon={Edit2}>{t.edit}</Button>
+            </div>
+            {/* Create records for this client without leaving the profile */}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button size="sm" icon={Calendar} onClick={() => setCreating('consultation')}>{t.new_consultation}</Button>
+              <Button size="sm" variant="secondary" icon={ClipboardList} onClick={() => setCreating('plan')}>{t.new_plan}</Button>
+              <Button size="sm" variant="secondary" icon={Receipt} onClick={() => setCreating('invoice')}>{t.new_invoice}</Button>
+            </div>
           </div>
         </div>
 
         {/* Quick stats */}
         {lastMeasurement && (
-          <div className="grid grid-cols-4 gap-3 mt-4 pt-4 border-t border-sage-100">
-            <div className="text-center">
-              <p className="text-xs text-sage-400">{t.measurement_weight}</p>
-              <p className="text-lg font-bold text-sage-800">{lastMeasurement.peso}<span className="text-xs font-normal text-sage-400"> kg</span></p>
-            </div>
-            {currentIMC && (
-              <div className="text-center">
-                <p className="text-xs text-sage-400">{t.measurement_bmi}</p>
-                <p className="text-lg font-bold text-sage-800">{currentIMC}</p>
-              </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4 pt-4 border-t border-sage-100">
+            {lastMeasurement.peso != null && (
+              <MetricStat label={t.measurement_weight} value={Number(lastMeasurement.peso)} unit="kg" delta={deltaOf('peso')} since={firstMeasurement.fecha} locale={locale} />
             )}
-            {lastMeasurement.grasaCorporal && (
-              <div className="text-center">
-                <p className="text-xs text-sage-400">{t.measurement_body_fat}</p>
-                <p className="text-lg font-bold text-sage-800">{lastMeasurement.grasaCorporal}<span className="text-xs font-normal text-sage-400"> %</span></p>
-              </div>
+            {currentIMC && <MetricStat label={t.measurement_bmi} value={Number(currentIMC)} locale={locale} />}
+            {lastMeasurement.grasaCorporal != null && (
+              <MetricStat label={t.measurement_body_fat} value={Number(lastMeasurement.grasaCorporal)} unit="%" delta={deltaOf('grasaCorporal')} since={firstMeasurement.fecha} locale={locale} />
             )}
-            {client.altura && (
-              <div className="text-center">
-                <p className="text-xs text-sage-400">{t.client_height}</p>
-                <p className="text-lg font-bold text-sage-800">{client.altura}<span className="text-xs font-normal text-sage-400"> cm</span></p>
-              </div>
-            )}
+            {altura && <MetricStat label={t.client_height} value={Number(altura)} unit="cm" locale={locale} />}
           </div>
         )}
       </div>
@@ -178,11 +206,12 @@ export const ClientDetailView = ({ clientId, onBack }) => {
               <InfoRow label={t.client_city} value={[client.codigoPostal, client.ciudad, client.provincia].filter(Boolean).join(', ')} />
               <InfoRow label="Fecha nacimiento" value={formatDate(client.fechaNacimiento)} />
               <InfoRow label="Género" value={client.genero === 'M' ? 'Hombre' : client.genero === 'F' ? 'Mujer' : client.genero} />
-              <InfoRow label="Altura" value={client.altura ? `${client.altura} cm` : null} />
+              <InfoRow label="Altura" value={altura ? `${altura} cm` : null} />
               <InfoRow label="Nivel actividad" value={client.nivelActividad} />
             </div>
             <div className="bg-white border border-sage-200 rounded-soft p-4">
               <h3 className="text-sm font-semibold text-sage-700 mb-3">{t.client_health_profile}</h3>
+              {!hasHealthData && <p className="text-xs text-sage-500">{t.client_health_empty}</p>}
               {(client.alergias || []).length > 0 && <InfoRow label="Alergias" value={client.alergias.join(', ')} />}
               {(client.intolerancias || []).length > 0 && <InfoRow label="Intolerancias" value={client.intolerancias.join(', ')} />}
               {(client.patologias || []).length > 0 && <InfoRow label="Patologías" value={client.patologias.join(', ')} />}
@@ -297,12 +326,9 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                       {inv.items?.length > 1 && ` +${inv.items.length - 1}`}
                     </p>
                   </div>
-                  <p className="tabular-nums font-semibold text-sage-800">{(inv.total ?? inv.importe ?? 0).toFixed(2)} €</p>
-                  <span className={`text-xs px-2 py-0.5 rounded-badge ${
-                    inv.estado === 'pagada' ? 'bg-success-light text-success' :
-                    inv.estado === 'anulada' ? 'bg-danger-light text-danger' :
-                    'bg-warning-light text-warning'
-                  }`}>{inv.estado}</span>
+                  <p className="tabular-nums font-semibold text-sage-800">{formatCurrency(inv.total ?? inv.importe ?? 0)}</p>
+                  {/* StatusBadge calls a pending invoice "emitida" */}
+                  <StatusBadge status={inv.estado === 'pendiente' ? 'emitida' : inv.estado} />
                 </div>
               ))
             )}
@@ -311,6 +337,9 @@ export const ClientDetailView = ({ clientId, onBack }) => {
       </div>
 
       {showEdit && <ClientModal client={client} onClose={() => setShowEdit(false)} />}
+      {creating === 'consultation' && <ConsultationModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
+      {creating === 'plan' && <PlanEditorModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
+      {creating === 'invoice' && <InvoiceModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
       {emailDoc && (
         <SendEmailModal
           mode="document"

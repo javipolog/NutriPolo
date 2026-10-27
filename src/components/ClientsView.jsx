@@ -28,6 +28,9 @@ export const ClientsView = () => {
   const clientFilters = useStore(s => s.clientFilters);
   const setClientFilters = useStore(s => s.setClientFilters);
   const config = useStore(s => s.config);
+  const pendingSuggestions = useStore(s =>
+    (s.patientSuggestions || []).filter(sg => sg.status === 'pending' || sg.status === 'pending-confirm').length
+  );
 
   const t = useT();
   const toast = useToast();
@@ -67,8 +70,9 @@ export const ClientsView = () => {
 
   return (
     <div className="space-y-5 animate-fadeIn">
-      {/* Suggested new clients from external calendars */}
-      <PatientSuggestionsSection />
+      {/* Suggested new clients from external calendars — only when there is
+          something to review, so the empty state does not push the list down */}
+      {pendingSuggestions > 0 && <PatientSuggestionsSection />}
 
       {/* Header */}
       <div className="flex items-center justify-between">

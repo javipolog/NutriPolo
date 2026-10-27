@@ -146,7 +146,7 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
 // ─────────────────────────────────────────────────────────────
 // Plan Editor Modal
 // ─────────────────────────────────────────────────────────────
-const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
+export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
   const clients = useStore(s => s.clients);
   const addNutritionPlan = useStore(s => s.addNutritionPlan);
   const updateNutritionPlan = useStore(s => s.updateNutritionPlan);

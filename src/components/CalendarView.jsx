@@ -1,10 +1,11 @@
-import React, { useState, useMemo, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Plus, MapPin, RefreshCw, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
-import { Button, SegmentedControl, useToast, useConfirm, clickableProps } from './UI';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { ChevronLeft, ChevronRight, Plus, MapPin, RefreshCw, Check, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
+import { Button, Badge, SegmentedControl, useToast, useConfirm, clickableProps } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { ConsultationModal } from './ConsultationModal';
+import { useNow } from '../hooks/useNow';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -47,14 +48,18 @@ function startOfMonth(date) {
   return new Date(date.getFullYear(), date.getMonth(), 1);
 }
 
+// Scheduled stands out; past or cancelled appointments step back.
 const STATUS_BG = {
-  programada: 'bg-wellness-100 border-wellness-400 text-wellness-700',
-  completada:  'bg-success-light border-success text-success-dark',
-  cancelada:   'bg-danger-light border-danger/50 text-danger-dark',
-  no_show:     'bg-sage-100 border-sage-400 text-sage-600',
+  programada: 'bg-wellness-50 text-wellness-700',
+  completada: 'bg-sage-100 text-sage-600',
+  cancelada:  'bg-danger-light text-danger-dark line-through opacity-75',
+  no_show:    'bg-sage-100 text-sage-500 line-through',
 };
 
-const LOCATION_COLORS = ['border-l-wellness-400', 'border-l-coral-400', 'border-l-blue-400', 'border-l-purple-400'];
+// Badge tones for the list view
+const STATUS_TONE = { programada: 'primary', completada: 'success', cancelada: 'danger', no_show: 'neutral' };
+
+const LOCATION_COLORS = ['border-l-wellness-400', 'border-l-terra-400', 'border-l-info', 'border-l-warning'];
 
 /** Return inline style object when a consultation has a Google Calendar color, or null. */
 function calStyle(c, calColorMap) {
@@ -77,7 +82,7 @@ function consultationMatchVisual(c, t) {
     case 'auto-pending-review':
       return { cls: 'bg-info-light border-l-info text-info', Icon: CheckCircle2, tooltip: t.calendar_match_auto_tooltip };
     case 'suggested':
-      return { cls: 'bg-terra-50 border-l-orange-400 text-terra-700', Icon: AlertCircle, tooltip: t.calendar_match_suggested_tooltip };
+      return { cls: 'bg-terra-50 border-l-terra-400 text-terra-700', Icon: AlertCircle, tooltip: t.calendar_match_suggested_tooltip };
     case 'unknown':
       return { cls: 'bg-danger-light border-l-danger text-danger', Icon: UserPlus, tooltip: t.calendar_match_unknown_tooltip };
     case 'dismissed':
@@ -87,156 +92,254 @@ function consultationMatchVisual(c, t) {
   }
 }
 
-// ── Hour slots for weekly view ─────────────────────────────────────────────
+// ── Weekly View ────────────────────────────────────────────────────────────
+// Appointments are placed by start minute and sized by duration, so 16:30 sits
+// halfway down the 16:00 row and overlapping ones share the column side by side.
 const DEFAULT_FIRST_HOUR = 8;
 const DEFAULT_LAST_HOUR = 20;
+const HOUR_PX = 48;
+const MIN_EVENT_PX = 20;
 
-// ── Weekly View ────────────────────────────────────────────────────────────
+const toMinutes = hora => {
+  if (!hora) return NaN;
+  const [h, m] = hora.split(':').map(Number);
+  return h * 60 + (m || 0);
+};
+
+/** Assign side-by-side lanes to overlapping items: adds `lane` and `lanes`. */
+function layoutLanes(items) {
+  const sorted = [...items].sort((a, b) => a.start - b.start || b.end - a.end);
+  const out = [];
+  let cluster = [];
+  let clusterEnd = -Infinity;
+  const flush = () => {
+    const laneEnds = [];
+    cluster.forEach(it => {
+      let lane = laneEnds.findIndex(end => end <= it.start);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.end); } else laneEnds[lane] = it.end;
+      it.lane = lane;
+    });
+    cluster.forEach(it => out.push({ ...it, lanes: laneEnds.length }));
+    cluster = [];
+  };
+  for (const it of sorted) {
+    if (cluster.length && it.start >= clusterEnd) { flush(); clusterEnd = -Infinity; }
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.end);
+  }
+  if (cluster.length) flush();
+  return out;
+}
 
 const WeekView = ({ weekStart, consultations, personalEvents, clients, config, calColorMap, onNewConsultation, onEditConsultation }) => {
   const t = useT();
   const dayNames = weekdayNames(useLocale());
+  const now = useNow(60000);
+  const scrollRef = useRef(null);
+  const headerRef = useRef(null);
+  // Rows grow to fill tall windows; HOUR_PX is the minimum
+  const [hourPx, setHourPx] = useState(HOUR_PX);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const today = todayISO();
   const locationColors = {};
   (config.locations || []).forEach((l, i) => { locationColors[l.id] = LOCATION_COLORS[i % LOCATION_COLORS.length]; });
   const blockedHours = config.blockedHours || [];
+  const defaultDuration = Number(config.defaultConsultationDuration) || 45;
 
   // Convert JS getDay() (0=Sun) to our format (0=Mon)
-  const isBlocked = (jsDay, hour) => {
-    const dow = jsDay === 0 ? 6 : jsDay - 1; // 0=Mon..6=Sun
-    return blockedHours.some(b => b.dayOfWeek === dow && hour >= b.startHour && hour < b.endHour);
+  const blockFor = (jsDay, hour) => {
+    const dow = jsDay === 0 ? 6 : jsDay - 1;
+    return blockedHours.find(b => b.dayOfWeek === dow && hour >= b.startHour && hour < b.endHour);
   };
 
-  const getBlockedLabel = (jsDay, hour) => {
-    const dow = jsDay === 0 ? 6 : jsDay - 1;
-    const match = blockedHours.find(b => b.dayOfWeek === dow && hour >= b.startHour && hour < b.endHour);
-    return match?.label || '';
-  };
+  // Timed items per day, with start/end in minutes and their lanes
+  const itemsByDay = useMemo(() => {
+    const map = {};
+    const push = (fecha, item) => { (map[fecha] ||= []).push(item); };
+    consultations.forEach(c => {
+      const start = toMinutes(c.hora);
+      if (Number.isNaN(start)) return;
+      push(c.fecha, { kind: 'consultation', id: c.id, data: c, start, end: start + (Number(c.duracion) || defaultDuration) });
+    });
+    (personalEvents || []).forEach(e => {
+      const start = toMinutes(e.hora);
+      if (e.allDay || Number.isNaN(start)) return;
+      push(e.fecha, { kind: 'personal', id: e.id, data: e, start, end: start + (Number(e.duracion) || 60) });
+    });
+    Object.keys(map).forEach(k => { map[k] = layoutLanes(map[k]); });
+    return map;
+  }, [consultations, personalEvents, defaultDuration]);
 
   // 8–20 by default, widened so early/late appointments are never hidden.
-  const hours = useMemo(() => {
+  const [firstHour, lastHour] = useMemo(() => {
     let first = DEFAULT_FIRST_HOUR, last = DEFAULT_LAST_HOUR;
-    for (const c of [...consultations, ...(personalEvents || [])]) {
-      const h = c.hora ? parseInt(c.hora.split(':')[0], 10) : NaN;
-      if (Number.isNaN(h) || c.allDay) continue;
-      first = Math.min(first, h);
-      last = Math.max(last, h);
-    }
-    return Array.from({ length: last - first + 1 }, (_, i) => i + first);
-  }, [consultations, personalEvents]);
-
-  const byDayHour = useMemo(() => {
-    const map = {};
-    consultations.forEach(c => {
-      const h = c.hora ? parseInt(c.hora.split(':')[0]) : null;
-      const key = `${c.fecha}_${h}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(c);
+    Object.values(itemsByDay).flat().forEach(it => {
+      first = Math.min(first, Math.floor(it.start / 60));
+      last = Math.max(last, Math.ceil(it.end / 60) - 1);
     });
-    return map;
-  }, [consultations]);
+    return [first, Math.min(last, 23)];
+  }, [itemsByDay]);
+  const hours = Array.from({ length: lastHour - firstHour + 1 }, (_, i) => i + firstHour);
+  const topFor = minutes => ((minutes - firstHour * 60) / 60) * hourPx;
 
-  // Parallel index for personal events — ballet, birthdays, etc.
-  // All-day events skipped here (they'd span the whole column); only time-bound render.
-  const personalByDayHour = useMemo(() => {
-    const map = {};
-    (personalEvents || []).forEach(e => {
-      if (e.allDay) return;
-      const h = e.hora ? parseInt(e.hora.split(':')[0]) : null;
-      if (h === null || Number.isNaN(h)) return;
-      const key = `${e.fecha}_${h}`;
-      if (!map[key]) map[key] = [];
-      map[key].push(e);
-    });
-    return map;
-  }, [personalEvents]);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const fit = () => {
+      const available = el.clientHeight - (headerRef.current?.offsetHeight || 0);
+      setHourPx(Math.max(HOUR_PX, Math.floor(available / hours.length)));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hours.length]);
+
+  const nowDate = new Date(now);
+  const nowMinutes = nowDate.getHours() * 60 + nowDate.getMinutes();
+  const nowVisible = nowMinutes >= firstHour * 60 && nowMinutes < (lastHour + 1) * 60;
+
+  // Open each week around the current time, or its first appointment
+  const weekKey = toISO(weekStart);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const weekDays = days.map(toISO);
+    const firstStart = Math.min(...weekDays.flatMap(d => (itemsByDay[d] || []).map(it => it.start)));
+    const target = weekDays.includes(today) && nowVisible ? nowMinutes - 60 : firstStart - 30;
+    el.scrollTop = Number.isFinite(target) ? Math.max(0, topFor(target)) : 0;
+    // Only when the week changes, not on every data update
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [weekKey]);
+
+  // The lower half of an hour slot proposes hh:30
+  const handleSlotClick = (e, iso, h) => {
+    const half = e.nativeEvent.offsetY >= hourPx / 2 ? '30' : '00';
+    onNewConsultation({ fecha: iso, hora: `${String(h).padStart(2, '0')}:${half}` });
+  };
+
+  const renderConsultation = (it) => {
+    const c = it.data;
+    const client = clients.find(x => x.id === c.clienteId);
+    const locColor = locationColors[c.locationId] || 'border-l-sage-300';
+    const cStyle = calStyle(c, calColorMap);
+    const matchVisual = consultationMatchVisual(c, t);
+    const MatchIcon = matchVisual?.Icon;
+    const name = matchVisual
+      ? c.googleSummary?.replace(/^Consulta\s*-\s*/i, '') || '?'
+      : client?.nombre || c.googleSummary || '?';
+    const tall = ((it.end - it.start) / 60) * hourPx >= 36;
+    return (
+      <div
+        {...clickableProps(e => { e.stopPropagation(); onEditConsultation(c); })}
+        className={`h-full overflow-hidden rounded-[4px] px-1.5 py-0.5 text-[11px] leading-tight border-l-[3px] cursor-pointer shadow-sm hover:brightness-95 ${
+          matchVisual
+            ? matchVisual.cls
+            : cStyle
+              ? 'border'
+              : `${STATUS_BG[c.estado] || STATUS_BG.programada} ${locColor}`
+        }`}
+        style={(!matchVisual && cStyle) || undefined}
+        title={matchVisual ? matchVisual.tooltip : `${c.hora} · ${name}${c.tipo ? ` — ${c.tipo}` : ''} · ${t[`status_${c.estado}`] || c.estado}`}
+      >
+        <p className="truncate">
+          <span className="font-semibold tabular-nums">{c.hora}</span>{' '}
+          {MatchIcon && <MatchIcon size={10} className="inline -mt-0.5 mr-0.5" aria-hidden="true" />}
+          <span className="font-medium">{name}</span>
+          {c.estado === 'completada' && <Check size={10} className="inline -mt-0.5 ml-1" aria-label={t.status_completada} />}
+        </p>
+        {tall && c.tipo && <p className="truncate opacity-80">{c.tipo}</p>}
+      </div>
+    );
+  };
+
+  const renderPersonal = (it) => {
+    const e = it.data;
+    return (
+      <div
+        onClick={ev => ev.stopPropagation()}
+        className="h-full overflow-hidden rounded-[4px] px-1.5 py-0.5 text-[11px] leading-tight border-l-[3px] border-l-sage-400 bg-sage-200/60 text-sage-700 italic cursor-default"
+        title={`[${t.personal_event_prefix}] ${e.title}${e.duracion ? ` — ${e.duracion}min` : ''}`}
+      >
+        <p className="truncate"><span className="font-semibold not-italic tabular-nums">{e.hora}</span> {e.title}</p>
+      </div>
+    );
+  };
 
   return (
-    <div className="overflow-x-auto flex-1 flex flex-col min-h-0">
-      <div className="min-w-[700px] flex flex-col flex-1">
-        {/* Day headers */}
-        <div className="grid grid-cols-[48px_repeat(7,1fr)] border-b border-sage-200 bg-sage-50">
+    <div ref={scrollRef} className="overflow-auto flex-1 min-h-0">
+      <div className="min-w-[700px]">
+        {/* Day headers stay visible while the hours scroll */}
+        <div ref={headerRef} className="sticky top-0 z-20 grid grid-cols-[48px_repeat(7,1fr)] border-b border-sage-200 bg-sage-50">
           <div />
           {days.map(d => {
             const iso = toISO(d);
             const isToday = iso === today;
             return (
-              <div key={iso} className={`py-2 text-center text-xs font-medium border-l border-sage-200 ${isToday ? 'bg-wellness-50' : ''}`}>
-                <p className="text-sage-400">{dayNames[d.getDay() === 0 ? 6 : d.getDay() - 1]}</p>
-                <p className={`text-lg font-bold mt-0.5 ${isToday ? 'text-wellness-500' : 'text-sage-700'}`}>{d.getDate()}</p>
+              <div key={iso} className="py-2 text-center text-xs font-medium border-l border-sage-200">
+                <p className={isToday ? 'text-wellness-500' : 'text-sage-500'}>{dayNames[d.getDay() === 0 ? 6 : d.getDay() - 1]}</p>
+                <p className={`mx-auto mt-0.5 w-8 h-8 flex items-center justify-center rounded-full text-lg font-semibold tabular-nums ${isToday ? 'bg-wellness-400 text-white' : 'text-sage-800'}`}>{d.getDate()}</p>
               </div>
             );
           })}
         </div>
 
-        {/* Time rows */}
-        <div className="relative flex-1 flex flex-col">
-          {hours.map(h => (
-            <div key={h} className="grid grid-cols-[48px_repeat(7,1fr)] border-b border-sage-100 flex-1 min-h-[40px]">
-              <div className="text-right pr-2 pt-1 text-[11px] text-sage-400 shrink-0">{h}:00</div>
-              {days.map(d => {
-                const iso = toISO(d);
-                const isToday = iso === today;
-                const key = `${iso}_${h}`;
-                const slots = byDayHour[key] || [];
-                const blocked = isBlocked(d.getDay(), h);
-                const blockedLabel = blocked ? getBlockedLabel(d.getDay(), h) : '';
-                return (
+        <div className="grid grid-cols-[48px_repeat(7,1fr)]">
+          {/* Hour labels sit on the line that starts each hour */}
+          <div>
+            {hours.map(h => (
+              <div key={h} style={{ height: hourPx }} className="relative">
+                {/* The first label sits inside its row so the sticky header does not hide it */}
+                <span className={`absolute right-2 text-[11px] text-sage-500 tabular-nums ${h > firstHour ? '-top-2' : 'top-0.5'}`}>{h}:00</span>
+              </div>
+            ))}
+          </div>
+
+          {days.map(d => {
+            const iso = toISO(d);
+            const isToday = iso === today;
+            return (
+              <div key={iso} className={`relative border-l border-sage-200 ${isToday ? 'bg-wellness-50/40' : ''}`}>
+                {/* Hour slots: click to create, shaded when blocked */}
+                {hours.map(h => {
+                  const block = blockFor(d.getDay(), h);
+                  return (
+                    <div
+                      key={h}
+                      style={{ height: hourPx }}
+                      className={`border-b border-sage-100 transition-colors ${block ? 'bg-sage-200/60 cursor-default' : 'cursor-pointer hover:bg-sage-100/70'}`}
+                      onClick={block ? undefined : e => handleSlotClick(e, iso, h)}
+                    >
+                      {block?.label && <span className="block px-1 pt-0.5 text-[11px] text-sage-500 italic truncate">{block.label}</span>}
+                    </div>
+                  );
+                })}
+
+                {(itemsByDay[iso] || []).map(it => (
                   <div
-                    key={iso}
-                    className={`border-l border-sage-100 px-0.5 py-0.5 transition-colors ${blocked ? 'bg-sage-200/60 cursor-default' : 'cursor-pointer hover:bg-sage-50'} ${isToday && !blocked ? 'bg-wellness-50/40' : ''}`}
-                    onClick={() => !blocked && onNewConsultation({ fecha: iso, hora: `${String(h).padStart(2, '0')}:00` })}
+                    key={`${it.kind}-${it.id}`}
+                    className="absolute z-10 px-px"
+                    style={{
+                      top: topFor(it.start) + 1,
+                      height: Math.max(((it.end - it.start) / 60) * hourPx - 2, MIN_EVENT_PX),
+                      left: `${(it.lane / it.lanes) * 100}%`,
+                      width: `${100 / it.lanes}%`,
+                    }}
                   >
-                    {blocked && slots.length === 0 && blockedLabel && (
-                      <span className="text-[11px] text-sage-400 italic">{blockedLabel}</span>
-                    )}
-                    {slots.map(c => {
-                      const client = clients.find(x => x.id === c.clienteId);
-                      const locColor = locationColors[c.locationId] || 'border-l-sage-400';
-                      const cStyle = calStyle(c, calColorMap);
-                      const matchVisual = consultationMatchVisual(c, t);
-                      const MatchIcon = matchVisual?.Icon;
-                      return (
-                        <div
-                          key={c.id}
-                          {...clickableProps(e => { e.stopPropagation(); onEditConsultation(c); })}
-                          className={`text-[11px] rounded px-1 py-0.5 mb-0.5 border-l-2 cursor-pointer truncate hover:opacity-80 ${
-                            matchVisual
-                              ? matchVisual.cls
-                              : cStyle
-                                ? 'border'
-                                : `${STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'} ${locColor}`
-                          }`}
-                          style={(!matchVisual && cStyle) || undefined}
-                          title={matchVisual
-                            ? matchVisual.tooltip
-                            : `${client?.nombre || c.googleSummary || '?'} — ${c.tipo || ''}`
-                          }
-                        >
-                          <span className="font-medium">{c.hora}</span>{' '}
-                          {matchVisual
-                            ? <>{MatchIcon && <MatchIcon size={8} className="inline mb-0.5 mr-0.5" />}{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
-                            : (client?.nombre?.split(' ')[0] || c.googleSummary || '?')
-                          }
-                        </div>
-                      );
-                    })}
-                    {(personalByDayHour[key] || []).map(e => (
-                      <div
-                        key={e.id}
-                        onClick={ev => ev.stopPropagation()}
-                        className="text-[11px] rounded px-1 py-0.5 mb-0.5 border-l-2 border-l-sage-500 bg-sage-200/50 text-sage-700 italic truncate cursor-default"
-                        title={`[${t.personal_event_prefix}] ${e.title}${e.duracion ? ` — ${e.duracion}min` : ''}`}
-                      >
-                        <span className="font-medium">{e.hora}</span> {e.title}
-                      </div>
-                    ))}
+                    {it.kind === 'consultation' ? renderConsultation(it) : renderPersonal(it)}
                   </div>
-                );
-              })}
-            </div>
-          ))}
+                ))}
+
+                {isToday && nowVisible && (
+                  <div className="absolute left-0 right-0 z-10 pointer-events-none" style={{ top: topFor(nowMinutes) }} aria-hidden="true">
+                    <div className="relative h-0.5 bg-terra-500">
+                      <span className="absolute -left-1 -top-[3px] w-2 h-2 rounded-full bg-terra-500" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -409,9 +512,9 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
                       {c.locationId && <span className="flex items-center gap-0.5"><MapPin size={9} />{locationName(c.locationId)}</span>}
                     </div>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-badge shrink-0 ${STATUS_BG[c.estado] || 'bg-sage-100 text-sage-500'}`}>
+                  <Badge tone={STATUS_TONE[c.estado] || 'neutral'} className="shrink-0">
                     {t[`status_${c.estado}`] || c.estado}
-                  </span>
+                  </Badge>
                 </div>
               );
             })}

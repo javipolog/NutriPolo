@@ -207,7 +207,7 @@ fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
 - `sage`, `wellness` i `terra` són variables CSS a `styles.css` (clar i fosc); no feu servir colors de Tailwind (`red-*`, `orange-*`…) ni hex als components
 - Contrast WCAG AA: `sage-400`+ com a text; `wellness-400` / `terra-500` porten text blanc
 - Dark mode via `data-theme` a `<html>`; les excepcions (`bg-white`, text semàntic) són a `styles.css`
-- Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Modal` (prop `footer` fora del scroll)
+- Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Combobox` (llistes llargues, p. ex. clients), `Modal` (prop `footer` fora del scroll)
 - Tipografia: títols de vista `font-serif text-title`; xifres amb `tabular-nums`; res per sota d'11 px
 - Fonts empaquetades amb @fontsource (`main.jsx`), sense peticions a Google Fonts
 

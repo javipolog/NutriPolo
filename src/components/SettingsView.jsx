@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useId } from 'react';
 import {
   Upload, Sun, Moon, Monitor,
   Eye, EyeOff, RotateCcw, Send, Loader2, X, Plus, Edit2,
@@ -1700,12 +1700,63 @@ const InvoiceDesignSection = () => {
   );
 };
 
-const Section = ({ title, children, id }) => (
-  <div id={id} className="bg-white border border-sage-200 rounded-soft shadow-card p-5 space-y-4 scroll-mt-4">
-    <h2 className="text-sm font-semibold text-sage-700 border-b border-sage-100 pb-2">{title}</h2>
-    {children}
-  </div>
-);
+const Section = ({ title, children, id }) => {
+  const autoId = useId();
+  return (
+    <section id={id || autoId} data-settings-section aria-label={typeof title === 'string' ? title : undefined} className="bg-white border border-sage-200 rounded-soft shadow-card p-5 space-y-4 scroll-mt-4">
+      <h2 className="text-sm font-semibold text-sage-700 border-b border-sage-100 pb-2">{title}</h2>
+      {children}
+    </section>
+  );
+};
+
+/** Sticky table of contents for the settings page, highlighting the section in view. */
+const SettingsIndex = ({ lang }) => {
+  const t = useT();
+  const [sections, setSections] = useState([]);
+  const [active, setActive] = useState(null);
+
+  useEffect(() => {
+    const els = [...document.querySelectorAll('[data-settings-section]')];
+    setSections(els.map(el => ({ id: el.id, title: el.querySelector('h2')?.textContent || '' })));
+    // The section crossing the top third of the scroll area counts as current.
+    // At the very bottom the last sections can never reach it, so keep the clicked one.
+    const root = document.querySelector('main');
+    const observer = new IntersectionObserver(entries => {
+      if (root && root.scrollTop + root.clientHeight >= root.scrollHeight - 4) return;
+      const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if (visible[0]) setActive(visible[0].target.id);
+    }, { root, rootMargin: '0px 0px -65% 0px' });
+    els.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, [lang]);
+
+  return (
+    <nav aria-label={t.settings_title} className="hidden lg:block sticky top-0 w-52 shrink-0 pt-14">
+      <ul className="space-y-0.5 border-l border-sage-200">
+        {sections.map(sec => (
+          <li key={sec.id}>
+            <button
+              type="button"
+              onClick={() => {
+                setActive(sec.id);
+                document.getElementById(sec.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+              aria-current={active === sec.id ? 'location' : undefined}
+              className={`-ml-px block w-full text-left pl-3 py-1.5 text-sm border-l-2 transition-colors ${
+                active === sec.id
+                  ? 'border-wellness-400 text-sage-900 font-medium'
+                  : 'border-transparent text-sage-500 hover:text-sage-800 hover:border-sage-300'
+              }`}
+            >
+              {sec.title}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+};
 
 export const SettingsView = () => {
   const config = useStore(s => s.config);
@@ -1804,7 +1855,8 @@ export const SettingsView = () => {
   ];
 
   return (
-    <div className="space-y-5 animate-fadeIn max-w-2xl">
+    <div className="flex items-start gap-10 animate-fadeIn">
+    <div className="space-y-5 max-w-2xl flex-1 min-w-0">
       <h1 className="font-serif text-title text-sage-900">{t.settings_title}</h1>
 
       {/* Personal data */}
@@ -2066,6 +2118,8 @@ export const SettingsView = () => {
       </Section>
 
       {ConfirmDialog}
+    </div>
+    <SettingsIndex lang={config.appLang} />
     </div>
   );
 };

@@ -17,7 +17,7 @@ const emptyItem = () => ({
   consultationId: null,
 });
 
-export const InvoiceModal = ({ invoice, onClose }) => {
+export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
   const clients = useStore(s => s.clients);
   const services = useStore(s => s.services);
   const getUnbilledConsultations = useStore(s => s.getUnbilledConsultations);
@@ -50,7 +50,7 @@ export const InvoiceModal = ({ invoice, onClose }) => {
     }
     return {
       numero: generateInvoiceNumber(),
-      clienteId: '',
+      clienteId: defaultClientId || '',
       fecha: todayISO(),
       estado: 'pendiente',
       metodoPago: '',

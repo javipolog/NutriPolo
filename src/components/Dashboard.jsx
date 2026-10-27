@@ -6,11 +6,15 @@ import {
 import {
     Calendar, Users, ClipboardList, Receipt, MapPin,
     AlertTriangle, CheckCircle, CheckCircle2, Clock, ArrowRight,
-    UserPlus, Activity, Bell, TrendingUp
+    UserPlus, Activity, Bell
 } from 'lucide-react';
-import { Card, StatCard, Button, EmptyState, StatusBadge } from './UI';
+import { Card, StatCard, Button, Badge, EmptyState, StatusBadge } from './UI';
 import useStore, { formatCurrency, formatDate, formatDateShort, filterVisibleConsultations } from '../stores/store';
 import { RemindersPanel } from './RemindersPanel';
+import { ConsultationModal } from './ConsultationModal';
+import { ClientModal } from './ClientModal';
+import { InvoiceModal } from './InvoiceModal';
+import { PlanEditorModal } from './NutritionPlanEditor';
 import { useT, useLocale, plural } from '../i18n';
 
 /* ============================================
@@ -19,7 +23,7 @@ import { useT, useLocale, plural } from '../i18n';
 
 const CONSULTATION_STATUS_DOT = {
     programada:  'bg-wellness-400',
-    completada:  'bg-success',
+    completada:  'bg-sage-300',
     cancelada:   'bg-danger',
     no_show:     'bg-sage-400',
 };
@@ -93,16 +97,25 @@ const ChartTooltip = ({ active, payload, label, formatter }) => {
    SECTION: HEADER
    ============================================ */
 
-const DashboardHeader = ({ nombre }) => {
+const DashboardHeader = ({ nombre, onCreate }) => {
     const t = useT();
     const locale = useLocale();
     return (
-        <div>
-            <h1 className="font-serif text-display text-sage-900">{getGreeting(nombre, t)}</h1>
-            <p className="text-sage-500 mt-1 flex items-center gap-2 text-sm">
-                <Activity size={14} className="text-wellness-400 shrink-0" />
-                {getTodayLabel(locale)}
-            </p>
+        <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+                <h1 className="font-serif text-display text-sage-900">{getGreeting(nombre, t)}</h1>
+                <p className="text-sage-500 mt-1 flex items-center gap-2 text-sm">
+                    <Activity size={14} className="text-wellness-400 shrink-0" />
+                    {getTodayLabel(locale)}
+                </p>
+            </div>
+            {/* Quick actions open the creation form directly */}
+            <div className="flex flex-wrap gap-2">
+                <Button size="sm" icon={Calendar} onClick={() => onCreate('consultation')}>{t.new_consultation}</Button>
+                <Button size="sm" variant="secondary" icon={UserPlus} onClick={() => onCreate('client')}>{t.new_client}</Button>
+                <Button size="sm" variant="secondary" icon={ClipboardList} onClick={() => onCreate('plan')}>{t.new_plan}</Button>
+                <Button size="sm" variant="secondary" icon={Receipt} onClick={() => onCreate('invoice')}>{t.new_invoice}</Button>
+            </div>
         </div>
     );
 };
@@ -211,16 +224,15 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                                         )}
                                     </p>
                                 </div>
-                                <span className={`text-xs font-medium px-2 py-0.5 rounded-badge shrink-0 ${
-                                    c.estado === 'completada' ? 'bg-success-light text-success' :
-                                    c.estado === 'cancelada'  ? 'bg-danger-light text-danger' :
-                                    c.estado === 'no_show' ? 'bg-sage-100 text-sage-500' :
-                                    'bg-wellness-50 text-wellness-500'
-                                }`}>
+                                <Badge
+                                    tone={{ completada: 'neutral', cancelada: 'danger', no_show: 'neutral' }[c.estado] || 'primary'}
+                                    icon={c.estado === 'completada' ? CheckCircle : undefined}
+                                    className="shrink-0"
+                                >
                                     {c.estado === 'programada' ? t.status_pending :
                                      c.estado === 'completada' ? t.status_completed :
                                      c.estado === 'cancelada'  ? t.status_cancelled : t.status_no_show}
-                                </span>
+                                </Badge>
                             </div>
                         );
                     })}
@@ -325,36 +337,6 @@ const AlertsPanel = ({ followUps, expiringPlans, unbilledCount, upcomingCount, p
                     })}
                 </div>
             )}
-        </Card>
-    );
-};
-
-/* ============================================
-   SECTION: QUICK ACTIONS
-   ============================================ */
-
-const QuickActions = ({ onNavigate }) => {
-    const t = useT();
-    return (
-        <Card className="p-5">
-            <h2 className="font-serif text-subheading text-sage-900 mb-4 flex items-center gap-2">
-                <TrendingUp size={17} className="text-wellness-400" />
-                {t.dashboard_quick_actions}
-            </h2>
-            <div className="flex flex-wrap gap-3">
-                <Button variant="secondary" size="sm" icon={Calendar} onClick={() => onNavigate('agenda')}>
-                    {t.new_consultation}
-                </Button>
-                <Button variant="secondary" size="sm" icon={UserPlus} onClick={() => onNavigate('clients')}>
-                    {t.new_client}
-                </Button>
-                <Button variant="secondary" size="sm" icon={ClipboardList} onClick={() => onNavigate('plans')}>
-                    {t.new_plan}
-                </Button>
-                <Button variant="secondary" size="sm" icon={Receipt} onClick={() => onNavigate('invoices')}>
-                    {t.new_invoice}
-                </Button>
-            </div>
         </Card>
     );
 };
@@ -480,7 +462,7 @@ const RecentInvoices = ({ invoices, clients, onNavigate }) => {
                                 const client = clientsById.get(inv.clienteId);
                                 return (
                                     <tr key={inv.id} className="hover:bg-sage-50 transition-colors">
-                                        <td className="py-3 px-6 font-mono text-sm text-sage-700">{inv.numero}</td>
+                                        <td className="py-3 px-6 font-mono text-sm text-sage-700 whitespace-nowrap">{inv.numero}</td>
                                         <td className="py-3 px-6 text-sm font-medium text-sage-800">{client?.nombre || '—'}</td>
                                         <td className="py-3 px-6 text-sm text-sage-500">{formatDate(inv.fecha)}</td>
                                         <td className="py-3 px-6 text-right tabular-nums font-bold text-sage-900">{formatCurrency(inv.total)}</td>
@@ -596,6 +578,8 @@ export const Dashboard = () => {
     );
     const setCurrentView = useStore(s => s.setCurrentView);
     const locale = useLocale();
+    const [creating, setCreating] = useState(null); // 'consultation' | 'client' | 'plan' | 'invoice'
+    const closeCreate = () => setCreating(null);
     const getTodayConsultations   = useStore(s => s.getTodayConsultations);
     const getUpcomingConsultations = useStore(s => s.getUpcomingConsultations);
     const getPendingFollowUps     = useStore(s => s.getPendingFollowUps);
@@ -707,7 +691,7 @@ export const Dashboard = () => {
 
     return (
         <div className="space-y-6 animate-fadeIn pb-8">
-            <DashboardHeader nombre={config?.nombre} />
+            <DashboardHeader nombre={config?.nombre} onCreate={setCreating} />
 
             <QuickStatsRow
                 todayConsultations={todayConsultations}
@@ -744,8 +728,6 @@ export const Dashboard = () => {
 
             <RemindersPanel onNavigate={setCurrentView} />
 
-            <QuickActions onNavigate={setCurrentView} />
-
             <ActivityCharts
                 consultationsChart={consultationsChart}
                 clientsChart={clientsChart}
@@ -753,18 +735,26 @@ export const Dashboard = () => {
                 isDark={isDark}
             />
 
-            <RecentInvoices
-                invoices={invoices}
-                clients={clients}
-                onNavigate={setCurrentView}
-            />
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                <div className="xl:col-span-2">
+                    <RecentInvoices
+                        invoices={invoices}
+                        clients={clients}
+                        onNavigate={setCurrentView}
+                    />
+                </div>
+                <RecentActivityFeed
+                    clients={clients}
+                    consultations={consultations}
+                    nutritionPlans={nutritionPlans}
+                    invoices={invoices}
+                />
+            </div>
 
-            <RecentActivityFeed
-                clients={clients}
-                consultations={consultations}
-                nutritionPlans={nutritionPlans}
-                invoices={invoices}
-            />
+            {creating === 'consultation' && <ConsultationModal onClose={closeCreate} />}
+            {creating === 'client' && <ClientModal onClose={closeCreate} />}
+            {creating === 'plan' && <PlanEditorModal onClose={closeCreate} />}
+            {creating === 'invoice' && <InvoiceModal onClose={closeCreate} />}
         </div>
     );
 };

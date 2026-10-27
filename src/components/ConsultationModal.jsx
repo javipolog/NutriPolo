@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Button, Modal, Input, Textarea, SegmentedControl, useToast } from './UI';
+import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast } from './UI';
 import useStore, { todayISO } from '../stores/store';
 import { useT } from '../i18n';
 import { AlertTriangle, CheckCircle2, Mail, MessageCircle } from 'lucide-react';
@@ -19,6 +19,10 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const t = useT();
   const toast = useToast();
   const isEdit = !!consultation;
+  // Phone or email as a hint, to tell apart clients with the same name
+  const clientOptions = useMemo(() => [...clients]
+    .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''))
+    .map(c => ({ value: c.id, label: c.nombre, hint: c.telefono || c.email || '' })), [clients]);
 
   // Reminders act on the saved consultation (live from the store).
   const liveConsultation = useStore(s => consultation ? s.consultations.find(c => c.id === consultation.id) : null);
@@ -186,17 +190,16 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
 
         {/* Client */}
         <div>
-          <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_client} *</label>
-          <select
+          <label htmlFor="consultation-client" className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_client} *</label>
+          <Combobox
+            id="consultation-client"
             value={form.clienteId}
-            onChange={e => set('clienteId', e.target.value)}
-            className={`w-full px-3 py-2 text-sm border rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 ${errors.clienteId ? 'border-danger' : 'border-sage-300'}`}
-          >
-            <option value="">Seleccionar cliente...</option>
-            {[...clients].sort((a, b) => (a.nombre || '').localeCompare(b.nombre || '')).map(c => (
-              <option key={c.id} value={c.id}>{c.nombre}</option>
-            ))}
-          </select>
+            onChange={v => set('clienteId', v)}
+            placeholder={t.search_clients}
+            emptyText={t.no_results}
+            error={errors.clienteId}
+            options={clientOptions}
+          />
           {errors.clienteId && <p className="text-xs text-danger mt-1">{errors.clienteId}</p>}
         </div>
 
