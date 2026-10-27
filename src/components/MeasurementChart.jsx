@@ -5,6 +5,9 @@ import { Button, useToast, useConfirm } from './UI';
 import useStore, { formatDate, formatDateShort, calcIMC, todayISO } from '../stores/store';
 import { useT } from '../i18n';
 
+// Y axis fitted to the data with a little headroom, instead of starting at 0
+const FITTED_DOMAIN = [min => Math.floor(min * 0.97), max => Math.ceil(max * 1.03)];
+
 // Module-level so it keeps its identity across renders (an inline component
 // would remount the <input> on every keystroke and drop the focus).
 const MeasurementField = ({ label, unit, value, onChange }) => (
@@ -117,6 +120,9 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
     imc: m.imc || (m.peso && clientHeight ? calcIMC(m.peso, clientHeight) : null),
   }));
 
+  const secondaryKey = { weight: 'imc', bodyfat: 'musculo' }[chartType];
+  const hasSecondary = !!secondaryKey && chartData.some(d => d[secondaryKey] != null);
+
   const handleDelete = async (id) => {
     const ok = await confirm('¿Eliminar esta medición?');
     if (ok) { deleteMeasurement(id); toast.success('Medición eliminada'); }
@@ -157,23 +163,28 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
                 <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E2E5DC" />
                   <XAxis dataKey="fecha" tick={{ fontSize: 10, fill: '#7A816F' }} />
-                  <YAxis tick={{ fontSize: 10, fill: '#7A816F' }} />
+                  {/* Each series gets its own axis fitted to its range: on a 0-based
+                      axis a 82 → 78 kg change looks like a flat line. */}
+                  <YAxis yAxisId="left" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#7A816F' }} width={36} />
+                  {hasSecondary && (
+                    <YAxis yAxisId="right" orientation="right" domain={FITTED_DOMAIN} tick={{ fontSize: 10, fill: '#7A816F' }} width={36} />
+                  )}
                   <Tooltip contentStyle={{ fontSize: 12, borderColor: '#D4D8CD', borderRadius: 6 }} />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   {chartType === 'weight' && (
                     <>
-                      <Line type="monotone" dataKey="peso" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Peso (kg)" connectNulls />
-                      <Line type="monotone" dataKey="imc" stroke="#E8846A" strokeWidth={2} dot={{ r: 3 }} name="IMC" connectNulls />
+                      <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Peso (kg)" connectNulls />
+                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="imc" stroke="#E8846A" strokeWidth={2} dot={{ r: 3 }} name="IMC" connectNulls />}
                     </>
                   )}
                   {chartType === 'bodyfat' && (
                     <>
-                      <Line type="monotone" dataKey="grasa" stroke="#E8846A" strokeWidth={2} dot={{ r: 3 }} name="Grasa (%)" connectNulls />
-                      <Line type="monotone" dataKey="musculo" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Músculo (kg)" connectNulls />
+                      <Line yAxisId="left" type="monotone" dataKey="grasa" stroke="#E8846A" strokeWidth={2} dot={{ r: 3 }} name="Grasa (%)" connectNulls />
+                      {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="musculo" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Músculo (kg)" connectNulls />}
                     </>
                   )}
                   {chartType === 'circumferences' && (
-                    <Line type="monotone" dataKey="peso" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Peso ref." connectNulls />
+                    <Line yAxisId="left" type="monotone" dataKey="peso" stroke="#4A9960" strokeWidth={2} dot={{ r: 3 }} name="Peso ref." connectNulls />
                   )}
                 </LineChart>
               </ResponsiveContainer>

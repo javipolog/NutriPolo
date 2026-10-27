@@ -69,12 +69,8 @@ export const Toast = ({ message, type = 'info', onClose }) => {
     info:    { bar: 'bg-info',      icon: Info,           text: 'text-info'      },
   };
 
+  // Auto-dismiss is handled by ToastProvider, which honours each toast's duration
   const { bar, icon: Icon, text } = config[type] || config.info;
-
-  useEffect(() => {
-    const timer = setTimeout(() => { if (onClose) onClose(); }, 4000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
 
   return (
     <div role={type === 'error' ? 'alert' : 'status'} className="bg-white border border-sage-300 shadow-toast rounded-soft flex items-stretch min-w-[280px] max-w-md toast-enter overflow-hidden">
@@ -460,7 +456,9 @@ export const clickableProps = (onClick) => ({
 // ============================================
 // MODAL
 // ============================================
-export const Modal = ({ open, onClose, title, children, size = 'md' }) => {
+// `footer` renders below the scrolling body, so the main actions stay visible
+// however long the form is.
+export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
   const t = useT();
   const dialogRef = useRef(null);
   useDialogA11y(open, onClose, dialogRef);
@@ -489,6 +487,9 @@ export const Modal = ({ open, onClose, title, children, size = 'md' }) => {
           </button>
         </div>
         <div className="p-6 overflow-y-auto flex-1">{children}</div>
+        {footer && (
+          <div className="px-6 py-4 bg-sage-50 border-t border-sage-300 shrink-0">{footer}</div>
+        )}
       </div>
     </div>
   );

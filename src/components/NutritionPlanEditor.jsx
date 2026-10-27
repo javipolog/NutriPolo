@@ -218,7 +218,34 @@ const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
   };
 
   return (
-    <Modal open onClose={onClose} title={isEdit ? 'Editar plan nutricional' : 'Nuevo plan nutricional'} size="xl">
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? 'Editar plan nutricional' : 'Nuevo plan nutricional'}
+      size="xl"
+      footer={
+        <div className="flex items-center justify-between">
+          <div className="flex gap-2">
+            {['borrador', 'activo', 'completado'].map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => set('estado', s)}
+                className={`px-3 py-1 text-xs rounded-badge transition-colors ${
+                  form.estado === s ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
+                }`}
+              >
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+            <Button variant="primary" onClick={() => handleSave()}>{t.save}</Button>
+          </div>
+        </div>
+      }
+    >
       <div className="space-y-5 max-h-[72vh] overflow-y-auto pr-1">
 
         {/* Header info */}
@@ -349,28 +376,6 @@ const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
             rows={2}
             placeholder="Solo visible para ti..."
           />
-        </div>
-      </div>
-
-      {/* Footer actions */}
-      <div className="flex items-center justify-between pt-4 border-t border-sage-200 mt-4">
-        <div className="flex gap-2">
-          {['borrador', 'activo', 'completado'].map(s => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => set('estado', s)}
-              className={`px-3 py-1 text-xs rounded-badge transition-colors ${
-                form.estado === s ? 'bg-wellness-400 text-white' : 'bg-sage-100 text-sage-600 hover:bg-sage-200'
-              }`}
-            >
-              {s.charAt(0).toUpperCase() + s.slice(1)}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
-          <Button variant="primary" onClick={() => handleSave()}>{t.save}</Button>
         </div>
       </div>
     </Modal>

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw, Bell, ShieldCheck } from 'lucide-react';
-import { Spinner, ToastProvider, ErrorBoundary, Modal, useToast } from './components/UI';
+import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
 import { LoadErrorScreen } from './components/LoadErrorScreen';
@@ -109,7 +109,8 @@ const UpdateChecker = () => {
   if (!update || dismissed) return null;
 
   return (
-    <div role="status" className="fixed bottom-4 right-4 z-50 max-w-sm animate-in slide-in-from-bottom">
+    // Top-right so it never overlaps the toast stack in the bottom-right corner
+    <div role="status" className="fixed top-4 right-4 z-50 max-w-sm animate-slideIn">
       <div className="bg-white border border-wellness-300 rounded-soft shadow-lg p-4 space-y-3">
         <div className="flex items-start gap-3">
           <Download size={20} className="text-wellness-500 mt-0.5 shrink-0" />
@@ -155,15 +156,12 @@ const UpdateChecker = () => {
   );
 };
 
-// Lazy-loaded views (created in later phases — placeholders until implemented)
-const LazyView = () => {
-  const t = useT();
-  return (
-    <div className="flex items-center justify-center h-64 text-sage-500 text-sm">
-      {t.loading}
-    </div>
-  );
-};
+// Shown while a view's code is still loading
+const LazyView = () => (
+  <div className="flex items-center justify-center h-64">
+    <Spinner />
+  </div>
+);
 
 // ============================================
 // INTEGRITY WARNING BANNER
@@ -214,66 +212,63 @@ const SaveErrorBanner = () => {
 // ============================================
 // DYNAMIC VIEW LOADER
 // ============================================
+const VIEW_IMPORTERS = {
+  dashboard: () => import('./components/Dashboard').then(m => m.Dashboard || m.default),
+  agenda:    () => import('./components/CalendarView').then(m => m.CalendarView || m.default),
+  clients:   () => import('./components/ClientsView').then(m => m.ClientsView || m.default),
+  plans:     () => import('./components/NutritionPlanEditor').then(m => m.NutritionPlanEditor || m.default),
+  invoices:  () => import('./components/Invoices').then(m => m.Invoices || m.default),
+  services:  () => import('./components/ServicesView').then(m => m.ServicesView || m.default),
+  settings:  () => import('./components/SettingsView').then(m => m.SettingsView || m.default),
+  inbox:     () => import('./components/PatientSuggestionsInbox').then(m => m.PatientSuggestionsInbox || m.default),
+};
+
+// Module-level cache: ViewLoader remounts on every view change (ErrorBoundary key),
+// so a loaded view must render synchronously the next time, without a "Loading" flash.
+const viewCache = {};
+const loadView = (view) => viewCache[view]
+  ? Promise.resolve(viewCache[view])
+  : VIEW_IMPORTERS[view]().then(Component => (viewCache[view] = Component));
+
+// Warm the cache in the background so the first visit to each view is instant too.
+const prefetchViews = () => {
+  Object.keys(VIEW_IMPORTERS).forEach(view => loadView(view).catch(() => {}));
+};
+
+const ViewLoadError = () => {
+  const t = useT();
+  return (
+    <div role="alert" className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center max-w-md px-6">
+        <div className="w-16 h-16 bg-warning-light rounded-full flex items-center justify-center mx-auto mb-4">
+          <AlertTriangle size={30} className="text-warning" />
+        </div>
+        <h2 className="font-serif text-xl font-semibold text-sage-900 mb-2">{t.view_load_error_title}</h2>
+        <p className="text-sage-600 text-sm mb-6">{t.view_load_error_desc}</p>
+        <Button icon={RefreshCw} onClick={() => window.location.reload()}>{t.reload_app}</Button>
+      </div>
+    </div>
+  );
+};
+
 function ViewLoader({ view }) {
-  const [components, setComponents] = useState({});
+  const [, setLoaded] = useState(0);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
-    // Import views as they are created
-    const loadView = async (v) => {
-      try {
-        switch (v) {
-          case 'dashboard': {
-            const m = await import('./components/Dashboard');
-            setComponents(c => ({ ...c, dashboard: m.Dashboard || m.default }));
-            break;
-          }
-          case 'agenda': {
-            const m = await import('./components/CalendarView');
-            setComponents(c => ({ ...c, agenda: m.CalendarView || m.default }));
-            break;
-          }
-          case 'clients': {
-            const m = await import('./components/ClientsView');
-            setComponents(c => ({ ...c, clients: m.ClientsView || m.default }));
-            break;
-          }
-          case 'plans': {
-            const m = await import('./components/NutritionPlanEditor');
-            setComponents(c => ({ ...c, plans: m.NutritionPlanEditor || m.default }));
-            break;
-          }
-          case 'invoices': {
-            const m = await import('./components/Invoices');
-            setComponents(c => ({ ...c, invoices: m.Invoices || m.default }));
-            break;
-          }
-          case 'services': {
-            const m = await import('./components/ServicesView');
-            setComponents(c => ({ ...c, services: m.ServicesView || m.default }));
-            break;
-          }
-          case 'settings': {
-            const m = await import('./components/SettingsView');
-            setComponents(c => ({ ...c, settings: m.SettingsView || m.default }));
-            break;
-          }
-          case 'inbox': {
-            const m = await import('./components/PatientSuggestionsInbox');
-            setComponents(c => ({ ...c, inbox: m.PatientSuggestionsInbox || m.default }));
-            break;
-          }
-
-        }
-      } catch {
-        // Component not yet created — show placeholder
-      }
-    };
-    loadView(view);
+    if (viewCache[view] || !VIEW_IMPORTERS[view]) return;
+    let cancelled = false;
+    setFailed(false);
+    loadView(view)
+      .then(() => { if (!cancelled) setLoaded(n => n + 1); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
   }, [view]);
 
-  const Component = components[view];
-  if (!Component) return <LazyView />;
-  return <Component />;
+  const Component = viewCache[view];
+  if (Component) return <Component />;
+  if (failed) return <ViewLoadError />;
+  return <LazyView />;
 }
 
 // ============================================
@@ -312,6 +307,11 @@ function AppContent() {
 
   useBackgroundJobs({ toast });
 
+  useEffect(() => {
+    const timer = setTimeout(prefetchViews, 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Apply theme
   useEffect(() => {
     const root = document.documentElement;
@@ -342,10 +342,13 @@ function AppContent() {
     const font = config.appFont || 'Inter';
     document.documentElement.style.setProperty('--font-ui', `'${font}', system-ui, sans-serif`);
     if (font !== 'Inter') loadGoogleFont(font, `gf-ui-${font.replace(/\s+/g, '-').toLowerCase()}`);
+    // Playfair Display and JetBrains Mono are already loaded by index.html
     const heading = config.appFontHeading || 'Playfair Display';
     document.documentElement.style.setProperty('--font-heading', `'${heading}', Georgia, ui-serif, serif`);
+    if (heading !== 'Playfair Display') loadGoogleFont(heading, `gf-heading-${heading.replace(/\s+/g, '-').toLowerCase()}`);
     const mono = config.appFontMono || 'JetBrains Mono';
     document.documentElement.style.setProperty('--font-mono', `'${mono}', monospace`);
+    if (mono !== 'JetBrains Mono') loadGoogleFont(mono, `gf-mono-${mono.replace(/\s+/g, '-').toLowerCase()}`);
   }, [config.appFont, config.appFontHeading, config.appFontMono]);
 
   // Post-hydration: backup + integrity check
@@ -472,13 +475,14 @@ function AppContent() {
   }
 
   return (
-    <div className="min-h-screen bg-sage-50 flex flex-col">
+    // Fixed-height shell: only <main> scrolls, so the sidebar stays in place.
+    <div className="h-screen overflow-hidden bg-sage-50 flex flex-col">
       <SaveErrorBanner />
       <IntegrityWarningBanner />
 
       <div className="flex flex-1 min-h-0">
         {/* Sidebar */}
-        <aside className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-sage-100 border-r border-sage-300 flex flex-col transition-all duration-200 shrink-0 shadow-sidebar`}>
+        <aside className={`${sidebarCollapsed ? 'w-16' : 'w-64'} bg-sage-100 border-r border-sage-300 flex flex-col overflow-y-auto transition-all duration-200 shrink-0 shadow-sidebar`}>
 
           {/* Logo + toggle */}
           <div className={`border-b border-sage-300 flex items-center ${sidebarCollapsed ? 'justify-center p-3 flex-col gap-2' : 'p-4 justify-between'}`}>
@@ -525,7 +529,7 @@ function AppContent() {
                     <item.icon size={17} className="shrink-0" />
                     {/* Badge dot on collapsed sidebar */}
                     {sidebarCollapsed && item.badge > 0 && (
-                      <span className="absolute top-1 right-1 min-w-[14px] h-3.5 flex items-center justify-center px-1 rounded-full bg-orange-400 text-white text-[9px] font-bold leading-none">
+                      <span className="absolute top-1 right-1 min-w-[14px] h-3.5 flex items-center justify-center px-1 rounded-full bg-terra-500 text-white text-[9px] font-bold leading-none">
                         {item.badge > 99 ? '99+' : item.badge}
                       </span>
                     )}
@@ -537,7 +541,7 @@ function AppContent() {
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
                             currentView === item.id
                               ? 'bg-white/30 text-white'
-                              : 'bg-orange-400 text-white'
+                              : 'bg-terra-500 text-white'
                           }`}>
                             {item.badge > 99 ? '99+' : item.badge}
                           </span>
@@ -589,7 +593,8 @@ function AppContent() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto bg-sage-50">
+        {/* relative: absolutely positioned children (sr-only text, chart tooltips) stay inside the scroll area */}
+        <main className="relative flex-1 p-4 md:p-6 lg:p-8 overflow-auto bg-sage-50">
           <ErrorBoundary key={currentView}>
             <ViewLoader view={currentView} />
           </ErrorBoundary>

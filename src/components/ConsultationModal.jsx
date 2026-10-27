@@ -127,7 +127,26 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   };
 
   return (
-    <Modal open onClose={onClose} title={isEdit ? 'Editar consulta' : t.new_consultation} size="lg">
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? 'Editar consulta' : t.new_consultation}
+      size="lg"
+      footer={
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {reminderClient && (
+            <div className="flex flex-wrap items-center gap-1 mr-auto">
+              <span className="text-xs text-sage-500 mr-1">{t.reminders_panel_title}:</span>
+              <Button variant="ghost" size="sm" icon={Mail} onClick={() => setShowReminderEmail(true)}>Email</Button>
+              <Button variant="ghost" size="sm" icon={MessageCircle} onClick={() => sendWhatsApp(liveConsultation, reminderClient)}>WhatsApp</Button>
+              {reminderInfo && <span className="text-[11px] text-sage-400">{t.reminders_last_sent} {reminderInfo}</span>}
+            </div>
+          )}
+          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+          <Button variant="primary" onClick={handleSave}>{t.save}</Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         {/* Readonly warning */}
         {isReadonly && (
@@ -313,19 +332,6 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           }
         </p>
       )}
-
-      <div className="flex flex-wrap items-center justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
-        {reminderClient && (
-          <div className="flex flex-wrap items-center gap-1 mr-auto">
-            <span className="text-xs text-sage-500 mr-1">{t.reminders_panel_title}:</span>
-            <Button variant="ghost" size="sm" icon={Mail} onClick={() => setShowReminderEmail(true)}>Email</Button>
-            <Button variant="ghost" size="sm" icon={MessageCircle} onClick={() => sendWhatsApp(liveConsultation, reminderClient)}>WhatsApp</Button>
-            {reminderInfo && <span className="text-[11px] text-sage-400">{t.reminders_last_sent} {reminderInfo}</span>}
-          </div>
-        )}
-        <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
-        <Button variant="primary" onClick={handleSave}>{t.save}</Button>
-      </div>
 
       {showReminderEmail && reminderClient && (
         <SendEmailModal

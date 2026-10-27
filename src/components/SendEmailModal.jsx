@@ -159,7 +159,25 @@ export const SendEmailModal = ({
   };
 
   return (
-    <Modal open onClose={onClose} title="Enviar email" size="lg">
+    <Modal
+      open
+      onClose={onClose}
+      title="Enviar email"
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+          <Button
+            variant="primary"
+            icon={sending ? Loader2 : Send}
+            onClick={handleSend}
+            disabled={sending || (!resolvedClient?.email)}
+          >
+            {sending ? 'Enviando...' : useSmtp ? 'Enviar' : 'Abrir cliente de correo'}
+          </Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         {/* Mode selector */}
         <div className="flex gap-1 bg-sage-100 p-1 rounded-button">
@@ -279,18 +297,6 @@ export const SendEmailModal = ({
             PDF adjunto listo para enviar {docRecord?.fileName ? `(${docRecord.fileName})` : ''}
           </p>
         )}
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
-        <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
-        <Button
-          variant="primary"
-          icon={sending ? Loader2 : Send}
-          onClick={handleSend}
-          disabled={sending || (!resolvedClient?.email)}
-        >
-          {sending ? 'Enviando...' : useSmtp ? 'Enviar' : 'Abrir cliente de correo'}
-        </Button>
       </div>
     </Modal>
   );

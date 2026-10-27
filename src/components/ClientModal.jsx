@@ -136,6 +136,12 @@ export const ClientModal = ({ client, onClose }) => {
       onClose={onClose}
       title={isEdit ? `Editar — ${client.nombre}` : t.new_client}
       size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+          <Button variant="primary" onClick={handleSave}>{t.save}</Button>
+        </div>
+      }
     >
       {/* Section tabs */}
       <div className="flex gap-1 mb-5 border-b border-sage-200 pb-0">
@@ -319,11 +325,6 @@ export const ClientModal = ({ client, onClose }) => {
           />
         </div>
       )}
-
-      <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-5">
-        <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
-        <Button variant="primary" onClick={handleSave}>{t.save}</Button>
-      </div>
     </Modal>
   );
 };

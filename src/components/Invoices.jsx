@@ -1,19 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { Plus, Trash2, Edit2, Receipt, Search, FileDown } from 'lucide-react';
-import { Button, EmptyState, useToast, useConfirm } from './UI';
+import { Button, EmptyState, StatusBadge, useToast, useConfirm } from './UI';
 import useStore, { formatCurrency, formatDate } from '../stores/store';
-import { useT } from '../i18n';
+import { useT, plural } from '../i18n';
 import { InvoiceModal } from './InvoiceModal';
 import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
 import { save } from '@tauri-apps/api/dialog';
 import { writeBinaryFile } from '@tauri-apps/api/fs';
 import { invoke } from '@tauri-apps/api/tauri';
-
-const STATUS_COLORS = {
-  pendiente: 'bg-warning-light text-warning',
-  pagada:    'bg-success-light text-success',
-  anulada:   'bg-danger-light text-danger',
-};
 
 export const Invoices = () => {
   const invoices = useStore(s => s.invoices);
@@ -124,7 +118,7 @@ export const Invoices = () => {
           onChange={e => setFilterYear(e.target.value)}
           className="px-3 py-1.5 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
         >
-          <option value="all">Todos los años</option>
+          <option value="all">{t.invoices_all_years}</option>
           {years.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
         <select
@@ -132,14 +126,14 @@ export const Invoices = () => {
           onChange={e => setFilterEstado(e.target.value)}
           className="px-3 py-1.5 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
         >
-          <option value="all">Todos los estados</option>
-          <option value="pendiente">Pendiente</option>
-          <option value="pagada">Pagada</option>
-          <option value="anulada">Anulada</option>
+          <option value="all">{t.invoices_all_statuses}</option>
+          <option value="pendiente">{t.invoice_status_pending}</option>
+          <option value="pagada">{t.invoice_status_paid}</option>
+          <option value="anulada">{t.invoice_status_cancelled}</option>
         </select>
       </div>
 
-      <p className="text-xs text-sage-500">{filtered.length} factura{filtered.length !== 1 ? 's' : ''}</p>
+      <p className="text-xs text-sage-500">{plural(t, 'invoices_count', filtered.length)}</p>
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -152,12 +146,12 @@ export const Invoices = () => {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-sage-200 bg-sage-50">
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Número</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Cliente</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Fecha</th>
-                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">Concepto</th>
-                <th className="text-right px-4 py-2.5 text-xs font-medium text-sage-500">Importe</th>
-                <th className="text-center px-4 py-2.5 text-xs font-medium text-sage-500">Estado</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_number}</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_client}</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_date}</th>
+                <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_concept}</th>
+                <th className="text-right px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_amount}</th>
+                <th className="text-center px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_status}</th>
                 <th className="px-4 py-2.5"></th>
               </tr>
             </thead>
@@ -181,9 +175,8 @@ export const Invoices = () => {
                     </td>
                     <td className="px-4 py-3 text-right font-mono font-semibold text-sage-800">{formatCurrency(inv.total || inv.importe)}</td>
                     <td className="px-4 py-3 text-center">
-                      <span className={`text-xs px-2 py-0.5 rounded-badge font-medium ${STATUS_COLORS[inv.estado] || 'bg-sage-100 text-sage-500'}`}>
-                        {inv.estado}
-                      </span>
+                      {/* StatusBadge calls a pending invoice "emitida" */}
+                      <StatusBadge status={inv.estado === 'pendiente' ? 'emitida' : inv.estado} />
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">

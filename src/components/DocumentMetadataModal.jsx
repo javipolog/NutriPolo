@@ -56,7 +56,18 @@ export const DocumentMetadataModal = ({ open, onClose, onSave, document, fileNam
   }));
 
   return (
-    <Modal open={open} onClose={onClose} title={document ? t.doc_edit : t.doc_upload} size="md">
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={document ? t.doc_edit : t.doc_upload}
+      size="md"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+          <Button onClick={handleSave}>{t.save}</Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         <Input
           label={t.doc_name}
@@ -82,10 +93,6 @@ export const DocumentMetadataModal = ({ open, onClose, onSave, document, fileNam
           onChange={e => setForm(f => ({ ...f, notas: e.target.value }))}
           rows={3}
         />
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="secondary" onClick={onClose}>{t.cancel}</Button>
-          <Button onClick={handleSave}>{t.save}</Button>
-        </div>
       </div>
     </Modal>
   );

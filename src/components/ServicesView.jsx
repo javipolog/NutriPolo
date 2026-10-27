@@ -30,7 +30,17 @@ const ServiceModal = ({ service, onClose }) => {
   };
 
   return (
-    <Modal open onClose={onClose} title={isEdit ? 'Editar servicio' : 'Nuevo servicio'}>
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? 'Editar servicio' : 'Nuevo servicio'}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+          <Button variant="primary" onClick={handleSave}>{t.save}</Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
         <div>
           <label className="block text-xs font-medium text-sage-600 mb-1">{t.service_name} *</label>
@@ -54,10 +64,6 @@ const ServiceModal = ({ service, onClose }) => {
             <Input value={form.duracion} onChange={e => set('duracion', e.target.value)} type="number" />
           </div>
         </div>
-      </div>
-      <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
-        <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
-        <Button variant="primary" onClick={handleSave}>{t.save}</Button>
       </div>
     </Modal>
   );

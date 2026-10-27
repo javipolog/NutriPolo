@@ -217,7 +217,18 @@ export const InvoiceModal = ({ invoice, onClose }) => {
   const activeServices = services.filter(s => s.activo);
 
   return (
-    <Modal open onClose={onClose} title={isEdit ? 'Editar factura' : t.new_invoice} size="lg">
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? 'Editar factura' : t.new_invoice}
+      size="lg"
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
+          <Button variant="primary" onClick={handleSave} disabled={saving}>{t.save}</Button>
+        </div>
+      }
+    >
       <div className="space-y-4">
 
         {/* Invoice number + Client + Date + Payment + Location */}
@@ -523,11 +534,6 @@ export const InvoiceModal = ({ invoice, onClose }) => {
             placeholder="Observaciones..."
           />
         </div>
-      </div>
-
-      <div className="flex justify-end gap-2 pt-4 border-t border-sage-200 mt-4">
-        <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
-        <Button variant="primary" onClick={handleSave} disabled={saving}>{t.save}</Button>
       </div>
     </Modal>
   );

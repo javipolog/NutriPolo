@@ -19,28 +19,31 @@
   --accent-light: #FDF4EF;
   --font-ui: 'Inter', system-ui, sans-serif;
   color-scheme: light;
-  /* sage / wellness palettes as RGB channels (see tailwind.config.js) */
+  /* sage / wellness palettes as RGB channels (see tailwind.config.js).
+     sage-400 and up pass WCAG AA (4.5:1) as text on white; wellness-400 is the
+     primary colour and carries white text at 6:1. */
   --sage-50: 248 250 248;
   --sage-100: 241 244 241;
   --sage-200: 226 231 226;
   --sage-300: 201 209 201;
-  --sage-400: 163 174 163;
-  --sage-500: 128 140 128;
-  --sage-600: 99 110 99;
-  --sage-700: 74 83 74;
+  --sage-400: 108 118 108;
+  --sage-500: 92 102 92;
+  --sage-600: 80 89 80;
+  --sage-700: 66 74 66;
   --sage-800: 53 59 53;
   --sage-900: 36 41 36;
   --sage-950: 24 28 24;
-  --wellness-50: 240 253 244;
-  --wellness-100: 220 252 231;
-  --wellness-200: 187 247 208;
-  --wellness-300: 134 239 172;
-  --wellness-400: 74 222 128;
-  --wellness-500: 34 197 94;
-  --wellness-600: 22 163 74;
-  --wellness-700: 21 128 61;
-  --wellness-800: 22 101 52;
-  --wellness-900: 20 83 45;
+  --wellness-50: 241 246 242;
+  --wellness-100: 226 237 229;
+  --wellness-200: 199 218 205;
+  --wellness-300: 158 190 169;
+  --wellness-400: 62 107 82;
+  --wellness-500: 47 87 66;
+  --wellness-600: 40 75 57;
+  --wellness-700: 33 63 47;
+  --wellness-800: 27 52 39;
+  --wellness-900: 21 41 31;
+  --focus-ring: 62 107 82;
 }
 
 [data-theme="dark"] {
@@ -60,23 +63,26 @@
   --sage-100: 30 34 30;
   --sage-200: 42 48 42;
   --sage-300: 56 64 56;
-  --sage-400: 90 101 90;
-  --sage-500: 128 140 128;
-  --sage-600: 163 174 163;
+  --sage-400: 128 139 128;
+  --sage-500: 150 160 150;
+  --sage-600: 172 182 172;
   --sage-700: 195 204 195;
   --sage-800: 220 227 220;
   --sage-900: 238 242 238;
   --sage-950: 248 250 248;
-  --wellness-50: 19 42 28;
-  --wellness-100: 23 53 35;
-  --wellness-200: 31 74 46;
-  --wellness-300: 46 107 67;
-  --wellness-400: 74 222 128;
-  --wellness-500: 34 197 94;
-  --wellness-600: 74 222 128;
-  --wellness-700: 134 239 172;
-  --wellness-800: 187 247 208;
-  --wellness-900: 220 252 231;
+  /* 400/500 stay dark enough to carry white text (buttons, active nav);
+     as text colours they are lightened by the overrides below. */
+  --wellness-50: 24 36 29;
+  --wellness-100: 29 45 36;
+  --wellness-200: 38 62 48;
+  --wellness-300: 52 86 66;
+  --wellness-400: 62 120 88;
+  --wellness-500: 52 104 76;
+  --wellness-600: 140 205 165;
+  --wellness-700: 170 222 190;
+  --wellness-800: 198 235 211;
+  --wellness-900: 226 245 232;
+  --focus-ring: 140 205 165;
 }
 
 * {
@@ -116,6 +122,14 @@ body,
 [data-theme="dark"] .text-success-dark { color: #7FD3A0; }
 [data-theme="dark"] .text-danger-dark  { color: #F08A8A; }
 [data-theme="dark"] .text-info-dark    { color: #8DB8E8; }
+[data-theme="dark"] .text-warning { color: #E9C46A; }
+[data-theme="dark"] .text-success { color: #7FD3A0; }
+[data-theme="dark"] .text-danger  { color: #F08A8A; }
+[data-theme="dark"] .text-info    { color: #8DB8E8; }
+
+/* Primary green as text/icon colour on dark surfaces */
+[data-theme="dark"] .text-wellness-400,
+[data-theme="dark"] .text-wellness-500 { color: rgb(140 205 165); }
 
 /* Terra (accent) en dark mode — lleugerament més clar */
 [data-theme="dark"] .bg-terra-50   { background-color: #352520; }
@@ -159,10 +173,26 @@ body,
 /* Sidebar i panels */
 [data-theme="dark"] .shadow-sidebar { box-shadow: 1px 0 0 0 #3D3C36; }
 
-/* .font-sans respecta --font-ui (configurable per l'usuari a Settings).
-   .font-serif i .font-mono mantenen les famílies definides a tailwind.config.js */
+/* Les tres famílies són configurables a Settings (--font-ui, --font-heading,
+   --font-mono, definides a App.jsx); els valors per defecte coincideixen amb
+   tailwind.config.js */
 .font-sans {
   font-family: var(--font-ui, 'Inter', system-ui, sans-serif);
+}
+.font-serif {
+  font-family: var(--font-heading, 'Playfair Display', Georgia, ui-serif, serif);
+}
+.font-mono {
+  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+}
+
+/* ============================================
+   FOCUS — visible only for keyboard navigation.
+   Inputs keep their own focus:ring (focus:outline-none wins on specificity).
+   ============================================ */
+:focus-visible {
+  outline: 2px solid rgb(var(--focus-ring));
+  outline-offset: 2px;
 }
 
 /* ============================================
@@ -230,7 +260,12 @@ select {
   background-repeat: no-repeat;
   background-position: right 0.75rem center;
   background-size: 1rem;
-  padding-right: 2.5rem;
+}
+
+/* Room for the arrow. The :not() raises specificity above px-* utilities,
+   which otherwise put the arrow on top of the selected text. */
+select:not([multiple]) {
+  padding-right: 2.25rem;
 }
 
 [data-theme="dark"] select {

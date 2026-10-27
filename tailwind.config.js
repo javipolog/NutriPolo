@@ -46,10 +46,11 @@ export default {
           light:   '#E8F5EC',
           dark:    '#1A5C38',
         },
+        // DEFAULT tones pass WCAG AA as text on their own -light tint
         warning: {
-          DEFAULT: '#B8860B',
+          DEFAULT: '#8F6A0A',
           light:   '#FFF8E1',
-          dark:    '#8B6508',
+          dark:    '#6E5206',
         },
         danger: {
           DEFAULT: '#C13B3B',
@@ -57,9 +58,9 @@ export default {
           dark:    '#9A2F2F',
         },
         info: {
-          DEFAULT: '#4A7FB5',
+          DEFAULT: '#3A6591',
           light:   '#EBF3FA',
-          dark:    '#3A6591',
+          dark:    '#2C4F73',
         },
         // Theme-aware: channels defined in styles.css (light + dark)
         wellness: {
