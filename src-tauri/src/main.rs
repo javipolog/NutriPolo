@@ -7,6 +7,8 @@ mod google_calendar;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem, WindowEvent};
 use base64::Engine as _;
 use lettre::{
     message::{header::ContentType, Attachment, Mailbox, MultiPart, SinglePart},
@@ -961,10 +963,112 @@ fn save_bytes_to_documents(
     Ok(dest_path.to_string_lossy().to_string())
 }
 
+// ============================================
+// BACKGROUND MODE (tray + autostart)
+// ============================================
+
+/// Argument of the Windows autostart entry: start hidden in the tray.
+const HIDDEN_ARG: &str = "--hidden";
+
+/// Closing the window hides it to the tray instead of quitting (Settings → Recordatorios).
+static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(true);
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
+/// Ask the frontend to flush pending writes and call `quit_app`; exit anyway
+/// if it does not answer in time.
+fn request_quit(app: &tauri::AppHandle) {
+    let _ = app.emit_all("tray-quit", ());
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        handle.exit(0);
+    });
+}
+
+fn auto_launch() -> Result<auto_launch::AutoLaunch, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    auto_launch::AutoLaunchBuilder::new()
+        .set_app_name("NutriPolo")
+        .set_app_path(&exe.to_string_lossy())
+        .set_args(&[HIDDEN_ARG])
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn autostart_is_enabled() -> Result<bool, String> {
+    auto_launch()?.is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn autostart_set(enabled: bool) -> Result<(), String> {
+    let launcher = auto_launch()?;
+    if enabled { launcher.enable() } else { launcher.disable() }.map_err(|e| e.to_string())
+}
+
+/// Close-to-tray preference and the tray menu labels in the app language.
+#[tauri::command]
+fn configure_tray(app_handle: tauri::AppHandle, close_to_tray: bool, show_label: String, quit_label: String) -> Result<(), String> {
+    CLOSE_TO_TRAY.store(close_to_tray, Ordering::Relaxed);
+    let tray = app_handle.tray_handle();
+    tray.get_item("show").set_title(show_label).map_err(|e| e.to_string())?;
+    tray.get_item("quit").set_title(quit_label).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn quit_app(app_handle: tauri::AppHandle) {
+    app_handle.exit(0);
+}
+
 fn main() {
+    let tray_menu = SystemTrayMenu::new()
+        .add_item(CustomMenuItem::new("show", "Abrir NutriPolo"))
+        .add_native_item(SystemTrayMenuItem::Separator)
+        .add_item(CustomMenuItem::new("quit", "Salir"));
+
     tauri::Builder::default()
+        // A second launch (desktop shortcut while running in the tray) focuses
+        // the existing window, so two instances never send the same reminders.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            if !argv.iter().any(|a| a == HIDDEN_ARG) {
+                show_main_window(app);
+            }
+        }))
+        .system_tray(SystemTray::new().with_tooltip("NutriPolo").with_menu(tray_menu))
+        .on_system_tray_event(|app, event| match event {
+            SystemTrayEvent::LeftClick { .. } | SystemTrayEvent::DoubleClick { .. } => show_main_window(app),
+            SystemTrayEvent::MenuItemClick { id, .. } => match id.as_str() {
+                "show" => show_main_window(app),
+                "quit" => request_quit(app),
+                _ => {}
+            },
+            _ => {}
+        })
+        .on_window_event(|event| {
+            if let WindowEvent::CloseRequested { api, .. } = event.event() {
+                if CLOSE_TO_TRAY.load(Ordering::Relaxed) {
+                    let _ = event.window().hide();
+                    api.prevent_close();
+                }
+            }
+        })
         .setup(|app| {
             clear_viewer_temp_dir(&app.handle());
+            // The window starts hidden (tauri.conf.json). An autostart stays in
+            // the tray, unless the data is encrypted: then nothing can run until
+            // the user unlocks, so show the unlock screen.
+            let hidden = std::env::args().any(|a| a == HIDDEN_ARG);
+            if !hidden || encryption_is_enabled_internal(&app.handle()) {
+                show_main_window(&app.handle());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1002,7 +1106,11 @@ fn main() {
             read_file_as_base64,
             delete_document_file,
             delete_documents_directory,
-            save_bytes_to_documents
+            save_bytes_to_documents,
+            autostart_is_enabled,
+            autostart_set,
+            configure_tray,
+            quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

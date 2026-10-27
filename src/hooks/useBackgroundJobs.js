@@ -47,6 +47,10 @@ async function runEmailReminders() {
  *
  *  - Google Calendar auto-sync (when connected + autoSync), every 5 min.
  *  - Automatic email reminders, every 5 min (after the sync, when enabled).
+ *
+ * The app keeps running in the tray with the window closed, so this also
+ * runs in the background. Ticks are skipped while offline (e.g. right after
+ * waking from sleep) and a run starts as soon as the network is back.
  */
 export function useBackgroundJobs({ toast }) {
   const connected = useStore(s => s.config.googleCalendar?.connected);
@@ -59,7 +63,13 @@ export function useBackgroundJobs({ toast }) {
 
   useEffect(() => {
     let cancelled = false;
+    let running = false;
     const run = async () => {
+      if (running || !navigator.onLine) return;
+      running = true;
+      try { await tick(); } finally { running = false; }
+    };
+    const tick = async () => {
       if (connected && autoSync) {
         try {
           const stats = await googleCalendar.syncAll(useStore.getState());
@@ -83,6 +93,7 @@ export function useBackgroundJobs({ toast }) {
     };
     run();
     const interval = setInterval(run, TICK_MS);
-    return () => { cancelled = true; clearInterval(interval); };
+    window.addEventListener('online', run);
+    return () => { cancelled = true; clearInterval(interval); window.removeEventListener('online', run); };
   }, [connected, autoSync]);
 }

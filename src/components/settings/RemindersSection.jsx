@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import { Mail, MessageCircle, RotateCcw, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { invoke } from '@tauri-apps/api/tauri';
+import { Mail, MessageCircle, RotateCcw, AlertTriangle, MonitorSmartphone } from 'lucide-react';
 import { Input, Textarea, Button, SegmentedControl } from '../UI';
 import useStore from '../../stores/store';
 import { useT } from '../../i18n';
@@ -49,6 +50,64 @@ const NumberField = ({ label, value, onChange, min = 0, max = 168, suffix }) => 
     </span>
   </label>
 );
+
+/**
+ * Start with Windows (hidden in the tray) and keep running when the window is
+ * closed, so automatic reminders go out without the window open. The
+ * autostart entry lives in the Windows registry, not in the store.
+ */
+const BackgroundSection = () => {
+  const closeToTray = useStore(s => s.config.closeToTray !== false);
+  const autoLockMinutes = useStore(s => Number(s.config.autoLockMinutes) || 0);
+  const updateConfig = useStore(s => s.updateConfig);
+  const t = useT();
+  const [autostart, setAutostart] = useState(false);
+  const [encrypted, setEncrypted] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    invoke('autostart_is_enabled').then(setAutostart).catch(() => {});
+    invoke('encryption_is_enabled').then(setEncrypted).catch(() => {});
+  }, []);
+
+  const toggleAutostart = async (enabled) => {
+    setError('');
+    try {
+      await invoke('autostart_set', { enabled });
+      setAutostart(enabled);
+    } catch (e) {
+      setError(t.background_autostart_error.replace('{error}', String(e)));
+    }
+  };
+
+  return (
+    <div className="space-y-3 p-4 border border-sage-200 rounded-soft">
+      <p className="text-sm font-medium text-sage-800 flex items-center gap-2"><MonitorSmartphone size={14} /> {t.background_title}</p>
+      <Toggle
+        checked={autostart}
+        onChange={toggleAutostart}
+        label={t.background_autostart}
+        hint={t.background_autostart_hint}
+      />
+      <Toggle
+        checked={closeToTray}
+        onChange={v => updateConfig({ closeToTray: v })}
+        label={t.background_close_to_tray}
+        hint={t.background_close_to_tray_hint}
+      />
+      {error && <p className="text-xs text-danger">{error}</p>}
+      <p className="text-xs text-sage-400">{t.background_sleep_hint}</p>
+      {encrypted && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-warning-light border border-warning/30 rounded-button">
+          <AlertTriangle size={14} className="text-warning shrink-0 mt-0.5" />
+          <p className="text-xs text-warning-dark">
+            {autoLockMinutes > 0 ? t.background_encrypted_autolock : t.background_encrypted}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+};
 
 /**
  * Settings → Recordatorios. Channel switches, timing, quiet hours and the
@@ -207,6 +266,8 @@ export const RemindersSection = ({ onGoToSmtp }) => {
           </div>
         )}
       </div>
+
+      <BackgroundSection />
 
       {/* Templates */}
       <div className="space-y-3">

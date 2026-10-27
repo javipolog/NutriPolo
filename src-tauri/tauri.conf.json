@@ -93,6 +93,10 @@
     "security": {
       "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://oauth2.googleapis.com https://www.googleapis.com https://accounts.google.com https://github.com https://*.github.com https://objects.githubusercontent.com"
     },
+    "systemTray": {
+      "iconPath": "icons/icon.ico",
+      "iconAsTemplate": false
+    },
     "updater": {
       "active": true,
       "dialog": false,
@@ -110,7 +114,8 @@
         "width": 1280,
         "minWidth": 1024,
         "minHeight": 700,
-        "center": true
+        "center": true,
+        "visible": false
       }
     ]
   }

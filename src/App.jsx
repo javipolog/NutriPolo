@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
+import { listen } from '@tauri-apps/api/event';
 import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw, Bell, ShieldCheck } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
@@ -294,6 +295,13 @@ function AppContent() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
 
   useBackgroundJobs({ toast });
+
+  // Tray: close-to-tray preference and menu labels in the app language.
+  useEffect(() => {
+    invoke('configure_tray', {
+      closeToTray: config.closeToTray !== false, showLabel: t.tray_show, quitLabel: t.tray_quit,
+    }).catch(() => {});
+  }, [config.closeToTray, t]);
 
   useEffect(() => {
     const timer = setTimeout(prefetchViews, 1500);
@@ -687,6 +695,15 @@ function EncryptionGate() {
 }
 
 export default function App() {
+  // "Quit" in the tray menu: write pending changes before the process exits.
+  useEffect(() => {
+    let unlisten;
+    listen('tray-quit', async () => {
+      try { await flushAllPending(); } finally { invoke('quit_app').catch(() => {}); }
+    }).then(u => { unlisten = u; }).catch(() => {});
+    return () => unlisten?.();
+  }, []);
+
   return (
     <ToastProvider>
       <EncryptionGate />

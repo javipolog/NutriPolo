@@ -176,6 +176,11 @@ fn gcal_list_events(token, calendar_id, time_min, time_max) -> Result<String, St
 fn gcal_create_event(token, calendar_id, event_json) -> Result<String, String>
 fn gcal_update_event(token, calendar_id, event_id, event_json) -> Result<String, String>
 fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
+
+// Segon pla (safata del sistema + inici amb Windows)
+fn autostart_is_enabled() / autostart_set(enabled)   // clau Run del registre, arrenca amb --hidden
+fn configure_tray(close_to_tray, show_label, quit_label)
+fn quit_app()                                         // el JS el crida despres de flushAllPending (event `tray-quit`)
 ```
 
 ---
@@ -200,7 +205,8 @@ fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
 - Configuracio a `config.reminders` (valors per defecte a `DEFAULT_REMINDER_CONFIG`)
 - Estat per consulta a `consultation.reminders.{email|whatsapp}` = `{ status, at, slot, attempts?, error? }`; `slot` = `fecha + 'T' + hora` (reprogramar torna a activar el recordatori)
 - Preferencies del client: `client.recordatorios.{email|whatsapp}` (opt-out) i `client.idioma`
-- Email automatic per SMTP des de `useBackgroundJobs` (cada 5 min, nomes amb l'app oberta); WhatsApp semiautomatic via wa.me
+- Email automatic per SMTP des de `useBackgroundJobs` (cada 5 min, nomes amb l'app en marxa); WhatsApp semiautomatic via wa.me
+- Segon pla: en tancar la finestra l'app queda a la safata (`config.closeToTray`) i pot arrencar amb Windows amagada (`--hidden`); instancia unica (tauri-plugin-single-instance). Amb xifratge cal desbloquejar abans que s'envii res
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)

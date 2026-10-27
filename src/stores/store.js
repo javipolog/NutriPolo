@@ -836,6 +836,7 @@ const useStore = create(
         blockedHours: [],
         // Each entry: { id, dayOfWeek: 0-6 (0=Lun), startHour: 8-20, endHour: 8-20, label?: string }
         autoLockMinutes: 0, // 0 = disabled; otherwise lock the vault after N min of inactivity
+        closeToTray: true,  // closing the window keeps the app running in the tray
       },
       updateConfig: (updates) => set(s => ({ config: { ...s.config, ...updates } })),
 
