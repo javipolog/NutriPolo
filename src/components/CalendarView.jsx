@@ -725,7 +725,7 @@ export const CalendarView = () => {
             </button>
             <button
               onClick={() => acceptMassDelete(cal.id)}
-              className="px-2.5 py-1 text-xs font-medium bg-red-500 text-white rounded-button hover:bg-red-600 transition-colors"
+              className="px-2.5 py-1 text-xs font-medium bg-danger text-white rounded-button hover:bg-danger-dark transition-colors"
             >
               {t.mass_delete_accept}
             </button>
@@ -762,14 +762,14 @@ export const CalendarView = () => {
       )}
       {pendingReviewCount > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 bg-orange-50 border border-orange-200 rounded-soft text-sm">
-          <AlertCircle size={16} className="text-orange-500 shrink-0" />
+          <AlertCircle size={16} className="text-terra-500 shrink-0" />
           <span className="flex-1 text-orange-800">
             <strong>{pendingReviewCount}</strong>{' '}
             {plural(t, 'calendar_banner_review', pendingReviewCount)}
           </span>
           <button
             onClick={() => setCurrentView('inbox')}
-            className="px-3 py-1 text-xs font-medium bg-orange-400 text-white rounded-button hover:bg-orange-500 transition-colors whitespace-nowrap"
+            className="px-3 py-1 text-xs font-medium bg-terra-500 text-white rounded-button hover:bg-terra-600 transition-colors whitespace-nowrap"
           >
             {t.new_patients_review} →
           </button>

@@ -864,7 +864,7 @@ const GoogleCalendarSection = () => {
                           </button>
                           <button
                             onClick={() => { acceptMassDelete(stored.id); toast.success(t.gcal_deletes_accepted); }}
-                            className="px-2 py-1 text-[11px] font-medium bg-red-500 text-white rounded-button hover:bg-red-600 transition-colors"
+                            className="px-2 py-1 text-[11px] font-medium bg-danger text-white rounded-button hover:bg-danger-dark transition-colors"
                           >
                             {t.mass_delete_accept}
                           </button>
