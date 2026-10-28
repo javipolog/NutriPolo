@@ -9,6 +9,8 @@ const TICK_MS = 5 * 60 * 1000;
 
 // Consultations with an email in flight, so overlapping ticks never send twice.
 const inFlight = new Set();
+// The "reconnect Google" toast is shown once, not on every tick.
+let reauthNotified = false;
 
 /**
  * Send the email reminders whose window is open. Runs only with automatic
@@ -72,14 +74,17 @@ export function useBackgroundJobs({ toast }) {
     const tick = async () => {
       if (connected && autoSync) {
         try {
-          const stats = await googleCalendar.syncAll(useStore.getState());
+          const stats = await googleCalendar.syncAll();
+          reauthNotified = false;
           if (!cancelled && stats.conflicts > 0) {
-            toastRef.current.info(`${stats.conflicts} conflicto(s) de sincronización resuelto(s) — se conservó la versión más reciente`);
+            toastRef.current.info(tRef.current.gcal_bg_conflicts.replace('{n}', stats.conflicts));
           }
         } catch (e) {
           if (cancelled) return;
           if (useStore.getState().config.googleCalendar?.needsReauth) {
-            toastRef.current.error('La sesión de Google Calendar ha caducado. Vuelve a conectar en Configuración.');
+            // Once per session: the sync stops until the user reconnects.
+            if (!reauthNotified) toastRef.current.error(tRef.current.gcal_bg_reauth);
+            reauthNotified = true;
           } else if (import.meta.env.DEV) {
             console.warn('[Background sync]', e);
           }

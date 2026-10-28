@@ -13,7 +13,7 @@ import { testSmtpConnection } from '../services/emailService';
 // Invoice design preview fonts, loaded only with this view
 import '@fontsource/work-sans/latin-700.css';
 import '@fontsource/roboto/latin-700.css';
-import { googleCalendar } from '../services/googleCalendarService';
+import { googleCalendar, formatSyncStats, formatSyncErrors } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { RemindersSection } from './settings/RemindersSection';
 import { invoke } from '@tauri-apps/api/tauri';
@@ -432,6 +432,7 @@ const GoogleCalendarSection = () => {
   const updateConfig = useStore(s => s.updateConfig);
   const clearGoogleCalendarData = useStore(s => s.clearGoogleCalendarData);
   const removeConsultationsForCalendar = useStore(s => s.removeConsultationsForCalendar);
+  const detachConsultationsFromCalendars = useStore(s => s.detachConsultationsFromCalendars);
   const removePersonalEventsForCalendar = useStore(s => s.removePersonalEventsForCalendar);
   const convertConsultationsToPersonal = useStore(s => s.convertConsultationsToPersonal);
   const acceptMassDelete = useStore(s => s.acceptMassDelete);
@@ -490,12 +491,22 @@ const GoogleCalendarSection = () => {
       const accessToken = tokenResult.access_token;
       const expiresAt = Date.now() + (tokenResult.expires_in * 1000);
       const refreshToken = tokenResult.refresh_token || '';
+      const grantedScopes = tokenResult.scope || '';
+      // Granular consent lets the user untick the calendar permission.
+      if (tokenResult.scope && !googleCalendar.hasRequiredScope(tokenResult.scope)) {
+        googleCalendar.revokeToken(accessToken).catch(() => {});
+        toast.error(t.gcal_scope_missing);
+        return;
+      }
 
       // Step 3: list calendars to get user email
       const calList = await googleCalendar.listCalendars(accessToken);
       setCalendars(calList);
       const primary = calList.find(c => c.primary) || calList[0];
       const userEmail = primary?.id || '';
+      // Consultations linked to calendars this account cannot see (another
+      // account, or a calendar removed) become local records.
+      detachConsultationsFromCalendars(calList.map(c => c.id));
 
       const newCalendars = calList.map(c => {
         const base = {
@@ -525,7 +536,7 @@ const GoogleCalendarSection = () => {
         setGcal({
           connected: true, needsReauth: false,
           clientId: clientId.trim(), clientSecret: clientSecret.trim(),
-          accessToken, refreshToken, expiresAt,
+          accessToken, refreshToken, expiresAt, grantedScopes,
           calendars: merged, defaultPushCalendarId: keepDefault, userEmail,
         });
         toast.success(t.gcal_reconnected);
@@ -553,6 +564,7 @@ const GoogleCalendarSection = () => {
         accessToken,
         refreshToken,
         expiresAt,
+        grantedScopes,
         calendars: newCalendars,
         defaultPushCalendarId,
         userEmail,
@@ -584,12 +596,9 @@ const GoogleCalendarSection = () => {
   const handleSyncNow = async () => {
     setSyncing(true);
     try {
-      const stats = await googleCalendar.syncAll(useStore.getState());
-      const parts = [];
-      if (stats.pushed) parts.push(`${stats.pushed} ${t.gcal_sync_pushed}`);
-      if (stats.pulled) parts.push(`${stats.pulled} ${t.gcal_sync_pulled}`);
-      if (stats.updated) parts.push(`${stats.updated} ${t.gcal_sync_updated}`);
-      toast.success(`${t.gcal_synced}${parts.length ? ' — ' + parts.join(', ') : ''}`);
+      const stats = await googleCalendar.syncAll();
+      toast.success(formatSyncStats(stats, t));
+      if (stats.errors > 0) toast.error(formatSyncErrors(stats, t));
     } catch (e) {
       toast.error(t.gcal_sync_error_detail.replace('{error}', e?.message || String(e)));
     } finally {
@@ -598,12 +607,11 @@ const GoogleCalendarSection = () => {
   };
 
   const handleDisconnect = async () => {
-    // Best-effort token revocation at Google
+    // Best-effort token revocation at Google (revoking the refresh token
+    // revokes the whole grant).
     try {
-      if (gcal.accessToken) await googleCalendar.revokeToken(gcal.accessToken);
-    } catch { /* ignore */ }
-    try {
-      if (gcal.refreshToken) await googleCalendar.revokeToken(gcal.refreshToken);
+      const token = gcal.refreshToken || gcal.accessToken;
+      if (token) await googleCalendar.revokeToken(token);
     } catch { /* ignore */ }
     // Atomic store reset
     clearGoogleCalendarData();
@@ -772,6 +780,20 @@ const GoogleCalendarSection = () => {
             {t.gcal_connected_as.replace('{email}', gcal.userEmail || 'Google Calendar')}
           </span>
         </div>
+
+        {gcal.needsReauth && (
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-warning-light border border-warning/30 rounded-button">
+            <AlertTriangle size={14} className="text-warning shrink-0" />
+            <p className="text-xs text-warning-dark flex-1 min-w-[12rem]">{t.gcal_reauth_scope_notice}</p>
+            <Button size="sm" variant="primary" onClick={handleConnect} disabled={loading}>{t.gcal_reconnect}</Button>
+          </div>
+        )}
+        {!gcal.needsReauth && !String(gcal.grantedScopes || '').includes('calendar.events') && (
+          <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-info-light border border-info/30 rounded-button">
+            <p className="text-xs text-info-dark flex-1 min-w-[12rem]">{t.gcal_scope_upgrade_notice}</p>
+            <Button size="sm" variant="ghost" onClick={handleConnect} disabled={loading}>{t.gcal_reconnect}</Button>
+          </div>
+        )}
 
         {/* Calendar list with sync modes */}
         <div>

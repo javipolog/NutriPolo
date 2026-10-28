@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
-import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast } from './UI';
-import useStore, { todayISO } from '../stores/store';
+import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast, useConfirm } from './UI';
+import useStore, { todayISO, canPushToCalendar } from '../stores/store';
 import { useT, useLocale } from '../i18n';
-import { AlertTriangle, CheckCircle2, Mail, MessageCircle } from 'lucide-react';
-import { googleCalendar } from '../services/googleCalendarService';
+import { AlertTriangle, CheckCircle2, Mail, MessageCircle, Trash2 } from 'lucide-react';
+import { googleCalendar, shortGcalError } from '../services/googleCalendarService';
 import { reminderSlot } from '../services/reminderService';
 import { useReminderActions } from '../hooks/useReminderActions';
 import { SendEmailModal } from './SendEmailModal';
@@ -19,6 +19,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const t = useT();
   const locale = useLocale();
   const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const isEdit = !!consultation;
   // Phone or email as a hint, to tell apart clients with the same name
   const clientOptions = useMemo(() => [...clients]
@@ -79,20 +80,35 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const validate = () => {
     const e = {};
     if (!form.clienteId) e.clienteId = t.select_client_error;
-    if (!form.fecha) e.fecha = 'Requerido';
+    if (!form.fecha) e.fecha = t.field_required;
     return e;
   };
 
+  // Pushed to the consultation's own calendar (or the default one when it is
+  // not linked yet). A failure keeps the change; the next sync retries it.
   const pushToGoogle = (consultationId) => {
-    const store = useStore.getState();
-    const gcal = store.config?.googleCalendar;
-    if (!gcal?.connected || !gcal.defaultPushCalendarId) return;
-    const saved = store.consultations.find(c => c.id === consultationId);
-    if (!saved) return;
-    googleCalendar.pushConsultation(store, saved).catch(err => {
+    googleCalendar.pushConsultation(consultationId).catch(err => {
       if (import.meta.env.DEV) console.error('[GCal Push]', err);
-      toast.error('Error al sincronizar con Google Calendar');
+      toast.error(t.gcal_push_failed.replace('{error}', shortGcalError(err)));
     });
+  };
+
+  const handleDelete = async () => {
+    const gc = useStore.getState().config.googleCalendar;
+    const linked = !!(consultation.googleEventId && consultation.sourceCalendarId);
+    const writable = linked && canPushToCalendar(gc, consultation.sourceCalendarId);
+    const ok = await confirm({
+      title: t.consultation_delete_title,
+      message: !linked ? t.consultation_delete_message
+        : writable ? t.consultation_delete_message_gcal
+        : t.consultation_delete_message_readonly.replace('{calendar}', sourceCal?.name || t.calendar_external),
+      danger: true,
+    });
+    if (!ok) return;
+    onClose();
+    const { remote } = await googleCalendar.deleteConsultation(consultation.id);
+    if (remote === 'pending') toast.info(t.consultation_deleted_gcal_pending);
+    else toast.success(t.consultation_deleted);
   };
 
   const handleInlineConfirm = () => {
@@ -147,6 +163,11 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
               {reminderInfo && <span className="text-[11px] text-sage-400">{t.reminders_last_sent} {reminderInfo}</span>}
             </div>
           )}
+          {isEdit && (
+            <Button variant="ghost" icon={Trash2} onClick={handleDelete} className={reminderClient ? '' : 'mr-auto'}>
+              {t.delete}
+            </Button>
+          )}
           <Button variant="ghost" onClick={onClose}>{t.cancel}</Button>
           <Button variant="primary" onClick={handleSave}>{t.save}</Button>
         </div>
@@ -167,16 +188,16 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
 
         {/* Auto-match review banner */}
         {isPendingReview && !reviewBannerDismissed && (
-          <div className="p-3 bg-sky-50 border border-sky-200 rounded-soft">
+          <div className="p-3 bg-info-light border border-info/30 rounded-soft">
             <div className="flex items-center gap-2 mb-1">
-              <CheckCircle2 size={14} className="text-sky-600 shrink-0" />
-              <span className="text-xs font-semibold text-sky-700">
-                Coincidencia automática detectada
-                {consultation.matchScore != null && ` · ${Math.round(consultation.matchScore * 100)}% confianza`}
+              <CheckCircle2 size={14} className="text-info shrink-0" />
+              <span className="text-xs font-semibold text-info-dark">
+                {t.consultation_auto_match_title}
+                {consultation.matchScore != null && ` · ${t.consultation_auto_match_score.replace('{n}', Math.round(consultation.matchScore * 100))}`}
               </span>
             </div>
             <p className="text-sm text-sage-700 mb-2">
-              Hemos vinculado esta cita a <strong>{proposedClient?.nombre || '?'}</strong> tentativamente.
+              {t.consultation_auto_match_text} <strong>{proposedClient?.nombre || '?'}</strong>
             </p>
             <div className="flex gap-2">
               <Button size="sm" variant="primary" onClick={handleInlineConfirm}>
@@ -328,6 +349,8 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           }
         </p>
       )}
+
+      {ConfirmDialog}
 
       {showReminderEmail && reminderClient && (
         <SendEmailModal
