@@ -180,6 +180,14 @@ export const ClientModal = ({ client, onClose }) => {
                 {ch === 'email' ? 'Email' : 'WhatsApp'}
               </label>
             ))}
+            <label className="flex items-center gap-1.5 text-xs text-sage-700 cursor-pointer" title={t.client_review_hint}>
+              <input
+                type="checkbox"
+                checked={form.recordatorios?.review !== false}
+                onChange={e => set('recordatorios', { ...(form.recordatorios || {}), review: e.target.checked })}
+              />
+              {t.client_review}
+            </label>
             <label className="flex items-center gap-1.5 text-xs text-sage-600 ml-auto">
               {t.client_language}
               <select
