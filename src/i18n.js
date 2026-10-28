@@ -767,6 +767,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
+    whats_new_reviews_title: 'Pide reseñas en Google después de la consulta',
+    whats_new_reviews_desc:  'Tras la consulta, la app puede pedir al paciente una reseña en Google por email o WhatsApp, una sola vez. Elige si tras la primera visita o también en las de seguimiento, y pon el enlace de reseña de cada ubicación. Actívalo en Ajustes → Recordatorios de citas → Reseñas en Google.',
     whats_new_reminders_title: 'Recordatorios de citas por email y WhatsApp',
     whats_new_reminders_desc: 'Nuevo panel "Recordatorios" en Inicio: un clic abre WhatsApp con el mensaje escrito, y los emails pueden enviarse solos. Configúralo en Ajustes → Recordatorios de citas (el envío automático de emails viene desactivado hasta que lo actives).',
     whats_new_reliability_title: 'Más fiabilidad y seguridad',
@@ -1785,6 +1787,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
+    whats_new_reviews_title: 'Demana ressenyes a Google després de la consulta',
+    whats_new_reviews_desc:  'Després de la consulta, l\'app pot demanar al pacient una ressenya a Google per correu o WhatsApp, una sola vegada. Tria si després de la primera visita o també en les de seguiment, i posa l\'enllaç de ressenya de cada ubicació. Activa-ho a Ajustos → Recordatoris de cites → Ressenyes a Google.',
     whats_new_reminders_title: 'Recordatoris de cites per correu i WhatsApp',
     whats_new_reminders_desc: 'Nou panell "Recordatoris" a l\'Inici: un clic obre WhatsApp amb el missatge escrit, i els correus es poden enviar sols. Configura-ho a Ajustos → Recordatoris de cites (l\'enviament automàtic de correus està desactivat fins que l\'activis).',
     whats_new_reliability_title: 'Més fiabilitat i seguretat',
@@ -2805,6 +2809,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
+    whats_new_reviews_title: 'Ask for Google reviews after the appointment',
+    whats_new_reviews_desc:  'After the appointment, the app can ask the patient for a Google review by email or WhatsApp, only once. Choose first visits and/or follow-ups and set the review link of each location. Turn it on in Settings → Appointment reminders → Google reviews.',
     whats_new_reminders_title: 'Appointment reminders by email and WhatsApp',
     whats_new_reminders_desc: 'New "Reminders" panel on the Dashboard: one click opens WhatsApp with the message written, and emails can be sent automatically. Set it up in Settings → Appointment reminders (automatic emails stay off until you turn them on).',
     whats_new_reliability_title: 'More reliable and secure',
