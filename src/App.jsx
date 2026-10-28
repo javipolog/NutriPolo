@@ -15,7 +15,7 @@ import { countPendingReminders } from './components/RemindersPanel';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
