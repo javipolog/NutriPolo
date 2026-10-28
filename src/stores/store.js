@@ -1288,6 +1288,13 @@ const useStore = create(
           : c),
       })),
 
+      // Google review request bookkeeping, same rules as reminders.
+      setConsultationReviewRequest: (id, channel, info) => set(s => ({
+        consultations: s.consultations.map(c => c.id === id
+          ? { ...c, reviewRequest: { ...(c.reviewRequest || {}), [channel]: info } }
+          : c),
+      })),
+
       deleteConsultation: (id) => {
         const item = get().consultations.find(c => c.id === id);
         set(s => ({

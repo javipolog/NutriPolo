@@ -6,7 +6,7 @@ Aplicacio d'escriptori per a Windows 11 per a la gestio de consultes de nutricio
 
 **Autor:** Javier Polo Garcia
 **Llicencia:** MIT
-**Versio:** 1.11.0
+**Versio:** 1.12.0
 **Identificador:** com.nutripolo.app
 
 ---
@@ -56,11 +56,12 @@ nutripolo-app/
 │   │   ├── LoadErrorScreen.jsx       # Pantalla si el fitxer de dades no es pot llegir
 │   │   ├── NutritionPlanEditor.jsx   # Editor de plans nutricionals + PDF
 │   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
-│   │   ├── RemindersPanel.jsx        # Panell de recordatoris (Dashboard)
+│   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
 │   │   ├── ServicesView.jsx          # Gestio de serveis/tarifes
 │   │   ├── SettingsView.jsx          # Configuracio de l'app
-│   │   ├── settings/RemindersSection.jsx # Ajustos de recordatoris
+│   │   ├── settings/RemindersSection.jsx # Ajustos de recordatoris + editor de plantilles
+│   │   ├── settings/ReviewRequestsSection.jsx # Ajustos de ressenyes de Google
 │   │   ├── UnlockScreen.jsx          # Desbloqueig (xifratge AES-256)
 │   │   └── UI.jsx                    # Components base reutilitzables (toast, confirm, etc.)
 │   │
@@ -77,7 +78,8 @@ nutripolo-app/
 │   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans nutricionals (pdf-lib)
-│   │   └── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
+│   │   ├── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
+│   │   └── reviewRequestService.js   # Peticio de ressenya a Google despres de la consulta (pura, amb tests)
 │   │
 │   ├── stores/                       # Estat global (Zustand)
 │   │   └── store.js                  # Store unic amb totes les entitats
@@ -206,6 +208,7 @@ fn quit_app()                                         // el JS el crida despres 
 - Estat per consulta a `consultation.reminders.{email|whatsapp}` = `{ status, at, slot, attempts?, error? }`; `slot` = `fecha + 'T' + hora` (reprogramar torna a activar el recordatori)
 - Preferencies del client: `client.recordatorios.{email|whatsapp}` (opt-out) i `client.idioma`
 - Email automatic per SMTP des de `useBackgroundJobs` (cada 5 min, nomes amb l'app en marxa); WhatsApp semiautomatic via wa.me
+- Ressenya de Google despres de la consulta: `config.reviewRequests` (defectes a `DEFAULT_REVIEW_CONFIG`): primera visita / seguiment (per historial del client), enllac i interruptor per ubicacio (`locations[id]`, si no `defaultUrl`), `delayHours` despres del final. Estat a `consultation.reviewRequest.{email|whatsapp}`; nomes un cop per client (`already_asked`); opt-out a `client.recordatorios.review`
 - Segon pla: en tancar la finestra l'app queda a la safata (`config.closeToTray`) i pot arrencar amb Windows amagada (`--hidden`); instancia unica (tauri-plugin-single-instance). Amb xifratge cal desbloquejar abans que s'envii res
 
 ### Estils

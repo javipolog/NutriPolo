@@ -4,52 +4,28 @@ import { Mail, MessageCircle, RotateCcw, AlertTriangle, MonitorSmartphone } from
 import { Input, Textarea, Button, SegmentedControl } from '../UI';
 import useStore from '../../stores/store';
 import { useT } from '../../i18n';
-import { AVAILABLE_VARIABLES, DEFAULT_APPOINTMENT_TEMPLATES, resolveTemplate } from '../../services/emailService';
+import { AVAILABLE_VARIABLES, DEFAULT_APPOINTMENT_TEMPLATES, REVIEW_URL_VARIABLE, resolveTemplate } from '../../services/emailService';
 import {
   getReminderConfig, whatsAppTemplate,
 } from '../../services/reminderService';
+import {
+  getReviewConfig, reviewEmailTemplate, reviewWhatsAppTemplate, reviewUrlFor,
+} from '../../services/reviewRequestService';
+import { Toggle, NumberField } from './SettingsFields';
+import { ReviewRequestsSection } from './ReviewRequestsSection';
 
 const LANGS = [['es', 'ES'], ['ca', 'CA'], ['en', 'EN']];
 const REMINDER_VARIABLES = AVAILABLE_VARIABLES.filter(v => /clientNom|cita|nutri/.test(v.key));
+const REVIEW_VARIABLES = [...REMINDER_VARIABLES, REVIEW_URL_VARIABLE];
 
 // Sample data for the live preview.
 const SAMPLE_CLIENT = { nombre: 'Laura Martínez', email: 'laura@example.com' };
-const sampleConsultation = () => {
+const sampleConsultation = (daysFromToday = 1) => {
   const d = new Date();
-  d.setDate(d.getDate() + 1);
+  d.setDate(d.getDate() + daysFromToday);
   const fecha = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   return { fecha, hora: '10:30', duracion: 45, tipo: 'Seguimiento' };
 };
-
-const Toggle = ({ checked, onChange, label, hint }) => (
-  <label className="flex items-start gap-2.5 cursor-pointer">
-    <input type="checkbox" className="mt-0.5" checked={checked} onChange={e => onChange(e.target.checked)} />
-    <span>
-      <span className="block text-sm text-sage-800">{label}</span>
-      {hint && <span className="block text-xs text-sage-500 mt-0.5">{hint}</span>}
-    </span>
-  </label>
-);
-
-const NumberField = ({ label, value, onChange, min = 0, max = 168, suffix }) => (
-  <label className="block">
-    <span className="block text-xs font-medium text-sage-600 mb-1">{label}</span>
-    <span className="flex items-center gap-2">
-      <Input
-        type="number"
-        min={min}
-        max={max}
-        value={value}
-        onChange={e => {
-          const n = parseInt(e.target.value, 10);
-          if (!Number.isNaN(n)) onChange(Math.min(max, Math.max(min, n)));
-        }}
-        className="w-24"
-      />
-      {suffix && <span className="text-xs text-sage-500">{suffix}</span>}
-    </span>
-  </label>
-);
 
 /**
  * Start with Windows (hidden in the tray) and keep running when the window is
@@ -110,35 +86,48 @@ const BackgroundSection = () => {
 };
 
 /**
- * Settings → Recordatorios. Channel switches, timing, quiet hours and the
- * per-language templates (with variable chips and a live preview).
+ * Settings → Recordatorios. Channel switches, timing, quiet hours, Google
+ * review requests and the per-language templates of both (with variable
+ * chips and a live preview).
  */
 export const RemindersSection = ({ onGoToSmtp }) => {
   const config = useStore(s => s.config);
   const updateConfig = useStore(s => s.updateConfig);
   const t = useT();
   const rc = getReminderConfig(config);
+  const rv = getReviewConfig(config);
   const [lang, setLang] = useState(config.appLang || 'es');
   const [channel, setChannel] = useState('email');
+  const [kindChoice, setKind] = useState('reminder');
   const [focusField, setFocusField] = useState('body');
+  // Review templates are only editable while review requests are on.
+  const kind = rv.enabled ? kindChoice : 'reminder';
+  const isReview = kind === 'review';
 
   const setReminders = (patch) => updateConfig({ reminders: { ...rc, ...patch } });
   const setChannelCfg = (ch, patch) => setReminders({ [ch]: { ...rc[ch], ...patch } });
+  // Channel settings of the templates being edited (reminder or review).
+  const tmplCfg = isReview ? rv : rc;
+  const setTmplChannel = (ch, patch) => (isReview
+    ? updateConfig({ reviewRequests: { ...rv, [ch]: { ...rv[ch], ...patch } } })
+    : setChannelCfg(ch, patch));
 
-  const emailTmpl = rc.email.templates?.[lang] || DEFAULT_APPOINTMENT_TEMPLATES[lang];
-  const waTmpl = whatsAppTemplate(config, lang);
-  const isCustom = channel === 'email' ? !!rc.email.templates?.[lang] : !!rc.whatsapp.templates?.[lang];
+  const emailTmpl = isReview
+    ? reviewEmailTemplate(config, lang)
+    : rc.email.templates?.[lang] || DEFAULT_APPOINTMENT_TEMPLATES[lang];
+  const waTmpl = isReview ? reviewWhatsAppTemplate(config, lang) : whatsAppTemplate(config, lang);
+  const isCustom = !!tmplCfg[channel].templates?.[lang];
 
   const setEmailTmpl = (field, value) =>
-    setChannelCfg('email', { templates: { ...rc.email.templates, [lang]: { ...emailTmpl, [field]: value } } });
+    setTmplChannel('email', { templates: { ...tmplCfg.email.templates, [lang]: { ...emailTmpl, [field]: value } } });
   const setWaTmpl = (value) =>
-    setChannelCfg('whatsapp', { templates: { ...rc.whatsapp.templates, [lang]: value } });
+    setTmplChannel('whatsapp', { templates: { ...tmplCfg.whatsapp.templates, [lang]: value } });
   const restoreDefault = () => {
     const ch = channel;
-    const { [lang]: _removed, ...rest } = rc[ch].templates || {};
-    setChannelCfg(ch, { templates: rest });
+    const { [lang]: _removed, ...rest } = tmplCfg[ch].templates || {};
+    setTmplChannel(ch, { templates: rest });
     // Also drop the pre-1.10 WhatsApp template so the default really applies.
-    if (ch === 'whatsapp' && config.whatsappReminderTemplate?.[lang]) {
+    if (!isReview && ch === 'whatsapp' && config.whatsappReminderTemplate?.[lang]) {
       const { [lang]: _old, ...legacy } = config.whatsappReminderTemplate;
       updateConfig({ whatsappReminderTemplate: legacy });
     }
@@ -150,11 +139,13 @@ export const RemindersSection = ({ onGoToSmtp }) => {
   };
 
   const preview = useMemo(() => {
-    const ctx = { client: SAMPLE_CLIENT, consultation: { ...sampleConsultation(), locationId: config.locations?.[0]?.id }, config, lang };
+    const consultation = { ...sampleConsultation(isReview ? 0 : 1), locationId: config.locations?.[0]?.id };
+    const reviewUrl = isReview ? (reviewUrlFor(consultation, config) || 'https://g.page/r/…/review') : undefined;
+    const ctx = { client: SAMPLE_CLIENT, consultation, config, lang, reviewUrl };
     return channel === 'email'
       ? `${resolveTemplate(emailTmpl.subject, ctx)}\n\n${resolveTemplate(emailTmpl.body, ctx)}`
       : resolveTemplate(waTmpl, ctx);
-  }, [channel, emailTmpl, waTmpl, config, lang]);
+  }, [channel, emailTmpl, waTmpl, config, lang, isReview]);
 
   const smtpReady = !!config.smtp?.host;
 
@@ -267,13 +258,22 @@ export const RemindersSection = ({ onGoToSmtp }) => {
         )}
       </div>
 
+      <ReviewRequestsSection onGoToSmtp={onGoToSmtp} />
+
       <BackgroundSection />
 
       {/* Templates */}
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm font-medium text-sage-800">{t.reminders_templates}</p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {rv.enabled && (
+              <SegmentedControl
+                value={kind}
+                onChange={setKind}
+                options={[{ value: 'reminder', label: t.reminders_kind_reminder }, { value: 'review', label: t.reminders_kind_review }]}
+              />
+            )}
             <SegmentedControl
               value={channel}
               onChange={setChannel}
@@ -306,7 +306,7 @@ export const RemindersSection = ({ onGoToSmtp }) => {
         )}
 
         <div className="flex flex-wrap gap-1">
-          {REMINDER_VARIABLES.map(v => (
+          {(isReview ? REVIEW_VARIABLES : REMINDER_VARIABLES).map(v => (
             <button
               key={v.key}
               onClick={() => insertVariable(v.key)}
