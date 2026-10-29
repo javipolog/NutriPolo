@@ -59,12 +59,20 @@ fn validate_path_component(name: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Keys the frontend may read and write. `encryption` is the vault config
-/// (`encryption.json`, salt + verification blob): only the encryption
-/// commands touch it, or a script could overwrite or delete it and lock the
-/// user out of their encrypted data.
+/// Keys the frontend may read and write: lowercase words joined by hyphens
+/// (`nutripolo-storage`, `backup-manifest`, `backup-2026-10-29`). The strict
+/// pattern leaves no way to alias another file on Windows (case folding,
+/// trailing dots or spaces, `~` short names, `:` streams). `encryption` is the
+/// vault config (`encryption.json`, salt + verification blob): only the
+/// encryption commands touch it, or a script could overwrite or delete it and
+/// lock the user out of their encrypted data.
 fn validate_data_key(key: &str) -> Result<(), String> {
-    validate_path_component(key, "key")?;
+    let well_formed = !key.is_empty()
+        && key.len() <= 64
+        && key.split('-').all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()));
+    if !well_formed {
+        return Err("invalid_key".to_string());
+    }
     if key == "encryption" {
         return Err("reserved_key".to_string());
     }
@@ -1061,7 +1069,11 @@ mod data_key_tests {
         assert!(validate_data_key("nutripolo-storage").is_ok());
         assert!(validate_data_key("backup-2026-10-29").is_ok());
         assert_eq!(validate_data_key("encryption"), Err("reserved_key".to_string()));
-        assert!(validate_data_key("../encryption").is_err());
+        // Names Windows would resolve to the same file, or that are not plain keys
+        for key in ["Encryption", "ENCRYPTION", "encryption.", "encryption ", "encryp~1", "encryption:x",
+                    "../encryption", "a/b", "", "-a", "a--b", "a-"] {
+            assert!(validate_data_key(key).is_err(), "{key:?} must be rejected");
+        }
     }
 }
 
