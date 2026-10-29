@@ -35,3 +35,7 @@ desktop.ini
 
 # Tauri: binaris generats
 src-tauri/gen/
+
+# Catàleg d'aliments: memòria cau i sortida generada
+scripts/catalog/.cache/
+scripts/catalog/out/
