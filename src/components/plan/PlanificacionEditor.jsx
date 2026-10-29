@@ -2,7 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   X, Save, Eye, EyeOff, Download, Plus, Trash2, Copy, ChevronUp, ChevronDown,
   ArrowLeftRight, ClipboardPaste, Eraser, Link2, ImagePlus, RotateCcw, Info, Coffee,
-  Apple, Cookie, Scale, CalendarDays, ShoppingBasket, Settings2,
+  Apple, Cookie, Scale, CalendarDays, ShoppingBasket, Settings2, BookOpen,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { Button, SegmentedControl, Combobox, useToast, useConfirm, useDialogA11y } from '../UI';
@@ -15,6 +15,9 @@ import {
 } from '../../services/planificacion';
 import { imageFileToDataUrl, planPdfFileName } from '../../services/planPdf';
 import { PdfPreview } from './PdfPreview';
+import { WebRecipePicker } from './WebRecipePicker';
+import { useWebRecipes } from '../../hooks/useWebRecipes';
+import { dishFromWebRecipe } from '../../services/webRecipes';
 
 const FIELD = 'w-full text-sm text-sage-800 bg-white border border-sage-300 rounded-button px-3 py-2 placeholder-sage-400 focus:outline-none focus:border-wellness-400 focus:ring-2 focus:ring-wellness-400/10 transition-colors';
 const LABEL = 'block text-xs font-medium text-sage-600 mb-1';
@@ -87,6 +90,7 @@ const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
   const t = useT();
   const toast = useToast();
   const listId = useId();
+  const [picking, setPicking] = useState(false);
   const opts = value.opciones || [];
   const setOpts = (o) => onChange({ ...value, opciones: o });
   const updateOpt = (id, data) => setOpts(opts.map(o => (o.id === id ? { ...o, ...data } : o)));
@@ -97,7 +101,7 @@ const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
     const hit = dishIndex.find(o.titulo);
     if (!hit) return;
     updateOpt(o.id, { titulo: hit.titulo, alimentos: hit.alimentos, nota: o.nota || hit.nota || '' });
-    toast.info(t.pf_autofilled.replace('{name}', hit.titulo));
+    toast.info((hit.web ? t.pf_web_filled : t.pf_autofilled).replace('{name}', hit.titulo));
   };
 
   return (
@@ -149,7 +153,20 @@ const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
           </div>
         </div>
       ))}
-      <Button variant="secondary" size="sm" icon={Plus} onClick={() => setOpts([...opts, emptyOption()])}>{t.pf_add_option}</Button>
+      <div className="flex flex-wrap gap-2">
+        <Button variant="secondary" size="sm" icon={Plus} onClick={() => setOpts([...opts, emptyOption()])}>{t.pf_add_option}</Button>
+        <Button variant="ghost" size="sm" icon={BookOpen} onClick={() => setPicking(true)}>{t.pf_web_pick}</Button>
+      </div>
+      <WebRecipePicker
+        open={picking}
+        onClose={() => setPicking(false)}
+        onPick={r => {
+          const { titulo, alimentos } = dishFromWebRecipe(r);
+          setOpts([...opts, { ...emptyOption(), titulo, alimentos }]);
+          setPicking(false);
+          toast.info(t.pf_web_filled.replace('{name}', titulo));
+        }}
+      />
 
       <div className="pt-2 space-y-3">
         <div>
@@ -235,8 +252,10 @@ const MenuEditor = ({ value, onChange, dishIndex }) => {
   const t = useT();
   const toast = useToast();
   const listId = useId();
+  const { confirm, ConfirmDialog } = useConfirm();
   const [sel, setSel] = useState({ day: 'lunes', slot: 'comida', variant: 'a' });
   const [clip, setClip] = useState(null);
+  const [picking, setPicking] = useState(false);
   const dias = value.dias;
   const day = dias.find(d => d.id === sel.day);
   const dish = day[sel.slot][sel.variant];
@@ -257,7 +276,15 @@ const MenuEditor = ({ value, onChange, dishIndex }) => {
     const hit = dishIndex.find(dish.titulo);
     if (!hit) return;
     setSelected({ titulo: hit.titulo, alimentos: hit.alimentos, receta: dish.receta || hit.receta || '' });
-    toast.info(t.pf_autofilled.replace('{name}', hit.titulo));
+    toast.info((hit.web ? t.pf_web_filled : t.pf_autofilled).replace('{name}', hit.titulo));
+  };
+
+  const pickWebRecipe = async (r) => {
+    setPicking(false);
+    if (!isDishEmpty(dish) && dish.titulo !== r.titulo
+      && !(await confirm(t.pf_web_replace_confirm.replace('{name}', dish.titulo || linesOf(dish.alimentos)[0])))) return;
+    setSelected(dishFromWebRecipe(r));
+    toast.info(t.pf_web_filled.replace('{name}', r.titulo));
   };
 
   const slotLabel = (s) => (s === 'comida' ? t.pf_lunch : t.pf_dinner);
@@ -318,6 +345,7 @@ const MenuEditor = ({ value, onChange, dishIndex }) => {
             {t[`pf_day_${sel.day}`]} · {slotLabel(sel.slot)} {sel.variant.toUpperCase()}
           </h3>
           <div className="ml-auto flex flex-wrap gap-0.5">
+            <Button variant="ghost" size="sm" icon={BookOpen} onClick={() => setPicking(true)}>{t.pf_web_pick}</Button>
             <Button variant="ghost" size="sm" onClick={() => setSelected({ titulo: t.pf_dish_free_text, alimentos: '', receta: '' })}>{t.pf_dish_free}</Button>
             <IconBtn icon={ArrowLeftRight} label={t.pf_dish_swap} onClick={swap} />
             <IconBtn icon={Copy} label={t.pf_dish_copy} disabled={isDishEmpty(dish)} onClick={() => { setClip({ ...dish }); toast.info(t.pf_dish_copied); }} />
@@ -367,6 +395,8 @@ const MenuEditor = ({ value, onChange, dishIndex }) => {
         <label className={LABEL} htmlFor="pf-menu-notas">{t.pf_menu_notes}</label>
         <textarea id="pf-menu-notas" value={value.notas || ''} onChange={e => onChange({ ...value, notas: e.target.value })} rows={rowsFor(value.notas)} className={`${FIELD} resize-y`} />
       </div>
+      <WebRecipePicker open={picking} onClose={() => setPicking(false)} onPick={pickWebRecipe} />
+      {ConfirmDialog}
     </div>
   );
 };
@@ -557,7 +587,8 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   const titleId = useId();
 
   const client = clients.find(c => c.id === form?.clienteId);
-  const dishIndex = useMemo(() => buildDishIndex(plans, savedId), [plans, savedId]);
+  const { items: webRecipes } = useWebRecipes();
+  const dishIndex = useMemo(() => buildDishIndex(plans, savedId, webRecipes), [plans, savedId, webRecipes]);
   const otherPlans = useMemo(() => plans
     .filter(p => p.formato === PLAN_FORMAT && p.id !== savedId)
     .sort((a, b) => (b.fechaInicio || '').localeCompare(a.fechaInicio || ''))
