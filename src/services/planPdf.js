@@ -47,17 +47,11 @@ export async function imageFileToDataUrl(file, maxSide = 480) {
 }
 
 /**
- * Foto del catàleg d'aliments → data URL per copiar-la a la biblioteca de
- * productes. Ja són JPEG de 480 px sobre blanc, no cal tornar-les a comprimir.
+ * Foto de la biblioteca d'aliments (servida per l'app) → el mateix JPEG petit
+ * que una foto pujada a mà, per copiar-la a la biblioteca de productes.
  */
-export async function catalogPhotoDataUrl(path) {
+export async function foodPhotoDataUrl(path) {
   const resp = await fetch(path);
-  if (!resp.ok) throw new Error(`catalog photo ${resp.status}`);
-  const blob = await resp.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
+  if (!resp.ok) throw new Error(`food photo ${resp.status}`);
+  return imageFileToDataUrl(await resp.blob());
 }

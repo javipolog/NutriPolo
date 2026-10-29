@@ -13,8 +13,9 @@ import {
   emptyOption, emptyDish, isDishEmpty, linesOf, safeUrl, planificacionStats, planFoods, dishKey,
   DEFAULT_CANTIDADES, DEFAULT_CANTIDADES_NOTA, WEEK_DAYS, MENU_SLOTS, MENU_VARIANTS, PLAN_FORMAT,
 } from '../../services/planificacion';
-import { imageFileToDataUrl, catalogPhotoDataUrl, planPdfFileName } from '../../services/planPdf';
-import { findCatalogFood, foodCatalogImage } from '../../services/genericFoods';
+import { imageFileToDataUrl, foodPhotoDataUrl, planPdfFileName } from '../../services/planPdf';
+import { foodMatcher, foodImageUrl, productName } from '../../services/foodCatalog';
+import { useFoodLibrary } from '../../hooks/useFoodLibrary';
 import { PdfPreview } from './PdfPreview';
 import { WebRecipePicker } from './WebRecipePicker';
 import { FoodCatalogPicker } from './FoodCatalogPicker';
@@ -419,21 +420,24 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // Cada aliment amb la foto de la biblioteca que es diu igual o, si no en
-  // té, la del catàleg d'aliments
+  // Cada aliment amb la foto de la biblioteca de productes que es diu igual
+  // o, si no en té, la de la biblioteca d'aliments (genèric o Mercadona)
+  const { alimentos } = useFoodLibrary();
+  const matchFood = useMemo(() => foodMatcher(alimentos), [alimentos]);
   const productByKey = useMemo(() => new Map(products.map(pr => [dishKey(pr.nombre), pr])), [products]);
   const foodRows = foods.map(f => {
     const product = productByKey.get(f.key) || null;
-    return { ...f, product, catalog: product ? null : findCatalogFood(f.nombre) };
+    const catalog = product ? null : matchFood(f.nombre);
+    return { ...f, product, catalog: catalog && foodImageUrl(catalog) ? catalog : null };
   });
   const unmarked = foodRows.filter(f => f.product && !selected.includes(f.product.id)).map(f => f.product.id);
   const fromCatalog = foodRows.filter(f => f.catalog);
   const toggle = (id) => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
 
-  // Copia la foto d'un aliment del catàleg a la biblioteca amb aquest nom
+  // Copia la foto d'un aliment de la biblioteca d'aliments a la de productes
   const addFromCatalog = async (food, nombre) => {
     try {
-      return addPlanProduct({ nombre, imagen: await catalogPhotoDataUrl(foodCatalogImage(food)) }).id;
+      return addPlanProduct({ nombre, imagen: await foodPhotoDataUrl(foodImageUrl(food)) }).id;
     } catch {
       toast.error(t.pf_image_error.replace('{name}', nombre));
       return null;
@@ -461,12 +465,13 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
 
   // Des del selector del catàleg: si ja és a la biblioteca només es marca
   const pickFromCatalog = async (food) => {
-    const existing = productByKey.get(dishKey(food.nombre));
+    const nombre = productName(food);
+    const existing = productByKey.get(dishKey(nombre));
     if (existing) {
       if (!selected.includes(existing.id)) onChange([...selected, existing.id]);
       return;
     }
-    const id = await addFromCatalog(food, food.nombre);
+    const id = await addFromCatalog(food, nombre);
     if (id) onChange([...selected, id]);
   };
 
@@ -535,7 +540,7 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
                       title={t.pf_food_use_catalog.replace('{name}', f.nombre)}
                       className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border border-dashed border-sage-300 bg-white text-xs text-sage-600 hover:border-wellness-400 hover:text-sage-800 transition-colors disabled:cursor-wait"
                     >
-                      <img src={foodCatalogImage(f.catalog)} alt="" className="w-6 h-6 rounded-full object-contain bg-white opacity-70" />
+                      <img src={foodImageUrl(f.catalog)} alt="" className="w-6 h-6 rounded-full object-contain bg-white opacity-70" />
                       {f.nombre}
                     </button>
                   );

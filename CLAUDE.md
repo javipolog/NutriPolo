@@ -241,7 +241,7 @@ fn quit_app()                                         // el JS el crida despres 
 - Format nou: `nutritionPlans` amb `formato: 'planificacion'` (model a `planificacion.js`); els plans sense `formato` són els antics per àpats i conserven el seu editor i PDF
 - Seccions: `desayunos` / `mediaManana` / `merienda` (opcions), `cantidades`, `menu.dias[]` (7 dies × `comida`/`cena` × `a`/`b`, amb `receta` enllaçada al PDF) i `productos` (ids)
 - Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
-- Aliments genèrics (`genericFoods.js`): fotos reals de Pixabay a `public/alimentos/<id>.jpg`, totes retallades sobre blanc amb la mateixa mida i ombra (`scripts/food-catalog-photos.py`, cal Pillow). Un aliment de la planificació que es diu igual (nom o àlies, `findCatalogFood`) agafa la foto amb un clic; triar-la la copia a `planLibrary.productos`. Res d'imatges generades amb IA
+- Secció Productos: un aliment de la planificació que es diu igual que un de la biblioteca d'aliments (`foodMatcher`: primer els genèrics, després el bàsic de Mercadona sense parèntesi) agafa la foto amb un clic; el botó "Biblioteca de alimentos" (`FoodCatalogPicker`) tria de tota la biblioteca. La foto es copia a `planLibrary.productos` (`foodPhotoDataUrl`)
 - Una planificació nova copia el contingut de l'última del client; els títols de "Mis recetas" i de la web autocompleten ingredients (`buildDishIndex`)
 - "Mis recetas": `planLibrary.recetas` (`{ id, titulo, alimentos, receta, nota, updatedAt }`, clau = `dishKey(titulo)`). En desar una planificació s'hi desen sols els plats i opcions amb títol i aliments nous o canviats des que es va obrir l'editor (`collectOwnRecipes` + `mergeOwnRecipes`), excepte receptes de la web sense retocar (així una recepta esborrada no torna); la migració v13 la sembra amb les planificacions existents. Es tria i s'esborra des de la pestanya del selector de receptes
 - PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt
@@ -256,6 +256,8 @@ fn quit_app()                                         // el JS el crida despres 
 - Llista curta a `scripts/catalog/basics.json`: ~290 bàsics, cadascun amb un producte de Mercadona (`id`), el nom genèric (`basico`) i, si cal, l'aliment genèric de BEDCA (`bedca`, `aprox`)
 - Nutrició per 100 g: Open Food Facts per EAN; si no hi és o no quadra (control Atwater), BEDCA. `nutricion.fuente` / `nutricion.control` (`ok`, `revisar`, `incompleto`, `sin_datos`)
 - Fotos: les originals de la botiga (600×600 sobre blanc), sense retocar
+- Una sola biblioteca (`buildFoodLibrary` / `loadFoodLibrary`, hook `useFoodLibrary`): els bàsics de Mercadona i els aliments genèrics de `genericFoods.js`, que van primer dins de cada categoria (les mateixes que Mercadona) i prenen la nutrició del producte equivalent (`mercadona` = sourceId, `nutricion.equivalente`). Si Mercadona no s'ha generat, només hi ha els genèrics
+- Genèrics: fotos reals de Pixabay a `public/alimentos/<id>.jpg` (sí que van a git), totes retallades sobre blanc amb la mateixa mida i ombra (`scripts/food-catalog-photos.py`, cal Pillow). Res d'imatges generades amb IA
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)

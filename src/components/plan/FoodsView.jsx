@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Apple, Search, AlertTriangle } from 'lucide-react';
 import { Input, Modal, Badge, EmptyState, Spinner, SegmentedControl, clickableProps } from '../UI';
-import { loadFoodCatalog, foodImageUrl, filterFoods, groupFoods, needsReview } from '../../services/foodCatalog';
+import { loadFoodLibrary, foodImageUrl, filterFoods, groupFoods, needsReview, isGeneric } from '../../services/foodCatalog';
 import { formatCurrency } from '../../stores/store';
 import { useT, useLocale, plural } from '../../i18n';
 
@@ -27,9 +27,13 @@ const useNumber = () => {
 const SourceBadge = ({ food }) => {
   const t = useT();
   const { fuente, aproximado } = food.nutricion || {};
-  if (fuente === 'openfoodfacts') return <Badge tone="neutral">{t.foods_source_label}</Badge>;
-  if (fuente === 'bedca') return <Badge tone="info">{aproximado ? t.foods_source_bedca_approx : t.foods_source_bedca}</Badge>;
-  return null;
+  return (
+    <>
+      {isGeneric(food) && <Badge tone="success">{t.foods_generic_badge}</Badge>}
+      {fuente === 'openfoodfacts' && <Badge tone="neutral">{t.foods_source_label}</Badge>}
+      {fuente === 'bedca' && <Badge tone="info">{aproximado ? t.foods_source_bedca_approx : t.foods_source_bedca}</Badge>}
+    </>
+  );
 };
 
 const ReviewBadge = ({ food }) => {
@@ -60,7 +64,7 @@ const FoodCard = ({ food, onOpen }) => {
       <FoodPhoto food={food} />
       <div className="min-w-0">
         <p className="text-sm font-medium text-sage-900 leading-snug">{food.basico}</p>
-        <p className="text-xs text-sage-500 truncate" title={food.nombre}>{food.nombre}</p>
+        <p className="text-xs text-sage-500 truncate" title={food.nombre}>{isGeneric(food) ? t.foods_generic_photo : food.nombre}</p>
       </div>
       {p ? (
         <p className="text-xs text-sage-600 tabular-nums">
@@ -89,7 +93,7 @@ const FoodDetail = ({ food, onClose }) => {
       <div className="grid sm:grid-cols-[200px_1fr] gap-6">
         <div className="space-y-2">
           <FoodPhoto food={food} className="border border-sage-200" />
-          <p className="text-sm text-sage-700">{food.nombre}</p>
+          <p className="text-sm text-sage-700">{isGeneric(food) ? t.foods_generic_photo : food.nombre}</p>
           <p className="text-xs text-sage-500 tabular-nums">
             {[formato.envase, formato.cantidad != null && `${num(formato.cantidad)} ${formato.unidad || ''}`].filter(Boolean).join(' · ')}
             {precio.unidad != null && <> · {formatCurrency(precio.unidad)}</>}
@@ -116,6 +120,7 @@ const FoodDetail = ({ food, onClose }) => {
               <SourceBadge food={food} />
             </div>
             <p className="text-xs text-sage-500 mt-2">
+              {nutricion.equivalente && <>{t.foods_generic_equivalent.replace('{name}', nutricion.equivalente)} </>}
               {nutricion.fuente === 'bedca'
                 ? t.foods_source_bedca_desc.replace('{name}', nutricion.alimentoGenerico || '')
                 : nutricion.fuente === 'openfoodfacts' ? t.foods_source_label_desc : t.foods_no_data_desc}
@@ -142,90 +147,105 @@ const FoodDetail = ({ food, onClose }) => {
 
 export const FoodsView = () => {
   const t = useT();
-  const [catalog, setCatalog] = useState(undefined); // undefined = loading, null = not generated
+  const [library, setLibrary] = useState(null);
   const [query, setQuery] = useState('');
   const [grupo, setGrupo] = useState('all');
   const [show, setShow] = useState('all');
+  const [source, setSource] = useState('all');
   const [selected, setSelected] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    loadFoodCatalog().then(data => { if (!cancelled) setCatalog(data); });
+    loadFoodLibrary().then(lib => { if (!cancelled) setLibrary(lib); });
     return () => { cancelled = true; };
   }, []);
 
-  const foods = catalog?.alimentos || [];
+  const foods = library?.alimentos || [];
   const groups = useMemo(() => groupFoods(foods).map(g => g.grupo), [foods]);
   const reviewCount = useMemo(() => foods.filter(needsReview).length, [foods]);
   const visible = useMemo(
-    () => groupFoods(filterFoods(foods, { query, grupo, onlyReview: show === 'review' })),
-    [foods, query, grupo, show],
+    () => groupFoods(filterFoods(foods, { query, grupo, source, onlyReview: show === 'review' })),
+    [foods, query, grupo, source, show],
   );
   const visibleCount = visible.reduce((n, g) => n + g.items.length, 0);
 
-  if (catalog === undefined) {
+  if (!library) {
     return <div className="flex justify-center py-24"><Spinner /></div>;
   }
 
   return (
     <div className="space-y-5">
-      {!catalog ? (
-        <EmptyState icon={Apple} title={t.foods_missing_title} description={t.foods_missing_desc} />
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-3">
-            <Input
-              icon={Search}
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder={t.foods_search}
-              aria-label={t.foods_search}
-              className="flex-1 min-w-48"
-            />
-            <select
-              value={grupo}
-              onChange={e => setGrupo(e.target.value)}
-              aria-label={t.foods_group}
-              className="px-3 py-2 text-sm bg-white border border-sage-300 rounded-button text-sage-700 focus:outline-none focus:border-wellness-400"
-            >
-              <option value="all">{t.foods_all_groups}</option>
-              {groups.map(g => <option key={g} value={g}>{g}</option>)}
-            </select>
+      {!library.mercadona && (
+        <p className="text-xs text-warning bg-warning-light rounded-button px-3 py-2 flex gap-2">
+          <AlertTriangle size={14} className="shrink-0 mt-px" aria-hidden="true" />
+          <span><strong className="font-semibold">{t.foods_missing_title}.</strong> {t.foods_missing_desc}</span>
+        </p>
+      )}
+      <>
+        <div className="flex flex-wrap items-center gap-3">
+          <Input
+            icon={Search}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder={t.foods_search}
+            aria-label={t.foods_search}
+            className="flex-1 min-w-48"
+          />
+          <select
+            value={grupo}
+            onChange={e => setGrupo(e.target.value)}
+            aria-label={t.foods_group}
+            className="px-3 py-2 text-sm bg-white border border-sage-300 rounded-button text-sage-700 focus:outline-none focus:border-wellness-400"
+          >
+            <option value="all">{t.foods_all_groups}</option>
+            {groups.map(g => <option key={g} value={g}>{g}</option>)}
+          </select>
+          {library.mercadona && (
             <SegmentedControl
-              ariaLabel={t.foods_show}
-              value={show}
-              onChange={setShow}
+              ariaLabel={t.foods_source}
+              value={source}
+              onChange={setSource}
               options={[
                 { value: 'all', label: t.foods_show_all },
-                { value: 'review', label: `${t.foods_show_review} (${reviewCount})` },
+                { value: 'generico', label: t.foods_source_generic },
+                { value: 'mercadona', label: t.foods_source_mercadona },
               ]}
             />
-          </div>
-
-          <p className="text-xs text-sage-500 tabular-nums">
-            {visibleCount === foods.length
-              ? plural(t, 'foods_count', foods.length)
-              : t.foods_count_filtered.replace('{n}', visibleCount).replace('{total}', foods.length)}
-          </p>
-
-          {visibleCount === 0 ? (
-            <EmptyState icon={Search} title={t.foods_no_results} />
-          ) : (
-            visible.map(({ grupo: name, items }) => (
-              <section key={name} className="space-y-3">
-                <h2 className="text-sm font-semibold text-sage-700">
-                  {name} <span className="font-normal text-sage-500 tabular-nums">{items.length}</span>
-                </h2>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                  {items.map(food => <FoodCard key={food.id} food={food} onOpen={() => setSelected(food)} />)}
-                </div>
-              </section>
-            ))
           )}
+          <SegmentedControl
+            ariaLabel={t.foods_show}
+            value={show}
+            onChange={setShow}
+            options={[
+              { value: 'all', label: t.foods_show_all },
+              { value: 'review', label: `${t.foods_show_review} (${reviewCount})` },
+            ]}
+          />
+        </div>
 
-          <p className="text-xs text-sage-500">{t.foods_sources_note}</p>
-        </>
-      )}
+        <p className="text-xs text-sage-500 tabular-nums">
+          {visibleCount === foods.length
+            ? plural(t, 'foods_count', foods.length)
+            : t.foods_count_filtered.replace('{n}', visibleCount).replace('{total}', foods.length)}
+        </p>
+
+        {visibleCount === 0 ? (
+          <EmptyState icon={Search} title={t.foods_no_results} />
+        ) : (
+          visible.map(({ grupo: name, items }) => (
+            <section key={name} className="space-y-3">
+              <h2 className="text-sm font-semibold text-sage-700">
+                {name} <span className="font-normal text-sage-500 tabular-nums">{items.length}</span>
+              </h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                {items.map(food => <FoodCard key={food.id} food={food} onOpen={() => setSelected(food)} />)}
+              </div>
+            </section>
+          ))
+        )}
+
+        <p className="text-xs text-sage-500">{t.foods_sources_note}</p>
+      </>
 
       {selected && <FoodDetail food={selected} onClose={() => setSelected(null)} />}
     </div>
