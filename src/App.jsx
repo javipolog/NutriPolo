@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw, Star } from 'lucide-react';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, useToast } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
@@ -15,7 +15,7 @@ import { countPendingReminders } from './components/RemindersPanel';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.14.1';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -37,10 +37,10 @@ const WhatsNewModal = () => {
     <Modal open={open} onClose={handleClose} title={t.whats_new_title.replace('{version}', APP_VERSION)} size="sm">
       <div className="space-y-4">
         <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
-          <Star size={20} className="text-wellness-500 mt-0.5 shrink-0" />
+          <Package size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">{t.whats_new_reviews_title}</p>
-            <p className="text-xs text-sage-600 mt-1">{t.whats_new_reviews_desc}</p>
+            <p className="text-sm font-semibold text-sage-800">{t.whats_new_foods_title}</p>
+            <p className="text-xs text-sage-600 mt-1">{t.whats_new_foods_desc}</p>
           </div>
         </div>
 
