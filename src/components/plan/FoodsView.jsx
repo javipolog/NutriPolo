@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Apple, Search, AlertTriangle } from 'lucide-react';
-import { Input, Modal, Badge, EmptyState, Spinner, SegmentedControl, clickableProps } from '../UI';
-import { loadFoodLibrary, foodImageUrl, filterFoods, groupFoods, needsReview, isGeneric } from '../../services/foodCatalog';
-import { formatCurrency } from '../../stores/store';
+import React, { useMemo, useRef, useState } from 'react';
+import { Apple, Search, AlertTriangle, ImagePlus, RotateCcw, Pencil, Save } from 'lucide-react';
+import { Button, Input, Modal, Badge, EmptyState, Spinner, SegmentedControl, clickableProps, useToast } from '../UI';
+import { foodImageUrl, filterFoods, groupFoods, needsReview, isGeneric } from '../../services/foodCatalog';
+import { imageFileToDataUrl } from '../../services/planPdf';
+import { useFoodLibrary } from '../../hooks/useFoodLibrary';
+import useStore, { formatCurrency } from '../../stores/store';
 import { useT, useLocale, plural } from '../../i18n';
 
 const NUTRIENT_ROWS = [
@@ -30,6 +32,7 @@ const SourceBadge = ({ food }) => {
   return (
     <>
       {isGeneric(food) && <Badge tone="success">{t.foods_generic_badge}</Badge>}
+      {food.editado && <Badge tone="accent" icon={Pencil}>{t.foods_edited}</Badge>}
       {fuente === 'openfoodfacts' && <Badge tone="neutral">{t.foods_source_label}</Badge>}
       {fuente === 'bedca' && <Badge tone="info">{aproximado ? t.foods_source_bedca_approx : t.foods_source_bedca}</Badge>}
     </>
@@ -82,17 +85,58 @@ const FoodCard = ({ food, onOpen }) => {
   );
 };
 
+// "12,5" o "12.5" → 12.5; buit → null; text que no és un número → NaN
+const parseAmount = (v) => {
+  const s = String(v ?? '').trim().replace(',', '.');
+  return s === '' ? null : Number(s);
+};
+
 const FoodDetail = ({ food, onClose }) => {
   const t = useT();
   const num = useNumber();
+  const toast = useToast();
+  const setFoodEdit = useStore(s => s.setFoodEdit);
+  const clearFoodEdit = useStore(s => s.clearFoodEdit);
+  const fileRef = useRef(null);
+  const [draft, setDraft] = useState(null); // valors en edició, com a text
   const p = food.por100g || {};
-  const { formato = {}, precio = {}, nutricion = {} } = food;
+  const { formato = {}, precio = {}, nutricion = {}, editado = {} } = food;
+
+  const changePhoto = async (file) => {
+    if (!file) return;
+    try {
+      setFoodEdit(food.id, { imagen: await imageFileToDataUrl(file) });
+    } catch {
+      toast.error(t.pf_image_error.replace('{name}', file.name));
+    }
+  };
+
+  const startEditing = () => setDraft(Object.fromEntries(NUTRIENT_ROWS.map(([key]) => [key, p[key] == null ? '' : String(p[key]).replace('.', ',')])));
+  const parsed = draft && Object.fromEntries(NUTRIENT_ROWS.map(([key]) => [key, parseAmount(draft[key])]));
+  const invalid = parsed && Object.values(parsed).some(v => Number.isNaN(v) || v < 0);
+  const saveValues = () => {
+    setFoodEdit(food.id, { por100g: parsed });
+    setDraft(null);
+  };
 
   return (
     <Modal open onClose={onClose} title={food.basico}>
       <div className="grid sm:grid-cols-[200px_1fr] gap-6">
         <div className="space-y-2">
           <FoodPhoto food={food} className="border border-sage-200" />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={e => { changePhoto(e.target.files[0]); e.target.value = ''; }}
+          />
+          <div className="flex flex-wrap gap-1.5">
+            <Button variant="secondary" size="sm" icon={ImagePlus} onClick={() => fileRef.current?.click()}>{t.foods_change_photo}</Button>
+            {editado.imagen && (
+              <Button variant="ghost" size="sm" icon={RotateCcw} onClick={() => clearFoodEdit(food.id, 'imagen')}>{t.foods_restore_photo}</Button>
+            )}
+          </div>
           <p className="text-sm text-sage-700">{isGeneric(food) ? t.foods_generic_photo : food.nombre}</p>
           <p className="text-xs text-sage-500 tabular-nums">
             {[formato.envase, formato.cantidad != null && `${num(formato.cantidad)} ${formato.unidad || ''}`].filter(Boolean).join(' · ')}
@@ -102,29 +146,68 @@ const FoodDetail = ({ food, onClose }) => {
 
         <div className="space-y-4">
           <div>
-            <h3 className="text-xs font-semibold text-sage-700 mb-2">{t.foods_per_100}</h3>
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="text-xs font-semibold text-sage-700">{t.foods_per_100}</h3>
+              {!draft && (
+                <div className="ml-auto flex gap-1">
+                  {editado.por100g && (
+                    <Button variant="ghost" size="sm" icon={RotateCcw} onClick={() => clearFoodEdit(food.id, 'por100g')}>{t.foods_restore_values}</Button>
+                  )}
+                  <Button variant="ghost" size="sm" icon={Pencil} onClick={startEditing}>{t.foods_edit_values}</Button>
+                </div>
+              )}
+            </div>
             <table className="w-full text-sm">
               <tbody>
                 {NUTRIENT_ROWS.map(([key, label, unit]) => (
                   <tr key={key} className="border-b border-sage-100 last:border-0">
-                    <td className={`py-1.5 ${key === 'azucares' || key === 'grasasSaturadas' ? 'pl-4 text-sage-500' : 'text-sage-700'}`}>{t[label]}</td>
+                    <td className={`py-1.5 ${key === 'azucares' || key === 'grasasSaturadas' ? 'pl-4 text-sage-500' : 'text-sage-700'}`}>
+                      {draft ? <label htmlFor={`food-${key}`}>{t[label]}</label> : t[label]}
+                    </td>
                     <td className="py-1.5 text-right tabular-nums text-sage-900">
-                      {num(p[key])}{p[key] != null && <span className="text-sage-500"> {unit}</span>}
+                      {draft ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <input
+                            id={`food-${key}`}
+                            inputMode="decimal"
+                            value={draft[key]}
+                            onChange={e => setDraft({ ...draft, [key]: e.target.value })}
+                            aria-invalid={Number.isNaN(parsed[key]) || parsed[key] < 0 || undefined}
+                            className={`w-20 text-right tabular-nums text-sm text-sage-800 bg-white border rounded-button px-2 py-1 focus:outline-none focus:border-wellness-400 ${Number.isNaN(parsed[key]) || parsed[key] < 0 ? 'border-danger' : 'border-sage-300'}`}
+                          />
+                          <span className="w-7 text-left text-sage-500">{unit}</span>
+                        </span>
+                      ) : (
+                        <>{num(p[key])}{p[key] != null && <span className="text-sage-500"> {unit}</span>}</>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <ReviewBadge food={food} />
-              <SourceBadge food={food} />
-            </div>
-            <p className="text-xs text-sage-500 mt-2">
-              {nutricion.equivalente && <>{t.foods_generic_equivalent.replace('{name}', nutricion.equivalente)} </>}
-              {nutricion.fuente === 'bedca'
-                ? t.foods_source_bedca_desc.replace('{name}', nutricion.alimentoGenerico || '')
-                : nutricion.fuente === 'openfoodfacts' ? t.foods_source_label_desc : t.foods_no_data_desc}
-            </p>
+            {draft ? (
+              <div className="mt-3 flex justify-end gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>{t.cancel}</Button>
+                <Button variant="primary" size="sm" icon={Save} onClick={saveValues} disabled={invalid}>{t.save}</Button>
+              </div>
+            ) : (
+              <>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <ReviewBadge food={food} />
+                  <SourceBadge food={food} />
+                </div>
+                <p className="text-xs text-sage-500 mt-2">
+                  {nutricion.fuente === 'manual' ? t.foods_source_manual_desc : (
+                    <>
+                      {nutricion.equivalente && <>{t.foods_generic_equivalent.replace('{name}', nutricion.equivalente)} </>}
+                      {nutricion.fuente === 'bedca'
+                        ? t.foods_source_bedca_desc.replace('{name}', nutricion.alimentoGenerico || '')
+                        : nutricion.fuente === 'openfoodfacts' ? t.foods_source_label_desc : t.foods_no_data_desc}
+                    </>
+                  )}
+                </p>
+              </>
+            )}
           </div>
 
           {food.ingredientes && (
@@ -147,20 +230,16 @@ const FoodDetail = ({ food, onClose }) => {
 
 export const FoodsView = () => {
   const t = useT();
-  const [library, setLibrary] = useState(null);
+  const library = useFoodLibrary();
   const [query, setQuery] = useState('');
   const [grupo, setGrupo] = useState('all');
   const [show, setShow] = useState('all');
   const [source, setSource] = useState('all');
-  const [selected, setSelected] = useState(null);
+  const [selectedId, setSelectedId] = useState(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    loadFoodLibrary().then(lib => { if (!cancelled) setLibrary(lib); });
-    return () => { cancelled = true; };
-  }, []);
-
-  const foods = library?.alimentos || [];
+  const foods = library.alimentos;
+  // Per id, perquè el detall es refresqui quan s'hi canvia la foto o els valors
+  const selected = selectedId && foods.find(f => f.id === selectedId);
   const groups = useMemo(() => groupFoods(foods).map(g => g.grupo), [foods]);
   const reviewCount = useMemo(() => foods.filter(needsReview).length, [foods]);
   const visible = useMemo(
@@ -169,7 +248,7 @@ export const FoodsView = () => {
   );
   const visibleCount = visible.reduce((n, g) => n + g.items.length, 0);
 
-  if (!library) {
+  if (library.loading) {
     return <div className="flex justify-center py-24"><Spinner /></div>;
   }
 
@@ -238,7 +317,7 @@ export const FoodsView = () => {
                 {name} <span className="font-normal text-sage-500 tabular-nums">{items.length}</span>
               </h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                {items.map(food => <FoodCard key={food.id} food={food} onOpen={() => setSelected(food)} />)}
+                {items.map(food => <FoodCard key={food.id} food={food} onOpen={() => setSelectedId(food.id)} />)}
               </div>
             </section>
           ))
@@ -247,7 +326,7 @@ export const FoodsView = () => {
         <p className="text-xs text-sage-500">{t.foods_sources_note}</p>
       </>
 
-      {selected && <FoodDetail food={selected} onClose={() => setSelected(null)} />}
+      {selected && <FoodDetail food={selected} onClose={() => setSelectedId(null)} />}
     </div>
   );
 };

@@ -56,6 +56,24 @@ export function buildFoodLibrary(mercadona = []) {
   return order.flatMap(cat => all.filter(f => f.categoria === cat));
 }
 
+/**
+ * Aplica els canvis propis (planLibrary.alimentos) sobre la biblioteca: una
+ * foto pròpia (data URL) i/o uns valors per 100 g escrits a mà. L'aliment
+ * guarda `editado` per poder tornar a l'original.
+ */
+export function applyFoodEdits(foods, edits = {}) {
+  return foods.map(food => {
+    const edit = edits[food.id];
+    if (!edit?.imagen && !edit?.por100g) return food;
+    return {
+      ...food,
+      ...(edit.imagen && { imagenUrl: edit.imagen }),
+      ...(edit.por100g && { por100g: edit.por100g, nutricion: { ...food.nutricion, fuente: 'manual', control: 'ok' } }),
+      editado: { imagen: !!edit.imagen, por100g: !!edit.por100g },
+    };
+  });
+}
+
 /** La biblioteca completa; `mercadona` diu si el catàleg de la botiga hi és. */
 export async function loadFoodLibrary() {
   const data = await loadFoodCatalog();

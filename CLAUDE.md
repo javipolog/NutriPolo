@@ -257,6 +257,7 @@ fn quit_app()                                         // el JS el crida despres 
 - Nutrició per 100 g: Open Food Facts per EAN; si no hi és o no quadra (control Atwater), BEDCA. `nutricion.fuente` / `nutricion.control` (`ok`, `revisar`, `incompleto`, `sin_datos`)
 - Fotos: les originals de la botiga (600×600 sobre blanc), sense retocar
 - Una sola biblioteca (`buildFoodLibrary` / `loadFoodLibrary`, hook `useFoodLibrary`): els bàsics de Mercadona i els aliments genèrics de `genericFoods.js`, que van primer dins de cada categoria (les mateixes que Mercadona) i prenen la nutrició del producte equivalent (`mercadona` = sourceId, `nutricion.equivalente`). Si Mercadona no s'ha generat, només hi ha els genèrics
+- Canvis propis: des del detall d'un aliment es pot canviar la foto i escriure els valors per 100 g. Es guarden a `planLibrary.alimentos` (`{ [foodId]: { imagen?, por100g?, updatedAt } }`, `setFoodEdit` / `clearFoodEdit`), entren a les còpies de seguretat i s'apliquen amb `applyFoodEdits` (`useFoodLibrary`); el catàleg no es toca i es pot tornar a la foto o als valors originals. Els productes de la planificació també poden canviar de foto (`updatePlanProduct`)
 - Genèrics: fotos reals de Pixabay a `public/alimentos/<id>.jpg` (sí que van a git), totes retallades sobre blanc amb la mateixa mida i ombra (`scripts/food-catalog-photos.py`, cal Pillow). Res d'imatges generades amb IA
 
 ### Estils

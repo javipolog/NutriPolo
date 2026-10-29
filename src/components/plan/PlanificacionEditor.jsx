@@ -417,6 +417,8 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
   const fileRef = useRef(null);
   const foodFileRef = useRef(null);
   const [photoFor, setPhotoFor] = useState(null);
+  const replaceRef = useRef(null);
+  const [replaceFor, setReplaceFor] = useState(null);
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -486,6 +488,17 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
       }
     }
     if (added.length) onChange([...selected, ...added]);
+  };
+
+  // Canvia la foto d'un producte de la biblioteca (a totes les planificacions)
+  const onReplaceFile = async (file) => {
+    if (!file || !replaceFor) return;
+    try {
+      updatePlanProduct(replaceFor.id, { imagen: await imageFileToDataUrl(file) });
+    } catch {
+      toast.error(t.pf_image_error.replace('{name}', file.name));
+    }
+    setReplaceFor(null);
   };
 
   // La foto d'un aliment crea el producte amb el seu nom i el marca
@@ -591,6 +604,13 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
           className="hidden"
           onChange={e => { onFiles([...e.target.files]); e.target.value = ''; }}
         />
+        <input
+          ref={replaceRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={e => { onReplaceFile(e.target.files[0]); e.target.value = ''; }}
+        />
         <div className="flex flex-wrap gap-2">
           <Button variant="secondary" size="sm" icon={Apple} onClick={() => setCatalogOpen(true)}>{t.pf_food_catalog}</Button>
           <Button variant="secondary" size="sm" icon={ImagePlus} onClick={() => fileRef.current?.click()}>{t.pf_add_products}</Button>
@@ -613,7 +633,12 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
                     className="w-4 h-4 accent-wellness-400"
                   />
                 </label>
-                <div className="absolute top-1 right-1">
+                <div className="absolute top-1 right-1 flex">
+                  <IconBtn
+                    icon={ImagePlus}
+                    label={t.pf_product_change_photo.replace('{name}', pr.nombre)}
+                    onClick={() => { setReplaceFor(pr); replaceRef.current?.click(); }}
+                  />
                   <IconBtn icon={Trash2} label={`${t.pf_remove}: ${pr.nombre}`} danger onClick={() => remove(pr)} />
                 </div>
                 <img src={pr.imagen} alt="" className="h-28 w-full object-contain mt-5" />

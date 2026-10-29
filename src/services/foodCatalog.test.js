@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterFoods, groupFoods, needsReview, foodImageUrl, buildFoodLibrary, foodMatcher, isGeneric } from './foodCatalog';
+import { filterFoods, groupFoods, needsReview, foodImageUrl, buildFoodLibrary, foodMatcher, isGeneric, applyFoodEdits } from './foodCatalog';
 import { GENERIC_FOODS } from './genericFoods';
 
 const food = (basico, nombre, categoria, control = 'ok', imagen = null) =>
@@ -103,5 +103,33 @@ describe('foodMatcher', () => {
   it('only takes exact matches', () => {
     expect(match('Tomate frito')).toBeNull();
     expect(match('')).toBeNull();
+  });
+});
+
+describe('applyFoodEdits', () => {
+  const lib = buildFoodLibrary([
+    { id: 'merc-87204', sourceId: '87204', basico: 'Salmón', nombre: 'Porción de salmón', categoria: 'Pescado y marisco', imagen: '87204.jpg', por100g: { kcal: 208 }, nutricion: { fuente: 'bedca', control: 'revisar' } },
+  ]);
+
+  it('leaves the library untouched without edits', () => {
+    expect(applyFoodEdits(lib, {})).toEqual(lib);
+  });
+
+  it('uses the own photo and the values typed by hand', () => {
+    const edited = applyFoodEdits(lib, {
+      'merc-87204': { imagen: 'data:image/jpeg;base64,AAA', por100g: { kcal: 200, proteinas: 20 } },
+      'gen-salmon': { imagen: 'data:image/jpeg;base64,BBB' },
+    });
+    const merc = edited.find(f => f.id === 'merc-87204');
+    expect(foodImageUrl(merc)).toBe('data:image/jpeg;base64,AAA');
+    expect(merc.por100g).toEqual({ kcal: 200, proteinas: 20 });
+    expect(merc.nutricion).toMatchObject({ fuente: 'manual', control: 'ok' });
+    expect(needsReview(merc)).toBe(false);
+    expect(merc.editado).toEqual({ imagen: true, por100g: true });
+
+    const gen = edited.find(f => f.id === 'gen-salmon');
+    expect(foodImageUrl(gen)).toBe('data:image/jpeg;base64,BBB');
+    expect(gen.por100g).toEqual({ kcal: 208 });
+    expect(gen.editado).toEqual({ imagen: true, por100g: false });
   });
 });
