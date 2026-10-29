@@ -964,6 +964,68 @@ fn save_bytes_to_documents(
 }
 
 // ============================================
+// WEB RECIPES (nutripoloraquel.com/recetario)
+// ============================================
+
+const RECIPES_ORIGIN: &str = "https://nutripoloraquel.com";
+const RECIPES_MAX_BYTES: usize = 5 * 1024 * 1024;
+
+/// Only the recipe REST endpoint and recipe pages of the practice's website.
+fn recipes_path_allowed(path: &str) -> bool {
+    (path.starts_with("/wp-json/wp/v2/receta") || path.starts_with("/receta/"))
+        && !path.contains("..")
+        && !path.contains("//")
+        && path.chars().all(|c| c.is_ascii_alphanumeric() || "/-_.?=&:,%".contains(c))
+}
+
+/// GET a recipe list (JSON) or recipe page (HTML) from the website as text.
+/// On HTTP errors the message carries the start of the body, so the frontend
+/// can tell WordPress's "page out of range" apart from real failures.
+#[tauri::command]
+async fn recipes_fetch(path: String) -> Result<String, String> {
+    if !recipes_path_allowed(&path) {
+        return Err("recipes_path_not_allowed".into());
+    }
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        // The site serves requests one at a time (~6 s each); leave room for a queue
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| sanitize_err(e, "recipes_network_error"))?;
+    let resp = client
+        .get(format!("{}{}", RECIPES_ORIGIN, path))
+        .send()
+        .await
+        .map_err(|e| sanitize_err(e, "recipes_network_error"))?;
+    let status = resp.status();
+    let bytes = resp.bytes().await.map_err(|e| sanitize_err(e, "recipes_network_error"))?;
+    if bytes.len() > RECIPES_MAX_BYTES {
+        return Err("recipes_response_too_large".into());
+    }
+    let body = String::from_utf8_lossy(&bytes).into_owned();
+    if !status.is_success() {
+        return Err(format!("recipes_http_{}: {}", status.as_u16(), body.chars().take(200).collect::<String>()));
+    }
+    Ok(body)
+}
+
+#[cfg(test)]
+mod recipes_tests {
+    use super::recipes_path_allowed;
+
+    #[test]
+    fn only_recipe_paths_are_allowed() {
+        assert!(recipes_path_allowed("/wp-json/wp/v2/receta?per_page=100&page=1&_embed=wp:featuredmedia&_fields=id,link"));
+        assert!(recipes_path_allowed("/receta/%c3%b1oquis-cremosos/"));
+        assert!(!recipes_path_allowed("/wp-json/wp/v2/users"));
+        assert!(!recipes_path_allowed("/receta/../wp-admin/"));
+        assert!(!recipes_path_allowed("/receta//evil.example/"));
+        assert!(!recipes_path_allowed("/receta/x@evil.example"));
+        assert!(!recipes_path_allowed("https://evil.example/receta/"));
+    }
+}
+
+// ============================================
 // BACKGROUND MODE (tray + autostart)
 // ============================================
 
@@ -1107,6 +1169,7 @@ fn main() {
             delete_document_file,
             delete_documents_directory,
             save_bytes_to_documents,
+            recipes_fetch,
             autostart_is_enabled,
             autostart_set,
             configure_tray,

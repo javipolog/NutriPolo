@@ -1388,6 +1388,10 @@ const useStore = create(
       deletePlanProduct: (id) => set(s => ({
         planLibrary: { ...s.planLibrary, productos: s.planLibrary.productos.filter(p => p.id !== id) },
       })),
+      // Memòria cau del receptari de la web (services/webRecipes.js)
+      setWebRecipes: ({ items, syncedAt }) => set(s => ({
+        planLibrary: { ...s.planLibrary, recetasWeb: { items, syncedAt } },
+      })),
 
       // ---- CLIENT DOCUMENTS ----
       clientDocuments: [],

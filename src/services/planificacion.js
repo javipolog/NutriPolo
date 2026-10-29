@@ -215,10 +215,10 @@ const dishKey = (title) => String(title || '').trim().toLowerCase().normalize('N
 
 /**
  * Plats i opcions ja fets servir, per títol, per autocompletar-ne els
- * ingredients. Mana la planificació més recent.
+ * ingredients. Mana la planificació més recent; després, les receptes de la web.
  * @returns {{ titles: string[], find(title): { alimentos, receta? } | null }}
  */
-export function buildDishIndex(plans, excludeId) {
+export function buildDishIndex(plans, excludeId, webRecipes = []) {
   const map = new Map();
   const add = (titulo, entry) => {
     const k = dishKey(titulo);
@@ -238,6 +238,7 @@ export function buildDishIndex(plans, excludeId) {
       for (const o of p[k]?.opciones || []) if (o.titulo) add(o.titulo, { alimentos: o.alimentos || '', nota: o.nota || '' });
     }
   }
+  for (const r of webRecipes) add(r.titulo, { alimentos: (r.ingredientes || []).join('\n'), receta: r.url || '', web: true });
   return {
     titles: [...map.values()].map(e => e.titulo).sort((a, b) => a.localeCompare(b)),
     find: (title) => map.get(dishKey(title)) || null,

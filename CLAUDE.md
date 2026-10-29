@@ -57,6 +57,7 @@ nutripolo-app/
 │   │   ├── NutritionPlanEditor.jsx   # Llista de plans + editor antic (per àpats)
 │   │   ├── plan/PlanificacionEditor.jsx # Editor a pantalla completa de la planificació setmanal
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
+│   │   ├── plan/WebRecipePicker.jsx  # Selector de receptes de nutripoloraquel.com
 │   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
 │   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
@@ -70,6 +71,7 @@ nutripolo-app/
 │   ├── hooks/
 │   │   ├── useBackgroundJobs.js      # Auto-sync GCal + enviament automatic de recordatoris
 │   │   ├── useReminderActions.js     # Accions de recordatori (WhatsApp / email) amb registre
+│   │   ├── useWebRecipes.js          # Receptes de la web en memòria cau + sincronització
 │   │   └── useNow.js                 # Rellotge que es refresca
 │   │
 │   ├── services/                     # Serveis de negoci
@@ -84,6 +86,7 @@ nutripolo-app/
 │   │   ├── planificacion.js          # Model de la planificació (pur, amb tests)
 │   │   ├── planPdf.js                # Tria generador segons format + imatges de productes
 │   │   ├── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
+│   │   ├── webRecipes.js             # Receptari de la web: API REST + parseig HTML (pur, amb tests)
 │   │   └── reviewRequestService.js   # Peticio de ressenya a Google despres de la consulta (pura, amb tests)
 │   │
 │   ├── stores/                       # Estat global (Zustand)
@@ -184,6 +187,9 @@ fn gcal_create_event(token, calendar_id, event_json) -> Result<String, String>
 fn gcal_update_event(token, calendar_id, event_id, event_json) -> Result<String, String>
 fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
 
+// Receptari de la web (nomes nutripoloraquel.com: /wp-json/wp/v2/receta i /receta/...)
+fn recipes_fetch(path) -> Result<String, String>
+
 // Segon pla (safata del sistema + inici amb Windows)
 fn autostart_is_enabled() / autostart_set(enabled)   // clau Run del registre, arrenca amb --hidden
 fn configure_tray(close_to_tray, show_label, quit_label)
@@ -222,6 +228,8 @@ fn quit_app()                                         // el JS el crida despres 
 - Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
 - Una planificació nova copia el contingut de l'última del client; els títols ja usats autocompleten ingredients (`buildDishIndex`)
 - Fonts del PDF: Poppins (OFL) a `public/fonts`
+- Receptes de la web (`webRecipes.js`): llista per l'API REST de WordPress (tipus `receta`) i ingredients/temps/etiquetes llegits de l'HTML de cada recepta (camps ACF que l'API no exposa). Memòria cau a `planLibrary.recetasWeb` (`{ items, syncedAt }`); es resincronitza en obrir l'editor si té més de 6 h i només es baixen les receptes amb `modified` nou. El servidor atén les peticions en sèrie (~6 s cadascuna): les pàgines es baixen d'una en una, la llista es mostra de seguida amb `ingredientes: null` per a les pendents, i una recepta pendent es baixa a l'acte si es tria (`loadWebRecipeNow`). Triar-ne una omple títol, ingredients i enllaç (`receta`); també surten a l'autocompletat de títols (`buildDishIndex`, per darrere dels plans)
+- Les imatges de la web porten `referrerPolicy="no-referrer"`: el servidor talla la connexió si rep un Referer d'un altre lloc
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)

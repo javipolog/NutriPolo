@@ -124,4 +124,15 @@ describe('buildDishIndex', () => {
     expect(idx.titles).toEqual([]);
     expect(buildDishIndex([older]).titles).not.toContain('LIBRE CON MODERACIÓN (elegir 1 comida)');
   });
+
+  it('adds website recipes after the plans, which keep priority', () => {
+    const web = [
+      { titulo: 'Tortitas de avena', ingredientes: ['1 huevo', '200 g avena'], url: 'https://nutripoloraquel.com/receta/tortitas-de-avena/' },
+      { titulo: 'Rostidera de sepia + ensalada', ingredientes: ['Sepia de la web'], url: 'https://nutripoloraquel.com/receta/sepia/' },
+    ];
+    const idx = buildDishIndex([newer], undefined, web);
+    expect(idx.find('tortitas de avena')).toMatchObject({ alimentos: '1 huevo\n200 g avena', receta: web[0].url, web: true });
+    expect(idx.find('Rostidera de sepia + ensalada').alimentos).toBe('Sepia\nPatata nueva');
+    expect(idx.titles).toContain('Tortitas de avena');
+  });
 });
