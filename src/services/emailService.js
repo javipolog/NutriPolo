@@ -18,12 +18,13 @@ import { open as openUrl } from '@tauri-apps/api/shell';
  *   {{citaUbicacio}}  {{citaTipus}}   {{planFechaFin}}   {{nutriTel}}
  *   {{citaDia}}       {{citaDireccio}} {{citaDuracio}}   {{nutriWeb}}
  *   {{facturaNum}}    {{facturaTotal}}
+ *   {{resenaUrl}}     (Google review link, review requests only)
  *
  * `lang` (es/ca/en) only affects {{citaDia}}; defaults to config.appLang.
  */
 const WEEKDAY_LOCALES = { es: 'es-ES', ca: 'ca-ES', en: 'en-GB' };
 
-export const resolveTemplate = (template, { client, consultation, plan, invoice, document, config, locationName, lang } = {}) => {
+export const resolveTemplate = (template, { client, consultation, plan, invoice, document, config, locationName, lang, reviewUrl } = {}) => {
   if (!template) return '';
 
   const fmt = (d) => {
@@ -62,6 +63,7 @@ export const resolveTemplate = (template, { client, consultation, plan, invoice,
     '{{nutriEmail}}':      config?.email         || '—',
     '{{nutriTel}}':        config?.telefono      || '—',
     '{{nutriWeb}}':        config?.web           || '—',
+    '{{resenaUrl}}':       reviewUrl             || '—',
   };
 
   // split/join instead of replaceAll: a replacement string containing `$&`
@@ -287,6 +289,9 @@ export const AVAILABLE_VARIABLES = [
   { key: '{{nutriTel}}',       label: 'Tu teléfono' },
   { key: '{{nutriWeb}}',       label: 'Tu web' },
 ];
+
+/** Only meaningful in review-request templates, so not in AVAILABLE_VARIABLES. */
+export const REVIEW_URL_VARIABLE = { key: '{{resenaUrl}}', label: 'Enlace de reseña de Google' };
 
 // ── Email providers (webmail openers) ─────────────────────────────────────
 

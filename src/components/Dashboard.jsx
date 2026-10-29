@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Card, StatCard, Button, Badge, EmptyState, StatusBadge } from './UI';
 import useStore, { formatCurrency, formatDate, formatDateShort, filterVisibleConsultations } from '../stores/store';
-import { RemindersPanel } from './RemindersPanel';
+import { RemindersPanel, ReviewRequestsPanel } from './RemindersPanel';
 import { useChartTheme } from '../hooks/useChartTheme';
 import { ConsultationModal } from './ConsultationModal';
 import { ClientModal } from './ClientModal';
@@ -717,6 +717,8 @@ export const Dashboard = () => {
             </div>
 
             <RemindersPanel onNavigate={setCurrentView} />
+
+            <ReviewRequestsPanel onNavigate={setCurrentView} />
 
             <ActivityCharts
                 consultationsChart={consultationsChart}

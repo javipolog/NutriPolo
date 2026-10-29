@@ -104,7 +104,8 @@ export function isQuietTime(now, quietHours) {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function channelContact(channel, client, config) {
+/** The client's address for a channel (valid email / wa.me phone), or ''. */
+export function channelContact(channel, client, config) {
   if (channel === 'email') return EMAIL_RE.test(client?.email || '') ? client.email : '';
   return normalizeWhatsAppPhone(client?.whatsapp || client?.telefono, config?.whatsappCountryCode);
 }
@@ -239,22 +240,27 @@ export async function openWhatsAppReminder({ consultation, client, config, text 
 }
 
 /**
- * Send an email reminder. With SMTP configured it is sent directly;
+ * Send an email to a client. With SMTP configured it is sent directly;
  * otherwise the user's mail client opens pre-filled (`manual: true`).
  */
-export async function sendEmailReminder({ consultation, client, config, smtpPassword = '', subject, body }) {
-  const built = buildReminderEmail({ consultation, client, config });
-  const finalSubject = subject ?? built.subject;
-  const finalBody = body ?? built.body;
+export async function sendClientEmail({ client, config, smtpPassword = '', subject, body }) {
   const smtpConfig = buildSmtpConfig(config, smtpPassword);
   if (smtpConfig) {
     const result = await sendEmailSMTP({
-      to: client.email, toName: client.nombre, subject: finalSubject, body: finalBody, smtpConfig,
+      to: client.email, toName: client.nombre, subject, body, smtpConfig,
     });
     return { success: !!result?.success, error: result?.error || null, manual: false };
   }
   const result = await openMailClient({
-    to: client.email, subject: finalSubject, body: finalBody, provider: config?.emailProvider || 'gmail',
+    to: client.email, subject, body, provider: config?.emailProvider || 'gmail',
   });
   return { success: result?.success !== false, error: result?.error || null, manual: true };
+}
+
+/** Send an email reminder (see sendClientEmail); `subject` / `body` override the template. */
+export async function sendEmailReminder({ consultation, client, config, smtpPassword = '', subject, body }) {
+  const built = buildReminderEmail({ consultation, client, config });
+  return sendClientEmail({
+    client, config, smtpPassword, subject: subject ?? built.subject, body: body ?? built.body,
+  });
 }
