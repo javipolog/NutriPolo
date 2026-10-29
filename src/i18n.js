@@ -789,6 +789,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
+    whats_new_foods_title:   'Los alimentos del plan, en Productos',
+    whats_new_foods_desc:    'La sección Productos de la planificación ya muestra los alimentos que has escrito en los desayunos, la media mañana, la merienda y el menú. Márcalos para que salgan en el PDF, o añade con un clic una foto a los que aún no la tienen.',
     whats_new_reviews_title: 'Pide reseñas en Google después de la consulta',
     whats_new_reviews_desc:  'Tras la consulta, la app puede pedir al paciente una reseña en Google por email o WhatsApp, una sola vez. Elige si tras la primera visita o también en las de seguimiento, y pon el enlace de reseña de cada ubicación. Actívalo en Ajustes → Recordatorios de citas → Reseñas en Google.',
     whats_new_reminders_title: 'Recordatorios de citas por email y WhatsApp',
@@ -1948,6 +1950,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
+    whats_new_foods_title:   'Els aliments del pla, a Productes',
+    whats_new_foods_desc:    'La secció Productes de la planificació ja mostra els aliments que has escrit als esmorzars, el mig matí, el berenar i el menú. Marca\'ls perquè surtin al PDF, o afegeix amb un clic una foto als que encara no en tenen.',
     whats_new_reviews_title: 'Demana ressenyes a Google després de la consulta',
     whats_new_reviews_desc:  'Després de la consulta, l\'app pot demanar al pacient una ressenya a Google per correu o WhatsApp, una sola vegada. Tria si després de la primera visita o també en les de seguiment, i posa l\'enllaç de ressenya de cada ubicació. Activa-ho a Ajustos → Recordatoris de cites → Ressenyes a Google.',
     whats_new_reminders_title: 'Recordatoris de cites per correu i WhatsApp',
@@ -3102,6 +3106,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
+    whats_new_foods_title:   'The plan\'s foods, in Products',
+    whats_new_foods_desc:    'The plan\'s Products section now lists the foods you wrote in breakfasts, mid-morning, afternoon snack and the menu. Tick them to show them in the PDF, or add a photo in one click to those that don\'t have one yet.',
     whats_new_reviews_title: 'Ask for Google reviews after the appointment',
     whats_new_reviews_desc:  'After the appointment, the app can ask the patient for a Google review by email or WhatsApp, only once. Choose first visits and/or follow-ups and set the review link of each location. Turn it on in Settings → Appointment reminders → Google reviews.',
     whats_new_reminders_title: 'Appointment reminders by email and WhatsApp',
