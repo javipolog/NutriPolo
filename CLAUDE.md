@@ -54,7 +54,9 @@ nutripolo-app/
 │   │   ├── Invoices.jsx              # Llistat de factures
 │   │   ├── MeasurementChart.jsx      # Grafic d'evolucio de mesures
 │   │   ├── LoadErrorScreen.jsx       # Pantalla si el fitxer de dades no es pot llegir
-│   │   ├── NutritionPlanEditor.jsx   # Editor de plans nutricionals + PDF
+│   │   ├── NutritionPlanEditor.jsx   # Llista de plans + editor antic (per àpats)
+│   │   ├── plan/PlanificacionEditor.jsx # Editor a pantalla completa de la planificació setmanal
+│   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
 │   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
 │   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
@@ -77,7 +79,10 @@ nutripolo-app/
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
 │   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
-│   │   ├── pdfPlanGenerator.js       # Generacio PDF plans nutricionals (pdf-lib)
+│   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
+│   │   ├── pdfPlanificacionGenerator.js # PDF de la planificació (substitueix Canva; Poppins)
+│   │   ├── planificacion.js          # Model de la planificació (pur, amb tests)
+│   │   ├── planPdf.js                # Tria generador segons format + imatges de productes
 │   │   ├── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
 │   │   └── reviewRequestService.js   # Peticio de ressenya a Google despres de la consulta (pura, amb tests)
 │   │
@@ -210,6 +215,13 @@ fn quit_app()                                         // el JS el crida despres 
 - Email automatic per SMTP des de `useBackgroundJobs` (cada 5 min, nomes amb l'app en marxa); WhatsApp semiautomatic via wa.me
 - Ressenya de Google despres de la consulta: `config.reviewRequests` (defectes a `DEFAULT_REVIEW_CONFIG`): primera visita / seguiment (per historial del client), enllac i interruptor per ubicacio (`locations[id]`, si no `defaultUrl`), `delayHours` despres del final. Estat a `consultation.reviewRequest.{email|whatsapp}`; nomes un cop per client (`already_asked`); opt-out a `client.recordatorios.review`
 - Segon pla: en tancar la finestra l'app queda a la safata (`config.closeToTray`) i pot arrencar amb Windows amagada (`--hidden`); instancia unica (tauri-plugin-single-instance). Amb xifratge cal desbloquejar abans que s'envii res
+
+### Planificacions (dietes setmanals)
+- Format nou: `nutritionPlans` amb `formato: 'planificacion'` (model a `planificacion.js`); els plans sense `formato` són els antics per àpats i conserven el seu editor i PDF
+- Seccions: `desayunos` / `mediaManana` / `merienda` (opcions), `cantidades`, `menu.dias[]` (7 dies × `comida`/`cena` × `a`/`b`, amb `receta` enllaçada al PDF) i `productos` (ids)
+- Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
+- Una planificació nova copia el contingut de l'última del client; els títols ja usats autocompleten ingredients (`buildDishIndex`)
+- Fonts del PDF: Poppins (OFL) a `public/fonts`
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)

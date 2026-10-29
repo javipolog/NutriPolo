@@ -62,6 +62,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [emailDoc, setEmailDoc] = useState(null);
   const [creating, setCreating] = useState(null); // 'consultation' | 'plan' | 'invoice'
+  const [editingPlan, setEditingPlan] = useState(null);
   const locale = useLocale();
   const { sendWhatsApp } = useReminderActions();
 
@@ -276,7 +277,12 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                 <p className="text-center text-sage-400 py-8 text-sm">{t.no_plans}</p>
               ) : (
                 nutritionPlans.map(p => (
-                  <div key={p.id} className="bg-white dark:bg-sage-800 border border-sage-200 dark:border-sage-700 rounded-soft p-4">
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setEditingPlan(p)}
+                    className="w-full text-left bg-white dark:bg-sage-800 border border-sage-200 dark:border-sage-700 rounded-soft p-4 hover:border-sage-300 hover:shadow-card transition-shadow"
+                  >
                     <div className="flex items-start justify-between">
                       <div>
                         <p className="font-medium text-sage-800 dark:text-sage-100">{p.nombre}</p>
@@ -289,7 +295,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                         'bg-sage-100 text-sage-500'
                       }`}>{p.estado}</span>
                     </div>
-                  </div>
+                  </button>
                 ))
               )}
             </div>
@@ -335,6 +341,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
       {showEdit && <ClientModal client={client} onClose={() => setShowEdit(false)} />}
       {creating === 'consultation' && <ConsultationModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
       {creating === 'plan' && <PlanEditorModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
+      {editingPlan && <PlanEditorModal plan={editingPlan} onClose={() => setEditingPlan(null)} />}
       {creating === 'invoice' && <InvoiceModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
       {emailDoc && (
         <SendEmailModal
