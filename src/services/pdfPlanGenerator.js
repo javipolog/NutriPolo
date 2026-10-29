@@ -34,7 +34,8 @@ const fmt = (d) => {
 };
 
 function wrapText(text, maxWidth, font, size) {
-  const words = (text || '').split(' ');
+  // Els salts de linia (p. ex. un aliment per linia) no es poden codificar en WinAnsi
+  const words = (text || '').split(/\s+/).filter(Boolean);
   const lines = [];
   let line = '';
   for (const word of words) {
