@@ -285,7 +285,6 @@ function AppContent() {
   const autoLockMinutes = useStore(s => Number(s.config.autoLockMinutes) || 0);
   const nombre = useStore(s => s.config.nombre);
   const numColegiada = useStore(s => s.config.numColegiada);
-  const isLoading = useStore(s => s.isLoading);
   const sidebarCollapsed = useStore(s => s.sidebarCollapsed);
   const setSidebarCollapsed = useStore(s => s.setSidebarCollapsed);
   const appTheme = useStore(s => s.appTheme);
@@ -448,17 +447,6 @@ function AppContent() {
     window.addEventListener('keydown', handleKeyboard);
     return () => window.removeEventListener('keydown', handleKeyboard);
   }, [setCurrentView, undo, redo]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-sage-50 flex items-center justify-center">
-        <div className="text-center">
-          <Spinner size="lg" />
-          <p className="text-sage-600 mt-4 text-sm">{t.loading}</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     // Fixed-height shell: only <main> scrolls, so the sidebar stays in place.

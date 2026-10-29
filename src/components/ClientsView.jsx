@@ -84,15 +84,15 @@ export const ClientsView = () => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-48">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
-          <Input
-            value={clientSearch}
-            onChange={e => setClientSearch(e.target.value)}
-            placeholder={t.search_clients}
-            className="pl-9"
-          />
-        </div>
+        {/* The icon goes through Input so the text is padded past it */}
+        <Input
+          icon={Search}
+          value={clientSearch}
+          onChange={e => setClientSearch(e.target.value)}
+          placeholder={t.search_clients}
+          aria-label={t.search_clients}
+          className="flex-1 min-w-48"
+        />
         <select
           value={clientFilters.estado}
           onChange={e => setClientFilters({ estado: e.target.value })}

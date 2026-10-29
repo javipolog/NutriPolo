@@ -462,6 +462,8 @@ const GoogleCalendarSection = () => {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [calendars, setCalendars] = useState([]);
+  // null while loading; '' once loaded; the error text if it failed
+  const [calendarsError, setCalendarsError] = useState(null);
 
   useEffect(() => {
     if (gcal.connected) handleLoadCalendars();
@@ -580,12 +582,16 @@ const GoogleCalendarSection = () => {
   };
 
   const handleLoadCalendars = async () => {
+    setCalendarsError(null);
     try {
       const token = await googleCalendar.ensureToken();
       const calList = await googleCalendar.listCalendars(token);
       setCalendars(calList);
+      setCalendarsError('');
     } catch (e) {
-      toast.error(t.gcal_load_error.replace('{error}', String(e?.message || e)));
+      const msg = String(e?.message || e);
+      setCalendarsError(msg);
+      toast.error(t.gcal_load_error.replace('{error}', msg));
     }
   };
 
@@ -800,7 +806,11 @@ const GoogleCalendarSection = () => {
             </button>
           </div>
           {calendars.length === 0 ? (
-            <p className="text-xs text-sage-400">{t.gcal_loading_calendars}</p>
+            <p className={`text-xs ${calendarsError ? 'text-danger' : 'text-sage-400'}`}>
+              {calendarsError === null ? t.gcal_loading_calendars
+                : calendarsError ? t.gcal_load_error.replace('{error}', calendarsError)
+                : t.gcal_no_calendars}
+            </p>
           ) : (
             <div className="space-y-2">
               {calendars.map(cal => {

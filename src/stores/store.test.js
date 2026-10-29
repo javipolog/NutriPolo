@@ -42,6 +42,17 @@ describe('persistence', () => {
     expect(persisted.state.clients).toHaveLength(20);
   });
 
+  it('turns read-only calendars saved as bidirectional off on load', async () => {
+    saved['nutripolo-storage'] = JSON.stringify({ version: 14, state: { config: { googleCalendar: {
+      calendars: [{ id: 'r', accessRole: 'reader', syncMode: 'bidirectional' }, { id: 'w', accessRole: 'owner', syncMode: 'bidirectional' }],
+      defaultPushCalendarId: 'r',
+    } } } });
+    await useStore.persist.rehydrate();
+    const gc = useStore.getState().config.googleCalendar;
+    expect(gc.calendars.map(c => c.syncMode)).toEqual(['disabled', 'bidirectional']);
+    expect(gc.defaultPushCalendarId).toBeNull();
+  });
+
   it('reads back what it wrote', async () => {
     useStore.getState().addClient({ nombre: 'Ana' });
     await flushAllPending();

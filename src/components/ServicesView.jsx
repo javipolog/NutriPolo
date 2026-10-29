@@ -21,7 +21,8 @@ const ServiceModal = ({ service, onClose }) => {
   const handleSave = () => {
     const e = {};
     if (!form.nombre.trim()) e.nombre = t.error_required;
-    if (!form.precio) e.precio = t.error_required;
+    // 0 is a valid price (free follow-up); only empty or negative values are not
+    if (form.precio === '' || form.precio == null || !(parseFloat(form.precio) >= 0)) e.precio = t.error_required;
     if (Object.keys(e).length) { setErrors(e); return; }
     const data = { ...form, precio: parseFloat(form.precio), numSesiones: parseInt(form.numSesiones) || 1, duracion: parseInt(form.duracion) || 45 };
     if (isEdit) { updateService(service.id, data); toast.success(t.service_updated); }

@@ -329,8 +329,8 @@ export const openMailClient = async ({ to, subject, body, provider = 'gmail' }) 
     await openUrl(url);
     return { success: true };
   } catch {
-    window.open(url, '_blank');
-    return { success: true };
+    // window.open returns null when nothing could be opened
+    return window.open(url, '_blank') ? { success: true } : { success: false, error: 'mail_client_open_failed' };
   }
 };
 

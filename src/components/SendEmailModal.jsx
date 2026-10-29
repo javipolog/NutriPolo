@@ -47,10 +47,13 @@ export const SendEmailModal = ({
   const resolvedClient = client || clients.find(c => c.id === selectedClientId);
 
   const [docPdfBytes, setDocPdfBytes] = useState(pdfBytes);
+  // A document email cannot go out before (or without) its attachment.
+  const [docLoad, setDocLoad] = useState(null); // 'loading' | 'error' | null
 
   // Load document bytes lazily when mode is 'document'
   React.useEffect(() => {
     if (mode === 'document' && docRecord && !pdfBytes) {
+      setDocLoad('loading');
       import('../services/documentService').then(({ getDocumentBase64 }) => {
         getDocumentBase64(docRecord.clienteId, docRecord.storedFileName)
           .then(b64 => {
@@ -58,8 +61,9 @@ export const SendEmailModal = ({
             const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             setDocPdfBytes(bytes);
+            setDocLoad(null);
           })
-          .catch(() => { toast.error(t.email_attachment_error); });
+          .catch(() => { setDocLoad('error'); toast.error(t.email_attachment_error); });
       });
     }
   }, [mode, docRecord]);
@@ -171,7 +175,7 @@ export const SendEmailModal = ({
             variant="primary"
             icon={sending ? Loader2 : Send}
             onClick={handleSend}
-            disabled={sending || (!resolvedClient?.email)}
+            disabled={sending || !resolvedClient?.email || (mode === 'document' && useSmtp && !!docLoad)}
           >
             {sending ? t.email_sending : useSmtp ? t.email_send : t.email_open_client}
           </Button>

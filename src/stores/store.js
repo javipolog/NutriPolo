@@ -1575,11 +1575,6 @@ const useStore = create(
         }));
       },
 
-      getClientPlans: (clienteId) =>
-        get().nutritionPlans
-          .filter(p => p.clienteId === clienteId)
-          .sort((a, b) => (b.fechaInicio || '').localeCompare(a.fechaInicio || '')),
-
       getExpiringPlans: (days = 7) => {
         const today = todayISO();
         const limit = new Date();
@@ -1741,13 +1736,6 @@ const useStore = create(
         return true;
       },
 
-      getMonthRevenue: (year, month) => {
-        const prefix = `${year}-${String(month).padStart(2, '0')}`;
-        return get().invoices
-          .filter(i => i.fecha?.startsWith(prefix) && i.estado === 'pagada')
-          .reduce((sum, i) => sum + (i.total || i.importe || 0), 0);
-      },
-
       getUnbilledConsultations: (clienteId) => {
         const { consultations, invoices } = get();
         const billedIds = new Set(
@@ -1767,8 +1755,6 @@ const useStore = create(
       clientSearch: '',
       clientFilters: { estado: 'all', objetivo: 'all' },
       consultationFilters: { dateRange: 'week', locationId: 'all', tipo: 'all', estado: 'all' },
-      planFilters: { estado: 'all', clienteId: 'all' },
-      invoiceFilters: { estado: 'all', year: 'all' },
 
       setCurrentView: (view) => set({ currentView: view }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
@@ -1776,8 +1762,6 @@ const useStore = create(
       setClientSearch: (v) => set({ clientSearch: v }),
       setClientFilters: (f) => set(s => ({ clientFilters: { ...s.clientFilters, ...f } })),
       setConsultationFilters: (f) => set(s => ({ consultationFilters: { ...s.consultationFilters, ...f } })),
-      setPlanFilters: (f) => set(s => ({ planFilters: { ...s.planFilters, ...f } })),
-      setInvoiceFilters: (f) => set(s => ({ invoiceFilters: { ...s.invoiceFilters, ...f } })),
 
       // ---- UNDO/REDO ----
       _history: [],
@@ -1829,7 +1813,6 @@ const useStore = create(
 
       // ---- DATA INTEGRITY ----
       integrityWarnings: [],
-      isLoading: false,
       smtpPassword: '',
       // Last persistence error (string) or null. Not persisted.
       saveError: null,
@@ -2010,60 +1993,6 @@ const useStore = create(
         return { documentsRestored };
       },
 
-      // Legacy — kept for backwards compatibility
-      exportDataToJSON: async () => {
-        const data = JSON.stringify({
-          version: STORE_VERSION,
-          exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
-        }, null, 2);
-        try {
-          const { save } = await import('@tauri-apps/api/dialog');
-          const { writeBinaryFile } = await import('@tauri-apps/api/fs');
-          const path = await save({ filters: [{ name: 'JSON', extensions: ['json'] }], defaultPath: `nutripolo-backup-${todayISO()}.json` });
-          if (path) {
-            const encoder = new TextEncoder();
-            await writeBinaryFile(path, encoder.encode(data));
-          }
-        } catch {
-          const blob = new Blob([data], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `nutripolo-backup-${todayISO()}.json`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-      },
-
-      importDataFromJSON: async (mode = 'replace') => {
-        try {
-          const { open } = await import('@tauri-apps/api/dialog');
-          const { readTextFile } = await import('@tauri-apps/api/fs');
-          const path = await open({ filters: [{ name: 'JSON', extensions: ['json'] }] });
-          if (!path) return;
-          const raw = await readTextFile(path);
-          const d = backupData(JSON.parse(raw));
-          if (mode === 'replace') {
-            set(s => restoredState(d, s));
-          } else {
-            set(s => ({
-              clients:        [...s.clients,        ...(d.clients        || []).filter(c => !s.clients.find(x => x.id === c.id))],
-              measurements:   [...s.measurements,   ...(d.measurements   || []).filter(m => !s.measurements.find(x => x.id === m.id))],
-              consultations:  [...s.consultations,  ...(d.consultations  || []).filter(c => !s.consultations.find(x => x.id === c.id))],
-              nutritionPlans: [...s.nutritionPlans, ...(d.nutritionPlans || []).filter(p => !s.nutritionPlans.find(x => x.id === p.id))],
-              invoices:       [...s.invoices,       ...(d.invoices       || []).filter(i => !s.invoices.find(x => x.id === i.id))],
-              clientDocuments:[...s.clientDocuments, ...(d.clientDocuments|| []).filter(d2=> !s.clientDocuments.find(x => x.id === d2.id))],
-              planLibrary: {
-                ...s.planLibrary,
-                productos: [...s.planLibrary.productos, ...(d.planLibrary?.productos || []).filter(p => !s.planLibrary.productos.find(x => x.id === p.id))],
-                recetas: [...(s.planLibrary.recetas || []), ...(d.planLibrary?.recetas || []).filter(r => !(s.planLibrary.recetas || []).find(x => x.id === r.id))],
-              },
-            }));
-          }
-        } catch (e) { throw e; }
-      },
-
       emailTemplates: null,
     }),
     {
@@ -2122,27 +2051,25 @@ const useStore = create(
         if (error && !loadFailure) {
           loadFailure = { key: 'nutripolo-storage', error: String(error?.message || error) };
         }
-        if (state) {
-          state.isLoading = false;
-          // Sanitize reader-only calendars — never allow bidirectional on reader calendars
-          const gc = state.config?.googleCalendar;
-          if (gc?.calendars) {
-            let dirty = false;
-            const sanitized = gc.calendars.map(c => {
-              if (c.accessRole === 'reader' && c.syncMode === 'bidirectional') {
-                dirty = true;
-                return { ...c, syncMode: 'disabled' };
-              }
-              return c;
-            });
-            if (dirty) gc.calendars = sanitized;
-            // Clear default if it points to a reader calendar
-            if (gc.defaultPushCalendarId) {
-              const def = gc.calendars.find(c => c.id === gc.defaultPushCalendarId);
-              if (def?.accessRole === 'reader') gc.defaultPushCalendarId = null;
-            }
-          }
-        }
+        // Reader calendars can never be bidirectional nor the default push target.
+        // Applied with setState (not by mutating `state`) so it re-renders and persists.
+        const gc = state?.config?.googleCalendar;
+        if (!gc?.calendars) return;
+        const isReader = (id) => gc.calendars.some(c => c.id === id && c.accessRole === 'reader');
+        const fixMode = gc.calendars.some(c => c.accessRole === 'reader' && c.syncMode === 'bidirectional');
+        const fixDefault = !!gc.defaultPushCalendarId && isReader(gc.defaultPushCalendarId);
+        if (!fixMode && !fixDefault) return;
+        useStore.setState(s => ({
+          config: {
+            ...s.config,
+            googleCalendar: {
+              ...s.config.googleCalendar,
+              calendars: s.config.googleCalendar.calendars.map(c =>
+                c.accessRole === 'reader' && c.syncMode === 'bidirectional' ? { ...c, syncMode: 'disabled' } : c),
+              ...(fixDefault ? { defaultPushCalendarId: null } : {}),
+            },
+          },
+        }));
       },
     }
   )

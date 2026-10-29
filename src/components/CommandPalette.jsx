@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, Inbox } from 'lucide-react';
 import useStore, { formatCurrency, formatDateShort } from '../stores/store';
-import { googleCalendar } from '../services/googleCalendarService';
+import { googleCalendar, formatSyncStats, formatSyncErrors, shortGcalError } from '../services/googleCalendarService';
 import { useT, plural } from '../i18n';
+import { useToast } from './UI';
 
 const highlight = (value, query) => {
   const text = value == null ? '' : String(value);
@@ -29,23 +30,26 @@ export const CommandPalette = ({ open, onClose }) => {
   const setSelectedClientId = useStore(s => s.setSelectedClientId);
 
   const [syncing, setSyncing] = useState(false);
+  const t = useT();
+  const toast = useToast();
   const handleSyncCalendars = useCallback(async () => {
     if (!config.googleCalendar?.connected || syncing) return;
     setSyncing(true);
     try {
-      await googleCalendar.syncAll();
+      const stats = await googleCalendar.syncAll();
+      toast.success(formatSyncStats(stats, t));
+      if (stats.errors > 0) toast.error(formatSyncErrors(stats, t));
     } catch (e) {
-      if (import.meta.env.DEV) console.warn('[CommandPalette sync]', e);
+      toast.error(t.gcal_sync_error_detail.replace('{error}', shortGcalError(e)));
     } finally {
       setSyncing(false);
     }
-  }, [config.googleCalendar?.connected, syncing]);
+  }, [config.googleCalendar?.connected, syncing, toast, t]);
 
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
   const inputRef = useRef(null);
   const listRef = useRef(null);
-  const t = useT();
 
   const inboxDescription = useMemo(() => {
     const confirm = patientSuggestions.filter(sg => sg.status === 'pending-confirm').length;

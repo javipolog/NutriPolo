@@ -59,6 +59,18 @@ fn validate_path_component(name: &str, label: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Keys the frontend may read and write. `encryption` is the vault config
+/// (`encryption.json`, salt + verification blob): only the encryption
+/// commands touch it, or a script could overwrite or delete it and lock the
+/// user out of their encrypted data.
+fn validate_data_key(key: &str) -> Result<(), String> {
+    validate_path_component(key, "key")?;
+    if key == "encryption" {
+        return Err("reserved_key".to_string());
+    }
+    Ok(())
+}
+
 fn encryption_config_path(app_handle: &tauri::AppHandle) -> PathBuf {
     get_data_dir(app_handle).join("encryption.json")
 }
@@ -84,15 +96,13 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 #[tauri::command]
 fn save_data(app_handle: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
-    validate_path_component(&key, "key")?;
+    validate_data_key(&key)?;
     let dir = get_data_dir(&app_handle);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
-    // The "encryption" key itself stores the salt + verification blob and
-    // must stay in plaintext — otherwise we'd have a chicken-and-egg
-    // problem on unlock. Everything else gets transparently encrypted
-    // once the master key is unlocked.
-    let should_encrypt = encryption_is_enabled_internal(&app_handle) && key != "encryption";
+    // Transparently encrypted once encryption is enabled (the vault config
+    // itself is a reserved key, see validate_data_key).
+    let should_encrypt = encryption_is_enabled_internal(&app_handle);
 
     if should_encrypt {
         let key_bytes = encryption::current_key()?;
@@ -111,7 +121,7 @@ fn save_data(app_handle: tauri::AppHandle, key: String, value: String) -> Result
 
 #[tauri::command]
 fn load_data(app_handle: tauri::AppHandle, key: String) -> Result<String, String> {
-    validate_path_component(&key, "key")?;
+    validate_data_key(&key)?;
     let dir = get_data_dir(&app_handle);
 
     // If an `.enc` file exists, it takes precedence — we require the
@@ -134,7 +144,7 @@ fn load_data(app_handle: tauri::AppHandle, key: String) -> Result<String, String
 
 #[tauri::command]
 fn delete_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> {
-    validate_path_component(&key, "key")?;
+    validate_data_key(&key)?;
     let dir = get_data_dir(&app_handle);
     for ext in &["json", "enc"] {
         let path = dir.join(format!("{}.{}", key, ext));
@@ -149,7 +159,7 @@ fn delete_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> 
 /// restore can write a fresh copy without destroying the original bytes.
 #[tauri::command]
 fn quarantine_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> {
-    validate_path_component(&key, "key")?;
+    validate_data_key(&key)?;
     let dir = get_data_dir(&app_handle);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1040,6 +1050,19 @@ async fn recipes_fetch(path: String) -> Result<String, String> {
         return Err(format!("recipes_http_{}: {}", status.as_u16(), body.chars().take(200).collect::<String>()));
     }
     Ok(body)
+}
+
+#[cfg(test)]
+mod data_key_tests {
+    use super::validate_data_key;
+
+    #[test]
+    fn the_vault_config_is_not_a_data_key() {
+        assert!(validate_data_key("nutripolo-storage").is_ok());
+        assert!(validate_data_key("backup-2026-10-29").is_ok());
+        assert_eq!(validate_data_key("encryption"), Err("reserved_key".to_string()));
+        assert!(validate_data_key("../encryption").is_err());
+    }
 }
 
 #[cfg(test)]
