@@ -26,6 +26,19 @@ jobs:
 
       - run: npm ci
 
+      # Catàleg de Mercadona (fora de git): es genera aquí perquè l'instal·lador el porti.
+      # Si en surten menys de 250 aliments, la release s'atura en lloc de publicar-se sense.
+      - name: Import Mercadona food catalog
+        shell: bash
+        run: |
+          node scripts/catalog/import-mercadona.mjs
+          node -e "
+            const n = require('./public/catalog/foods.json').alimentos.length;
+            const imgs = require('fs').readdirSync('public/catalog/images').length;
+            console.log('Catalog:', n, 'foods,', imgs, 'images');
+            if (n < 250 || imgs < 250) { console.error('Mercadona catalog incomplete'); process.exit(1); }
+          "
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

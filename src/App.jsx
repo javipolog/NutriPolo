@@ -15,7 +15,7 @@ import { countPendingReminders } from './components/RemindersPanel';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.14.1';
+const APP_VERSION = '1.15.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -39,8 +39,8 @@ const WhatsNewModal = () => {
         <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
           <Package size={20} className="text-wellness-500 mt-0.5 shrink-0" />
           <div>
-            <p className="text-sm font-semibold text-sage-800">{t.whats_new_foods_title}</p>
-            <p className="text-xs text-sage-600 mt-1">{t.whats_new_foods_desc}</p>
+            <p className="text-sm font-semibold text-sage-800">{t.whats_new_library_title}</p>
+            <p className="text-xs text-sage-600 mt-1">{t.whats_new_library_desc}</p>
           </div>
         </div>
 
