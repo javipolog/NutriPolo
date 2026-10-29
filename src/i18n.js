@@ -2335,6 +2335,13 @@ export const TRANSLATIONS = {
     pf_internal_notes:               'Notes internes (no surten al PDF)',
     pf_image_error:                  'No s\'ha pogut llegir la imatge «{name}»',
     pf_autofill_hint:                'Els plats i opcions que ja has fet servir en altres planificacions s\'omplen sols.',
+    pf_option_title_ph:              'p. ex. Cafè amb llet + torrades amb pernil i tomàquet',
+    pf_option_foods_ph:              'Pa integral (60 g)\nPernil serrà (2 llesques)\nTomàquet ratllat',
+    pf_option_note_ph:               'p. ex. Prepara-ho la nit abans',
+    pf_section_note_ph:              'p. ex. Cereals que pots triar',
+    pf_dish_title_ph:                'p. ex. Llenties amb pernil i verdures',
+    pf_dish_recipe_ph:               'https://…',
+    // pf_dish_free_text no es tradueix: és contingut de la planificació (PDF en castellà)
   },
 
   en: {
@@ -3485,6 +3492,14 @@ export const TRANSLATIONS = {
     pf_internal_notes:               'Internal notes (not in the PDF)',
     pf_image_error:                  'Could not read the image “{name}”',
     pf_autofill_hint:                'Dishes and options you already used in other meal plans fill in their ingredients automatically.',
+    pf_supermarket_ph:               'e.g. Mercadona',
+    pf_option_title_ph:              'e.g. Coffee with milk + toast with ham and tomato',
+    pf_option_foods_ph:              'Wholemeal bread (60 g)\nSerrano ham (2 slices)\nGrated tomato',
+    pf_option_note_ph:               'e.g. Prepare it the night before',
+    pf_section_note_ph:              'e.g. Cereals you can choose',
+    pf_dish_title_ph:                'e.g. Lentils with ham and vegetables',
+    pf_dish_recipe_ph:               'https://…',
+    // pf_dish_free_text is not translated: it is plan content (the PDF is in Spanish)
   },
 };
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw, Star } from 'lucide-react';
@@ -255,13 +255,36 @@ function ViewLoader({ view }) {
   return <LazyView />;
 }
 
+/**
+ * Reminders badge count. Selecting a number (recomputed only when its inputs
+ * change) keeps the shell from re-rendering on unrelated store updates.
+ */
+function usePendingReminders(now) {
+  const cache = useRef(null);
+  return useStore(s => {
+    const c = cache.current;
+    if (!c || c.config !== s.config || c.consultations !== s.consultations || c.clients !== s.clients || c.now !== now) {
+      cache.current = {
+        config: s.config, consultations: s.consultations, clients: s.clients, now,
+        value: countPendingReminders(s, now),
+      };
+    }
+    return cache.current.value;
+  });
+}
+
 // ============================================
 // MAIN APP
 // ============================================
 function AppContent() {
   const currentView = useStore(s => s.currentView);
   const setCurrentView = useStore(s => s.setCurrentView);
-  const config = useStore(s => s.config);
+  // Narrow selectors: the shell (and the view inside it) only re-renders when
+  // something it shows changes, not on every sync update or keystroke.
+  const closeToTray = useStore(s => s.config.closeToTray !== false);
+  const autoLockMinutes = useStore(s => Number(s.config.autoLockMinutes) || 0);
+  const nombre = useStore(s => s.config.nombre);
+  const numColegiada = useStore(s => s.config.numColegiada);
   const isLoading = useStore(s => s.isLoading);
   const sidebarCollapsed = useStore(s => s.sidebarCollapsed);
   const setSidebarCollapsed = useStore(s => s.setSidebarCollapsed);
@@ -277,13 +300,8 @@ function AppContent() {
       sg.status === 'pending' || sg.status === 'pending-confirm'
     ).length
   );
-  const consultations = useStore(s => s.consultations);
-  const clients = useStore(s => s.clients);
   const now = useNow(60000);
-  const pendingReminders = useMemo(
-    () => countPendingReminders({ config, consultations, clients }, now),
-    [config, consultations, clients, now]
-  );
+  const pendingReminders = usePendingReminders(now);
 
   const toast = useToast();
   const t = useT();
@@ -294,9 +312,9 @@ function AppContent() {
   // Tray: close-to-tray preference and menu labels in the app language.
   useEffect(() => {
     invoke('configure_tray', {
-      closeToTray: config.closeToTray !== false, showLabel: t.tray_show, quitLabel: t.tray_quit,
+      closeToTray, showLabel: t.tray_show, quitLabel: t.tray_quit,
     }).catch(() => {});
-  }, [config.closeToTray, t]);
+  }, [closeToTray, t]);
 
   useEffect(() => {
     const timer = setTimeout(prefetchViews, 1500);
@@ -318,29 +336,6 @@ function AppContent() {
     }
   }, [appTheme]);
 
-  // Apply UI fonts
-  useEffect(() => {
-    const loadGoogleFont = (fontName, id) => {
-      if (!document.getElementById(id)) {
-        const link = document.createElement('link');
-        link.id = id;
-        link.rel = 'stylesheet';
-        const q = fontName.replace(/\s+/g, '+');
-        link.href = `https://fonts.googleapis.com/css2?family=${q}:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap`;
-        document.head.appendChild(link);
-      }
-    };
-    const font = config.appFont || 'Onest';
-    document.documentElement.style.setProperty('--font-ui', `'${font}', system-ui, sans-serif`);
-    if (font !== 'Onest') loadGoogleFont(font, `gf-ui-${font.replace(/\s+/g, '-').toLowerCase()}`);
-    // Onest is bundled (main.jsx); only other families are fetched
-    const heading = config.appFontHeading || 'Onest';
-    document.documentElement.style.setProperty('--font-heading', `'${heading}', system-ui, sans-serif`);
-    if (heading !== 'Onest') loadGoogleFont(heading, `gf-heading-${heading.replace(/\s+/g, '-').toLowerCase()}`);
-    const mono = config.appFontMono || 'Onest';
-    document.documentElement.style.setProperty('--font-mono', `'${mono}', system-ui, sans-serif`);
-    if (mono !== 'Onest') loadGoogleFont(mono, `gf-mono-${mono.replace(/\s+/g, '-').toLowerCase()}`);
-  }, [config.appFont, config.appFontHeading, config.appFontMono]);
 
   // Post-hydration: backup + integrity check
   useEffect(() => {
@@ -361,7 +356,7 @@ function AppContent() {
   //   0 or undefined → disabled
   //   N > 0          → lock after N minutes of no input events
   useEffect(() => {
-    const minutes = Number(config.autoLockMinutes) || 0;
+    const minutes = autoLockMinutes;
     if (minutes <= 0) return;
 
     let cancelled = false;
@@ -402,7 +397,7 @@ function AppContent() {
       cleanup?.();
       clearTimeout(timer);
     };
-  }, [config.autoLockMinutes]);
+  }, [autoLockMinutes]);
 
   const navItems = [
     { id: 'dashboard', icon: Home,          label: t.nav_dashboard, shortcut: '1', badge: pendingReminders },
@@ -557,8 +552,8 @@ function AppContent() {
           {!sidebarCollapsed ? (
             <div className="p-3 border-t border-sage-300">
               <div className="bg-sage-50 border border-sage-300 rounded-soft p-3 mb-2">
-                <p className="text-sm font-medium text-sage-900 truncate">{config.nombre}</p>
-                <p className="text-xs text-sage-500 mt-0.5">{t.sidebar_colegiada} {config.numColegiada}</p>
+                <p className="text-sm font-medium text-sage-900 truncate">{nombre}</p>
+                <p className="text-xs text-sage-500 mt-0.5">{t.sidebar_colegiada} {numColegiada}</p>
               </div>
               <button
                 onClick={() => setShowCommandPalette(true)}

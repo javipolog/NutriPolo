@@ -30,3 +30,9 @@ tauri-plugin-single-instance = { git = "https://github.com/tauri-apps/plugins-wo
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Smaller, faster installer build (slower to compile).
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

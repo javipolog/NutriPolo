@@ -12,13 +12,43 @@ vi.mock('@tauri-apps/api/tauri', () => ({
   }),
 }));
 
-const { default: useStore, changedFields, lastVisitByClient, canDeleteInvoice } = await import('./store');
+// Outside Tauri the store persists to localStorage
+const saved = {};
+globalThis.localStorage = {
+  getItem: (k) => saved[k] ?? null,
+  setItem: (k, v) => { saved[k] = v; },
+  removeItem: (k) => { delete saved[k]; },
+};
+
+const { default: useStore, changedFields, lastVisitByClient, canDeleteInvoice, flushAllPending } = await import('./store');
 
 const initial = useStore.getState();
 
 beforeEach(() => {
   useStore.setState(initial, true);
   for (const k of Object.keys(files)) delete files[k];
+});
+
+describe('persistence', () => {
+  it('serializes the store once per write, not on every change', async () => {
+    const stringify = vi.spyOn(JSON, 'stringify');
+    for (let i = 0; i < 20; i++) useStore.getState().addClient({ nombre: `Cliente ${i}` });
+    expect(stringify).not.toHaveBeenCalled();
+
+    await flushAllPending();
+    expect(stringify).toHaveBeenCalledTimes(1);
+    stringify.mockRestore();
+    const persisted = JSON.parse(saved['nutripolo-storage']);
+    expect(persisted.state.clients).toHaveLength(20);
+  });
+
+  it('reads back what it wrote', async () => {
+    useStore.getState().addClient({ nombre: 'Ana' });
+    await flushAllPending();
+    useStore.setState({ clients: [] });
+    await useStore.persist.rehydrate();
+    expect(useStore.getState().clients.map(c => c.nombre)).toEqual(['Ana']);
+  });
 });
 
 describe('changedFields', () => {

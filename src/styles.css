@@ -144,8 +144,8 @@ body,
 
 [data-theme="dark"] .shadow-sidebar { box-shadow: 1px 0 0 0 rgb(var(--sage-300)); }
 
-/* Rols tipogràfics (--font-ui, --font-heading, --font-mono, definits a App.jsx
-   des de config); per defecte tots són Onest, com a tailwind.config.js */
+/* Rols tipogràfics (--font-ui, --font-heading, --font-mono): tots són Onest,
+   com a tailwind.config.js (empaquetada a main.jsx, cap petició externa) */
 .font-sans {
   font-family: var(--font-ui, 'Onest', system-ui, sans-serif);
 }

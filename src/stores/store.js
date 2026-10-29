@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
@@ -30,9 +30,11 @@ function reportSaveError(error) {
 }
 
 function flushWrite(name) {
-  const value = writeQueue[name];
-  if (value === undefined) return Promise.resolve();
+  const queued = writeQueue[name];
+  if (queued === undefined) return Promise.resolve();
   delete writeQueue[name];
+  // Serialized here, once per write, not on every state change (see setItem).
+  const value = typeof queued === 'string' ? queued : JSON.stringify(queued);
   if (!isTauri()) {
     try { localStorage.setItem(name, value); } catch {}
     return Promise.resolve();
@@ -48,24 +50,34 @@ function flushWrite(name) {
     });
 }
 
+async function loadRaw(name) {
+  if (!isTauri()) return localStorage.getItem(name);
+  try {
+    return await invoke('load_data', { key: name });
+  } catch (err) {
+    const msg = String(err || '');
+    // Nothing saved yet (first launch).
+    if (msg.includes('not_found')) return null;
+    // If the vault is locked return null so Zustand keeps its defaults
+    // and let App.jsx re-trigger rehydration after unlock.
+    if (msg.includes('not_unlocked')) return null;
+    // The file exists but is unreadable: never fall back to empty
+    // defaults silently, or the next save would destroy the real data.
+    loadFailure = { key: name, error: msg };
+    return null;
+  }
+}
+
+// Persist storage for zustand (objects in, objects out).
 const tauriStorage = {
+  // A JSON parse error throws: the persist middleware reports it as a load failure.
   getItem: async (name) => {
-    if (!isTauri()) return localStorage.getItem(name);
-    try {
-      return await invoke('load_data', { key: name });
-    } catch (err) {
-      const msg = String(err || '');
-      // Nothing saved yet (first launch).
-      if (msg.includes('not_found')) return null;
-      // If the vault is locked return null so Zustand keeps its defaults
-      // and let App.jsx re-trigger rehydration after unlock.
-      if (msg.includes('not_unlocked')) return null;
-      // The file exists but is unreadable: never fall back to empty
-      // defaults silently, or the next save would destroy the real data.
-      loadFailure = { key: name, error: msg };
-      return null;
-    }
+    const raw = await loadRaw(name);
+    return raw == null ? null : JSON.parse(raw);
   },
+  // `value` is the persisted object ({ state, version }). Zustand calls this on
+  // every set(); the object is only turned into JSON when the debounced write
+  // runs, so bursts of updates (a sync, typing) cost one serialization.
   setItem: (name, value) => {
     if (loadFailure) return;
     writeQueue[name] = value;
@@ -1102,6 +1114,7 @@ const useStore = create(
         set(s => ({
           clients: [...s.clients, newClient],
           _history: [{ type: 'add_client', item: newClient }, ...s._history].slice(0, 20),
+          _future: [],
         }));
         return newClient;
       },
@@ -1116,6 +1129,7 @@ const useStore = create(
           return {
             ...patch,
             _history: [{ type: 'delete_client', item, cascade: snapshot }, ...s._history].slice(0, 20),
+            _future: [],
           };
         });
       },
@@ -1557,6 +1571,7 @@ const useStore = create(
         set(s => ({
           nutritionPlans: s.nutritionPlans.filter(p => p.id !== id),
           _history: [{ type: 'delete_plan', item }, ...s._history].slice(0, 20),
+          _future: [],
         }));
       },
 
@@ -1618,13 +1633,11 @@ const useStore = create(
       updateClientDocument: (id, data) => set(s => ({
         clientDocuments: s.clientDocuments.map(d => d.id === id ? { ...d, ...data } : d),
       })),
-      deleteClientDocument: (id) => {
-        const item = get().clientDocuments.find(d => d.id === id);
-        set(s => ({
-          clientDocuments: s.clientDocuments.filter(d => d.id !== id),
-          _history: [{ type: 'delete_document', item }, ...s._history].slice(0, 20),
-        }));
-      },
+      // No undo: the caller deletes the file itself, so restoring the
+      // metadata would list a document that no longer exists.
+      deleteClientDocument: (id) => set(s => ({
+        clientDocuments: s.clientDocuments.filter(d => d.id !== id),
+      })),
       getClientDocuments: (clienteId) =>
         get().clientDocuments
           .filter(d => d.clienteId === clienteId)
@@ -1723,6 +1736,7 @@ const useStore = create(
         set(s => ({
           invoices: s.invoices.filter(i => i.id !== id),
           _history: [{ type: 'delete_invoice', item }, ...s._history].slice(0, 20),
+          _future: [],
         }));
         return true;
       },
@@ -1786,7 +1800,6 @@ const useStore = create(
           if (last.type === 'delete_consultation') Object.assign(next, restoreDeletedConsultation(s, last.item));
           if (last.type === 'delete_plan')         next.nutritionPlans  = [last.item, ...s.nutritionPlans];
           if (last.type === 'delete_invoice')      next.invoices        = [last.item, ...s.invoices];
-          if (last.type === 'delete_document')     next.clientDocuments = [last.item, ...s.clientDocuments];
           return next;
         });
       },
@@ -1804,7 +1817,6 @@ const useStore = create(
           if (next.type === 'delete_consultation') Object.assign(update, redeleteConsultation(s, next.item));
           if (next.type === 'delete_plan')         update.nutritionPlans  = s.nutritionPlans.filter(p => p.id !== next.item.id);
           if (next.type === 'delete_invoice')      update.invoices        = s.invoices.filter(i => i.id !== next.item.id);
-          if (next.type === 'delete_document')     update.clientDocuments = s.clientDocuments.filter(d => d.id !== next.item.id);
           return update;
         });
       },
@@ -2056,7 +2068,7 @@ const useStore = create(
     }),
     {
       name: 'nutripolo-storage',
-      storage: createJSONStorage(() => tauriStorage),
+      storage: tauriStorage,
       version: STORE_VERSION,
       // Skip automatic hydration at module load. App.jsx explicitly calls
       // `useStore.persist.rehydrate()` after it has determined whether

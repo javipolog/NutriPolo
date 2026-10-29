@@ -56,7 +56,7 @@ export const ClientsView = () => {
     if (!ok) return;
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);
-    toast.success(`${client.nombre} eliminado`);
+    toast.success(t.client_deleted);
   };
 
   const openWhatsApp = async (client) => {

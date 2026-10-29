@@ -30,10 +30,7 @@
         "exists": false,
         "scope": [
           "$APP/**",
-          "$APPDATA/**",
-          "$DOCUMENT/**",
-          "$DESKTOP/**",
-          "$DOWNLOAD/**"
+          "$APPDATA/**"
         ]
       },
       "path": {
@@ -46,14 +43,6 @@
       "shell": {
         "all": false,
         "open": "^((mailto:\\w+)|(tel:\\w+)|(https?://\\w+)|(whatsapp://send\\?)).+"
-      },
-      "http": {
-        "all": false,
-        "scope": [
-          "https://oauth2.googleapis.com/**",
-          "https://www.googleapis.com/**",
-          "https://accounts.google.com/**"
-        ]
       }
     },
     "bundle": {
@@ -91,7 +80,7 @@
       }
     },
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https://nutripoloraquel.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://oauth2.googleapis.com https://www.googleapis.com https://accounts.google.com https://github.com https://*.github.com https://objects.githubusercontent.com"
+      "csp": "default-src 'self'; img-src 'self' data: https://nutripoloraquel.com; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'"
     },
     "systemTray": {
       "iconPath": "icons/icon.ico",

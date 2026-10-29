@@ -1017,15 +1017,23 @@ async fn recipes_fetch(path: String) -> Result<String, String> {
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| sanitize_err(e, "recipes_network_error"))?;
-    let resp = client
+    let mut resp = client
         .get(format!("{}{}", RECIPES_ORIGIN, path))
         .send()
         .await
         .map_err(|e| sanitize_err(e, "recipes_network_error"))?;
     let status = resp.status();
-    let bytes = resp.bytes().await.map_err(|e| sanitize_err(e, "recipes_network_error"))?;
-    if bytes.len() > RECIPES_MAX_BYTES {
+    if resp.content_length().is_some_and(|n| n > RECIPES_MAX_BYTES as u64) {
         return Err("recipes_response_too_large".into());
+    }
+    // Read in chunks so an oversized body without Content-Length is cut off
+    // instead of being downloaded whole.
+    let mut bytes = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(|e| sanitize_err(e, "recipes_network_error"))? {
+        if bytes.len() + chunk.len() > RECIPES_MAX_BYTES {
+            return Err("recipes_response_too_large".into());
+        }
+        bytes.extend_from_slice(&chunk);
     }
     let body = String::from_utf8_lossy(&bytes).into_owned();
     if !status.is_success() {

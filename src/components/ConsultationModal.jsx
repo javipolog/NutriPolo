@@ -116,7 +116,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     if (sg) {
       confirmAutoMatch(sg.id);
     }
-    toast.success(t.inbox_confirmed_ok || 'Coincidencia confirmada');
+    toast.success(t.inbox_confirmed_ok);
     onClose();
   };
 
@@ -185,7 +185,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
             <span>
               {t.consultation_readonly_warning
-                ? t.consultation_readonly_warning.replace('{cal}', sourceCal?.name || 'calendario externo')
+                ? t.consultation_readonly_warning.replace('{cal}', sourceCal?.name || t.calendar_external)
                 : t.consultation_readonly_external.replace('{calendar}', sourceCal?.name || t.calendar_external)}
             </span>
           </div>
@@ -206,10 +206,10 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             </p>
             <div className="flex gap-2">
               <Button size="sm" variant="primary" onClick={handleInlineConfirm}>
-                {t.inbox_confirm || 'Confirmar'}
+                {t.inbox_confirm}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setReviewBannerDismissed(true)}>
-                {t.inbox_pick_other || 'Elegir otro'}
+                {t.inbox_pick_other}
               </Button>
             </div>
           </div>
