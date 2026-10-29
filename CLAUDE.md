@@ -293,12 +293,12 @@ Documents dels clients es guarden a `documents/<clientId>/`.
 ## Seguretat
 
 - Dades guardades localment (no cloud)
-- CSP configurat per Google OAuth i Google Calendar API
+- CSP sense hosts externs a `connect-src` (Google, receptes, SMTP i actualitzacions passen pel backend Rust); imatges nomes de nutripoloraquel.com
 - Validacio de magic bytes per PDFs
 - Limit de 50MB per document
 - Path traversal protection en lectura/eliminacio de documents
 - SMTP password i secrets de Google al Windows Credential Manager (mai al store ni als backups)
-- Scope de fs limitat (`$APP`, `$APPDATA`, carpetes d'usuari); els camins triats en dialegs s'afegeixen sols
+- Scope de fs limitat a `$APP` i `$APPDATA`; els camins triats en dialegs s'afegeixen sols (totes les lectures/escriptures de fitxers del JS passen per un dialeg)
 
 ---
 

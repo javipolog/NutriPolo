@@ -647,7 +647,8 @@ export const CalendarView = () => {
   }, [syncing, toast, t]);
 
   const handleReset = useCallback(async () => {
-    const total = consultations.length;
+    // resetAgenda deletes every consultation, also those of hidden calendars
+    const total = allConsultations.length;
     if (!total) { toast.info(t.calendar_nothing_to_delete); return; }
 
     const ok = await confirm({
@@ -666,7 +667,7 @@ export const CalendarView = () => {
     } finally {
       setResetting(false);
     }
-  }, [consultations, confirm, resetAgenda, toast, t]);
+  }, [allConsultations, confirm, resetAgenda, toast, t]);
 
   // Auto-sync runs app-wide in useBackgroundJobs (App.jsx), not only while
   // this view is mounted.

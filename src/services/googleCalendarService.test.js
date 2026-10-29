@@ -318,6 +318,37 @@ describe('delete', () => {
     expect(useStore.getState().gcalPendingDeletes).toHaveLength(0);
   });
 
+  it('a consultation deleted before its create was confirmed is not re-imported', async () => {
+    const c = newConsultation();
+    // The create reached Google but the response was lost: no googleEventId here.
+    const event = googleCalendar.consultationToEvent(consultation(c.id), useStore.getState().clients);
+    cal(CAL).set(event.id, { ...event, updated: new Date().toISOString() });
+    google.offline = true;
+    await expect(googleCalendar.pushConsultation(c.id)).rejects.toThrow();
+    expect(consultation(c.id).googleEventId).toBeUndefined();
+
+    google.offline = false;
+    const res = await googleCalendar.deleteConsultation(c.id);
+    expect(res.remote).toBe('none');
+    tick();
+    await googleCalendar.syncAll();
+    expect(liveEvents()).toHaveLength(0);
+    expect(useStore.getState().consultations).toHaveLength(0);
+    expect(useStore.getState().gcalPendingDeletes).toHaveLength(0);
+  });
+
+  it('deleting a local consultation that never reached Google stays silent offline', async () => {
+    const c = newConsultation();
+    google.offline = true;
+    const res = await googleCalendar.deleteConsultation(c.id);
+    expect(res.remote).toBe('none');
+    google.offline = false;
+    tick();
+    await googleCalendar.syncAll();
+    expect(useStore.getState().gcalPendingDeletes).toHaveLength(0);
+    expect(useStore.getState().consultations).toHaveLength(0);
+  });
+
   it('undo restores the event in Google', async () => {
     const c = newConsultation();
     await googleCalendar.pushConsultation(c.id);

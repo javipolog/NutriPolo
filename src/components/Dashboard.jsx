@@ -563,6 +563,7 @@ export const Dashboard = () => {
     const clients        = useStore(s => s.clients);
     const allConsultations = useStore(s => s.consultations);
     const nutritionPlans = useStore(s => s.nutritionPlans);
+    const measurements   = useStore(s => s.measurements);
     const invoices       = useStore(s => s.invoices);
     const config         = useStore(s => s.config);
     const patientSuggestions = useStore(s => s.patientSuggestions);
@@ -594,7 +595,7 @@ export const Dashboard = () => {
     const upcoming = useMemo(() => getUpcomingConsultations(7), [consultations]);
 
     // Follow-ups needed
-    const followUps = useMemo(() => getPendingFollowUps(30), [clients, consultations]);
+    const followUps = useMemo(() => getPendingFollowUps(30), [clients, allConsultations, measurements]);
 
     // Expiring plans
     const expiringPlans = useMemo(() => getExpiringPlans(7), [nutritionPlans]);

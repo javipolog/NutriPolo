@@ -48,9 +48,9 @@ export function countPendingReminders(state, now = Date.now()) {
 
 function dayLabel(start, t) {
   const iso = localISODate(start);
-  if (iso === todayISO()) return t.today || 'Hoy';
+  if (iso === todayISO()) return t.today;
   const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
-  if (iso === localISODate(tomorrow)) return t.tomorrow || 'Mañana';
+  if (iso === localISODate(tomorrow)) return t.tomorrow;
   return `${String(start.getDate()).padStart(2, '0')}/${String(start.getMonth() + 1).padStart(2, '0')}`;
 }
 

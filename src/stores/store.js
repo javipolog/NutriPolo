@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist, createJSONStorage } from 'zustand/middleware';
+import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
@@ -30,9 +30,11 @@ function reportSaveError(error) {
 }
 
 function flushWrite(name) {
-  const value = writeQueue[name];
-  if (value === undefined) return Promise.resolve();
+  const queued = writeQueue[name];
+  if (queued === undefined) return Promise.resolve();
   delete writeQueue[name];
+  // Serialized here, once per write, not on every state change (see setItem).
+  const value = typeof queued === 'string' ? queued : JSON.stringify(queued);
   if (!isTauri()) {
     try { localStorage.setItem(name, value); } catch {}
     return Promise.resolve();
@@ -48,24 +50,34 @@ function flushWrite(name) {
     });
 }
 
+async function loadRaw(name) {
+  if (!isTauri()) return localStorage.getItem(name);
+  try {
+    return await invoke('load_data', { key: name });
+  } catch (err) {
+    const msg = String(err || '');
+    // Nothing saved yet (first launch).
+    if (msg.includes('not_found')) return null;
+    // If the vault is locked return null so Zustand keeps its defaults
+    // and let App.jsx re-trigger rehydration after unlock.
+    if (msg.includes('not_unlocked')) return null;
+    // The file exists but is unreadable: never fall back to empty
+    // defaults silently, or the next save would destroy the real data.
+    loadFailure = { key: name, error: msg };
+    return null;
+  }
+}
+
+// Persist storage for zustand (objects in, objects out).
 const tauriStorage = {
+  // A JSON parse error throws: the persist middleware reports it as a load failure.
   getItem: async (name) => {
-    if (!isTauri()) return localStorage.getItem(name);
-    try {
-      return await invoke('load_data', { key: name });
-    } catch (err) {
-      const msg = String(err || '');
-      // Nothing saved yet (first launch).
-      if (msg.includes('not_found')) return null;
-      // If the vault is locked return null so Zustand keeps its defaults
-      // and let App.jsx re-trigger rehydration after unlock.
-      if (msg.includes('not_unlocked')) return null;
-      // The file exists but is unreadable: never fall back to empty
-      // defaults silently, or the next save would destroy the real data.
-      loadFailure = { key: name, error: msg };
-      return null;
-    }
+    const raw = await loadRaw(name);
+    return raw == null ? null : JSON.parse(raw);
   },
+  // `value` is the persisted object ({ state, version }). Zustand calls this on
+  // every set(); the object is only turned into JSON when the debounced write
+  // runs, so bursts of updates (a sync, typing) cost one serialization.
   setItem: (name, value) => {
     if (loadFailure) return;
     writeQueue[name] = value;
@@ -240,6 +252,30 @@ export function computeInvoiceTotals(items = [], ivaPct = 0, irpfPct = 0) {
 }
 
 // ============================================
+// INVOICE NUMBERING
+// ============================================
+const INVOICE_SERIES_RE = /^(NP-\d{4}-)(\d+)$/;
+
+/** Sequence number of `numero` within the series `prefix` (NP-YYYY-), or 0. */
+function invoiceSeq(numero, prefix) {
+  const m = INVOICE_SERIES_RE.exec(numero || '');
+  return m && m[1] === prefix ? parseInt(m[2], 10) : 0;
+}
+
+/**
+ * Invoice numbers must stay correlative, without gaps: only the last invoice
+ * of its series can be deleted (its number is then reused). Any other one is
+ * cancelled (`anulada`) instead. Numbers outside the NP-YYYY-NNN series are
+ * free to delete.
+ */
+export function canDeleteInvoice(invoices, invoice) {
+  const m = INVOICE_SERIES_RE.exec(invoice?.numero || '');
+  if (!m) return true;
+  const seq = parseInt(m[2], 10);
+  return !(invoices || []).some(i => i.id !== invoice.id && invoiceSeq(i.numero, m[1]) > seq);
+}
+
+// ============================================
 // DEFAULT DATA
 // ============================================
 const DEFAULT_LOCATIONS = [
@@ -262,7 +298,7 @@ export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [], alimentos: {} };
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 13;
+const STORE_VERSION = 14;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -290,6 +326,11 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 14 && Array.isArray(s.clients)) {
+    // v13 → v14: l'última visita es calcula (lastVisitByClient); el camp desat
+    // podia anar enrere en editar una consulta antiga.
+    s.clients = s.clients.map(({ fechaUltimaConsulta, ...c }) => c);
+  }
   if (version < 13 && Array.isArray(s.nutritionPlans)) {
     // v12 → v13: "Mis recetas". Es sembra amb els plats de les planificacions
     // existents (de la més antiga a la més nova, perquè mani l'última versió).
@@ -764,11 +805,43 @@ const SYNC_FIELDS = [
   'detachedFromGoogle', 'remoteDeleted', 'restoreRemote',
 ];
 
+// Written only by setConsultationReminder / setConsultationReviewRequest. A
+// form saved with an old copy must not wipe a reminder sent meanwhile, or it
+// would be sent again.
+const BOOKKEEPING_FIELDS = ['reminders', 'reviewRequest'];
+
 function withoutSyncFields(data) {
   if (!data) return data;
   const out = { ...data };
   for (const f of SYNC_FIELDS) delete out[f];
+  for (const f of BOOKKEEPING_FIELDS) delete out[f];
   return out;
+}
+
+/**
+ * Fields of `edited` that differ from `original` (a form vs the record it
+ * was opened with). Empty values ('', null, undefined) count as equal.
+ */
+export function changedFields(original, edited) {
+  const norm = (v) => (v == null || v === '' ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  const out = {};
+  for (const [k, v] of Object.entries(edited || {})) {
+    if (k !== 'id' && norm(v) !== norm(original?.[k])) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Last visit per client (Map clienteId → YYYY-MM-DD): the newest completed
+ * consultation or measurement. Derived on demand so editing an old record
+ * can never move it back in time.
+ */
+export function lastVisitByClient({ consultations, measurements }) {
+  const last = new Map();
+  const bump = (id, fecha) => { if (id && fecha && !(last.get(id) >= fecha)) last.set(id, fecha); };
+  for (const c of consultations || []) if (c.estado === 'completada') bump(c.clienteId, c.fecha);
+  for (const m of measurements || []) bump(m.clienteId, m.fecha);
+  return last;
 }
 
 /**
@@ -862,6 +935,49 @@ function restoreClientDeletion(s, entry) {
     consultations: [...s.consultations.filter(c => !restoredIds.has(c.id)), ...(cascade.consultations || [])],
     measurements: [...s.measurements, ...(cascade.measurements || [])],
     nutritionPlans: [...s.nutritionPlans, ...(cascade.nutritionPlans || [])],
+  };
+}
+
+/**
+ * Data of a parsed backup brought up to the current schema, like a normal
+ * load. Accepts exports/auto-backups (`{ version, data }`), the raw store
+ * file (`{ version, state }`) and very old bare objects (taken as current).
+ */
+export function backupData(parsed) {
+  const raw = parsed?.data || parsed?.state || parsed || {};
+  const version = Number.isInteger(parsed?.version) ? parsed.version : STORE_VERSION;
+  return version < STORE_VERSION ? migrateStore(raw, version) : raw;
+}
+
+/** Collections included in backups and exports (config is added stripped). */
+function backupCollections(s) {
+  const { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
+    emailTemplates, planLibrary, patientSuggestions } = s;
+  return { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
+    emailTemplates, planLibrary, patientSuggestions };
+}
+
+/**
+ * State patch that replaces the data with a backup's (`d` from backupData).
+ * The undo history belongs to the replaced data, so it is cleared.
+ */
+function restoredState(d, current) {
+  return {
+    clients:        d.clients        || [],
+    measurements:   d.measurements   || [],
+    consultations:  d.consultations  || [],
+    nutritionPlans: d.nutritionPlans || [],
+    services:       d.services       || DEFAULT_SERVICES,
+    invoices:       d.invoices       || [],
+    clientDocuments:d.clientDocuments || [],
+    emailTemplates: d.emailTemplates || null,
+    planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
+    // Older backups did not include the inbox; the sync rebuilds missing suggestions.
+    patientSuggestions: Array.isArray(d.patientSuggestions) ? d.patientSuggestions : current.patientSuggestions,
+    config: mergeRestoredConfig(current.config, d.config),
+    selectedClientId: null,
+    _history: [],
+    _future: [],
   };
 }
 
@@ -995,11 +1111,11 @@ const useStore = create(
           patologias: client.patologias || [],
           objetivos: client.objetivos || [],
           restriccionesDieteticas: client.restriccionesDieteticas || [],
-          fechaUltimaConsulta: null,
         };
         set(s => ({
           clients: [...s.clients, newClient],
           _history: [{ type: 'add_client', item: newClient }, ...s._history].slice(0, 20),
+          _future: [],
         }));
         return newClient;
       },
@@ -1014,6 +1130,7 @@ const useStore = create(
           return {
             ...patch,
             _history: [{ type: 'delete_client', item, cascade: snapshot }, ...s._history].slice(0, 20),
+            _future: [],
           };
         });
       },
@@ -1033,13 +1150,6 @@ const useStore = create(
           imc,
         };
         set(s => ({ measurements: [...s.measurements, newM] }));
-        if (newM.clienteId) {
-          set(s => ({
-            clients: s.clients.map(c =>
-              c.id === newM.clienteId ? { ...c, fechaUltimaConsulta: newM.fecha } : c
-            ),
-          }));
-        }
         return newM;
       },
       updateMeasurement: (id, data) => set(s => ({
@@ -1072,13 +1182,6 @@ const useStore = create(
           ...(isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() }),
         };
         set(s => ({ consultations: [...s.consultations, newC] }));
-        if (newC.estado === 'completada' && newC.clienteId) {
-          set(s => ({
-            clients: s.clients.map(c =>
-              c.id === newC.clienteId ? { ...c, fechaUltimaConsulta: newC.fecha } : c
-            ),
-          }));
-        }
         return newC;
       },
       updateConsultation: (id, input, { sync = false } = {}) => {
@@ -1116,15 +1219,6 @@ const useStore = create(
               sg.id === existing.suggestedFromId && (sg.status === 'pending' || sg.status === 'pending-confirm')
                 ? { ...sg, status: 'linked', linkedClienteId: data.clienteId }
                 : sg
-            ),
-          }));
-        }
-
-        const updated = get().consultations.find(c => c.id === id);
-        if (updated?.estado === 'completada' && updated?.clienteId) {
-          set(s => ({
-            clients: s.clients.map(c =>
-              c.id === updated.clienteId ? { ...c, fechaUltimaConsulta: updated.fecha } : c
             ),
           }));
         }
@@ -1449,10 +1543,11 @@ const useStore = create(
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - days);
         const cutoffStr = localISODate(cutoff);
-        return get().clients.filter(c =>
-          c.estado === 'activo' &&
-          (!c.fechaUltimaConsulta || c.fechaUltimaConsulta < cutoffStr)
-        );
+        const lastVisit = lastVisitByClient(get());
+        return get().clients.filter(c => {
+          const last = lastVisit.get(c.id);
+          return c.estado === 'activo' && (!last || last < cutoffStr);
+        });
       },
 
       // ---- NUTRITION PLANS ----
@@ -1477,13 +1572,9 @@ const useStore = create(
         set(s => ({
           nutritionPlans: s.nutritionPlans.filter(p => p.id !== id),
           _history: [{ type: 'delete_plan', item }, ...s._history].slice(0, 20),
+          _future: [],
         }));
       },
-
-      getClientPlans: (clienteId) =>
-        get().nutritionPlans
-          .filter(p => p.clienteId === clienteId)
-          .sort((a, b) => (b.fechaInicio || '').localeCompare(a.fechaInicio || '')),
 
       getExpiringPlans: (days = 7) => {
         const today = todayISO();
@@ -1551,13 +1642,11 @@ const useStore = create(
       updateClientDocument: (id, data) => set(s => ({
         clientDocuments: s.clientDocuments.map(d => d.id === id ? { ...d, ...data } : d),
       })),
-      deleteClientDocument: (id) => {
-        const item = get().clientDocuments.find(d => d.id === id);
-        set(s => ({
-          clientDocuments: s.clientDocuments.filter(d => d.id !== id),
-          _history: [{ type: 'delete_document', item }, ...s._history].slice(0, 20),
-        }));
-      },
+      // No undo: the caller deletes the file itself, so restoring the
+      // metadata would list a document that no longer exists.
+      deleteClientDocument: (id) => set(s => ({
+        clientDocuments: s.clientDocuments.filter(d => d.id !== id),
+      })),
       getClientDocuments: (clienteId) =>
         get().clientDocuments
           .filter(d => d.clienteId === clienteId)
@@ -1579,30 +1668,26 @@ const useStore = create(
       // ---- INVOICES ----
       invoices: [],
 
-      // Derives the next invoice number from the current invoices list for the
-      // active year. Self-healing: tolerates deletions, imports, and year
-      // rollovers without needing a persisted counter to stay in sync.
-      generateInvoiceNumber: () => {
-        const year = new Date().getFullYear();
+      // Next number of the series of the invoice date's year (NP-YYYY-NNN),
+      // derived from the invoices list. Self-healing: tolerates imports and
+      // year rollovers without a persisted counter to keep in sync.
+      generateInvoiceNumber: (fecha) => {
+        const year = /^\d{4}/.test(fecha || '') ? fecha.slice(0, 4) : String(new Date().getFullYear());
         const prefix = `NP-${year}-`;
-        const invoices = get().invoices || [];
-        const maxSeq = invoices.reduce((max, inv) => {
-          if (!inv?.numero || !inv.numero.startsWith(prefix)) return max;
-          const match = inv.numero.match(/-(\d+)$/);
-          if (!match) return max;
-          const n = parseInt(match[1], 10);
-          return Number.isFinite(n) && n > max ? n : max;
+        const maxSeq = (get().invoices || []).reduce((max, inv) => {
+          const n = invoiceSeq(inv?.numero, prefix);
+          return n > max ? n : max;
         }, 0);
         return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
       },
 
       addInvoice: (invoice) => {
-        let numero = invoice.numero || get().generateInvoiceNumber();
+        let numero = invoice.numero || get().generateInvoiceNumber(invoice.fecha);
         // Defensive: if the caller supplied a number that collides with an
         // existing invoice (e.g. manual edit), regenerate to avoid duplicates.
         if (get().invoices.some(i => i.numero === numero)) {
           console.warn(`[addInvoice] Duplicate invoice number "${numero}" detected, regenerating`);
-          numero = get().generateInvoiceNumber();
+          numero = get().generateInvoiceNumber(invoice.fecha);
         }
         const items = invoice.items || [];
         const ivaPct = invoice.ivaPct ?? 0;
@@ -1652,19 +1737,17 @@ const useStore = create(
         };
         set(s => ({ invoices: s.invoices.map(i => i.id === id ? updated : i) }));
       },
+      // Only the last invoice of a series can be deleted (see canDeleteInvoice).
+      // Returns whether it was deleted.
       deleteInvoice: (id) => {
         const item = get().invoices.find(i => i.id === id);
+        if (!item || !canDeleteInvoice(get().invoices, item)) return false;
         set(s => ({
           invoices: s.invoices.filter(i => i.id !== id),
           _history: [{ type: 'delete_invoice', item }, ...s._history].slice(0, 20),
+          _future: [],
         }));
-      },
-
-      getMonthRevenue: (year, month) => {
-        const prefix = `${year}-${String(month).padStart(2, '0')}`;
-        return get().invoices
-          .filter(i => i.fecha?.startsWith(prefix) && i.estado === 'pagada')
-          .reduce((sum, i) => sum + (i.total || i.importe || 0), 0);
+        return true;
       },
 
       getUnbilledConsultations: (clienteId) => {
@@ -1686,9 +1769,7 @@ const useStore = create(
       clientSearch: '',
       clientFilters: { estado: 'all', objetivo: 'all' },
       consultationFilters: { dateRange: 'week', locationId: 'all', tipo: 'all', estado: 'all' },
-      planFilters: { estado: 'all', clienteId: 'all' },
       plansSection: 'plans', // Planes tab: 'plans' | 'foods' | 'recipes'
-      invoiceFilters: { estado: 'all', year: 'all' },
 
       setCurrentView: (view) => set({ currentView: view }),
       setPlansSection: (section) => set({ plansSection: section }),
@@ -1697,8 +1778,6 @@ const useStore = create(
       setClientSearch: (v) => set({ clientSearch: v }),
       setClientFilters: (f) => set(s => ({ clientFilters: { ...s.clientFilters, ...f } })),
       setConsultationFilters: (f) => set(s => ({ consultationFilters: { ...s.consultationFilters, ...f } })),
-      setPlanFilters: (f) => set(s => ({ planFilters: { ...s.planFilters, ...f } })),
-      setInvoiceFilters: (f) => set(s => ({ invoiceFilters: { ...s.invoiceFilters, ...f } })),
 
       // ---- UNDO/REDO ----
       _history: [],
@@ -1721,7 +1800,6 @@ const useStore = create(
           if (last.type === 'delete_consultation') Object.assign(next, restoreDeletedConsultation(s, last.item));
           if (last.type === 'delete_plan')         next.nutritionPlans  = [last.item, ...s.nutritionPlans];
           if (last.type === 'delete_invoice')      next.invoices        = [last.item, ...s.invoices];
-          if (last.type === 'delete_document')     next.clientDocuments = [last.item, ...s.clientDocuments];
           return next;
         });
       },
@@ -1739,7 +1817,6 @@ const useStore = create(
           if (next.type === 'delete_consultation') Object.assign(update, redeleteConsultation(s, next.item));
           if (next.type === 'delete_plan')         update.nutritionPlans  = s.nutritionPlans.filter(p => p.id !== next.item.id);
           if (next.type === 'delete_invoice')      update.invoices        = s.invoices.filter(i => i.id !== next.item.id);
-          if (next.type === 'delete_document')     update.clientDocuments = s.clientDocuments.filter(d => d.id !== next.item.id);
           return update;
         });
       },
@@ -1752,7 +1829,6 @@ const useStore = create(
 
       // ---- DATA INTEGRITY ----
       integrityWarnings: [],
-      isLoading: false,
       smtpPassword: '',
       // Last persistence error (string) or null. Not persisted.
       saveError: null,
@@ -1796,11 +1872,10 @@ const useStore = create(
       runAutoBackup: async () => {
         const today = todayISO();
         if (get().lastBackupDate === today) return;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
         const backup = {
           version: STORE_VERSION,
           date: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
+          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
         };
         try {
           const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
@@ -1825,29 +1900,17 @@ const useStore = create(
 
       restoreFromAutoBackup: async (date) => {
         const raw = await invoke('load_data', { key: `backup-${date}` });
-        const parsed = JSON.parse(raw);
-        const d = parsed.data || parsed;
-        set({
-          clients:        d.clients        || [],
-          measurements:   d.measurements   || [],
-          consultations:  d.consultations  || [],
-          nutritionPlans: d.nutritionPlans || [],
-          services:       d.services       || DEFAULT_SERVICES,
-          invoices:       d.invoices       || [],
-          clientDocuments:d.clientDocuments || [],
-          emailTemplates: d.emailTemplates || null,
-          planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-          config: mergeRestoredConfig(get().config, d.config),
-        });
+        const d = backupData(JSON.parse(raw));
+        set(s => restoredState(d, s));
       },
 
       exportDataToZip: async (onProgress) => {
         const JSZip = (await import('jszip')).default;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
+        const { clientDocuments } = get();
         const payload = {
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
+          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
         };
 
         const zip = new JSZip();
@@ -1901,20 +1964,8 @@ const useStore = create(
         if (path.endsWith('.json')) {
           const { readTextFile } = await import('@tauri-apps/api/fs');
           const raw = await readTextFile(path);
-          const parsed = JSON.parse(raw);
-          const d = parsed.data || parsed;
-          set({
-            clients:        d.clients        || [],
-            measurements:   d.measurements   || [],
-            consultations:  d.consultations  || [],
-            nutritionPlans: d.nutritionPlans || [],
-            services:       d.services       || DEFAULT_SERVICES,
-            invoices:       d.invoices       || [],
-            clientDocuments:d.clientDocuments || [],
-            emailTemplates: d.emailTemplates || null,
-            planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-            config: mergeRestoredConfig(get().config, d.config),
-          });
+          const d = backupData(JSON.parse(raw));
+          set(s => restoredState(d, s));
           return { documentsRestored: 0 };
         }
 
@@ -1929,8 +1980,7 @@ const useStore = create(
         const dataFile = zip.file('data.json');
         if (!dataFile) throw new Error('Invalid backup: data.json not found');
         const dataRaw = await dataFile.async('string');
-        const parsed = JSON.parse(dataRaw);
-        const d = parsed.data || parsed;
+        const d = backupData(JSON.parse(dataRaw));
 
         // Restore document files through the backend so they are encrypted
         // when at-rest encryption is on. Only `documents/<clientId>/<file>`
@@ -1954,95 +2004,16 @@ const useStore = create(
         }
 
         // Apply data to store
-        set({
-          clients:        d.clients        || [],
-          measurements:   d.measurements   || [],
-          consultations:  d.consultations  || [],
-          nutritionPlans: d.nutritionPlans || [],
-          services:       d.services       || DEFAULT_SERVICES,
-          invoices:       d.invoices       || [],
-          clientDocuments:d.clientDocuments || [],
-          emailTemplates: d.emailTemplates || null,
-          planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-          config: mergeRestoredConfig(get().config, d.config),
-        });
+        set(s => restoredState(d, s));
 
         return { documentsRestored };
-      },
-
-      // Legacy — kept for backwards compatibility
-      exportDataToJSON: async () => {
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
-        const data = JSON.stringify({
-          version: STORE_VERSION,
-          exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
-        }, null, 2);
-        try {
-          const { save } = await import('@tauri-apps/api/dialog');
-          const { writeBinaryFile } = await import('@tauri-apps/api/fs');
-          const path = await save({ filters: [{ name: 'JSON', extensions: ['json'] }], defaultPath: `nutripolo-backup-${todayISO()}.json` });
-          if (path) {
-            const encoder = new TextEncoder();
-            await writeBinaryFile(path, encoder.encode(data));
-          }
-        } catch {
-          const blob = new Blob([data], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `nutripolo-backup-${todayISO()}.json`;
-          a.click();
-          URL.revokeObjectURL(url);
-        }
-      },
-
-      importDataFromJSON: async (mode = 'replace') => {
-        try {
-          const { open } = await import('@tauri-apps/api/dialog');
-          const { readTextFile } = await import('@tauri-apps/api/fs');
-          const path = await open({ filters: [{ name: 'JSON', extensions: ['json'] }] });
-          if (!path) return;
-          const raw = await readTextFile(path);
-          const parsed = JSON.parse(raw);
-          const d = parsed.data || parsed;
-          if (mode === 'replace') {
-            set({
-              clients:        d.clients        || [],
-              measurements:   d.measurements   || [],
-              consultations:  d.consultations  || [],
-              nutritionPlans: d.nutritionPlans || [],
-              services:       d.services       || DEFAULT_SERVICES,
-              invoices:       d.invoices       || [],
-              clientDocuments:d.clientDocuments || [],
-              emailTemplates: d.emailTemplates || null,
-              planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-              config: mergeRestoredConfig(get().config, d.config),
-            });
-          } else {
-            set(s => ({
-              clients:        [...s.clients,        ...(d.clients        || []).filter(c => !s.clients.find(x => x.id === c.id))],
-              measurements:   [...s.measurements,   ...(d.measurements   || []).filter(m => !s.measurements.find(x => x.id === m.id))],
-              consultations:  [...s.consultations,  ...(d.consultations  || []).filter(c => !s.consultations.find(x => x.id === c.id))],
-              nutritionPlans: [...s.nutritionPlans, ...(d.nutritionPlans || []).filter(p => !s.nutritionPlans.find(x => x.id === p.id))],
-              invoices:       [...s.invoices,       ...(d.invoices       || []).filter(i => !s.invoices.find(x => x.id === i.id))],
-              clientDocuments:[...s.clientDocuments, ...(d.clientDocuments|| []).filter(d2=> !s.clientDocuments.find(x => x.id === d2.id))],
-              planLibrary: {
-                ...s.planLibrary,
-                productos: [...s.planLibrary.productos, ...(d.planLibrary?.productos || []).filter(p => !s.planLibrary.productos.find(x => x.id === p.id))],
-                recetas: [...(s.planLibrary.recetas || []), ...(d.planLibrary?.recetas || []).filter(r => !(s.planLibrary.recetas || []).find(x => x.id === r.id))],
-                alimentos: { ...(d.planLibrary?.alimentos || {}), ...(s.planLibrary.alimentos || {}) },
-              },
-            }));
-          }
-        } catch (e) { throw e; }
       },
 
       emailTemplates: null,
     }),
     {
       name: 'nutripolo-storage',
-      storage: createJSONStorage(() => tauriStorage),
+      storage: tauriStorage,
       version: STORE_VERSION,
       // Skip automatic hydration at module load. App.jsx explicitly calls
       // `useStore.persist.rehydrate()` after it has determined whether
@@ -2096,27 +2067,25 @@ const useStore = create(
         if (error && !loadFailure) {
           loadFailure = { key: 'nutripolo-storage', error: String(error?.message || error) };
         }
-        if (state) {
-          state.isLoading = false;
-          // Sanitize reader-only calendars — never allow bidirectional on reader calendars
-          const gc = state.config?.googleCalendar;
-          if (gc?.calendars) {
-            let dirty = false;
-            const sanitized = gc.calendars.map(c => {
-              if (c.accessRole === 'reader' && c.syncMode === 'bidirectional') {
-                dirty = true;
-                return { ...c, syncMode: 'disabled' };
-              }
-              return c;
-            });
-            if (dirty) gc.calendars = sanitized;
-            // Clear default if it points to a reader calendar
-            if (gc.defaultPushCalendarId) {
-              const def = gc.calendars.find(c => c.id === gc.defaultPushCalendarId);
-              if (def?.accessRole === 'reader') gc.defaultPushCalendarId = null;
-            }
-          }
-        }
+        // Reader calendars can never be bidirectional nor the default push target.
+        // Applied with setState (not by mutating `state`) so it re-renders and persists.
+        const gc = state?.config?.googleCalendar;
+        if (!gc?.calendars) return;
+        const isReader = (id) => gc.calendars.some(c => c.id === id && c.accessRole === 'reader');
+        const fixMode = gc.calendars.some(c => c.accessRole === 'reader' && c.syncMode === 'bidirectional');
+        const fixDefault = !!gc.defaultPushCalendarId && isReader(gc.defaultPushCalendarId);
+        if (!fixMode && !fixDefault) return;
+        useStore.setState(s => ({
+          config: {
+            ...s.config,
+            googleCalendar: {
+              ...s.config.googleCalendar,
+              calendars: s.config.googleCalendar.calendars.map(c =>
+                c.accessRole === 'reader' && c.syncMode === 'bidirectional' ? { ...c, syncMode: 'disabled' } : c),
+              ...(fixDefault ? { defaultPushCalendarId: null } : {}),
+            },
+          },
+        }));
       },
     }
   )

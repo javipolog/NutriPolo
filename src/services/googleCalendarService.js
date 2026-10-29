@@ -547,26 +547,32 @@ export const googleCalendar = {
     const state = useStore.getState();
     const c = state.consultations.find(x => x.id === consultationId);
     if (!c) return { remote: 'none' };
-    state.deleteConsultation(consultationId);
-    if (!c.googleEventId || !c.sourceCalendarId) return { remote: 'none' };
-
     const gc = state.config.googleCalendar;
-    const remote = canPushToCalendar(gc, c.sourceCalendarId);
-    useStore.getState().addGcalPendingDelete({
-      calendarId: c.sourceCalendarId, eventId: c.googleEventId, consultationId, remote,
-    });
+    // Not linked yet but bound for Google: its create may already be there (a
+    // lost response, or a push still queued). Delete the event it would have,
+    // or the next pull imports it again. Google answers 404 if there is none.
+    const unlinkedTarget = c.googleEventId ? null : this.pushTargetFor(gc, c);
+    const calendarId = unlinkedTarget || c.sourceCalendarId;
+    const eventId = c.googleEventId || (unlinkedTarget ? googleEventIdFor(c.id) : null);
+    state.deleteConsultation(consultationId);
+    if (!eventId || !calendarId) return { remote: 'none' };
+
+    const remote = canPushToCalendar(gc, calendarId);
+    useStore.getState().addGcalPendingDelete({ calendarId, eventId, consultationId, remote });
     if (!remote) return { remote: 'kept' };
-    if (!gc?.connected) return { remote: 'pending' };
+    // The user never saw an unlinked consultation in Google: nothing to report.
+    const shown = (status) => (unlinkedTarget ? 'none' : status);
+    if (!gc?.connected) return { remote: shown('pending') };
     try {
       await enqueue(async () => {
         const token = await this.ensureToken();
-        await this.withRetry(tk => this.deleteEvent(tk, c.sourceCalendarId, c.googleEventId), { token });
-        useStore.getState().removeGcalPendingDelete(c.sourceCalendarId, c.googleEventId);
+        await this.withRetry(tk => this.deleteEvent(tk, calendarId, eventId), { token });
+        useStore.getState().removeGcalPendingDelete(calendarId, eventId);
       });
-      return { remote: 'deleted' };
+      return { remote: shown('deleted') };
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[GCal Delete] queued for retry:', e);
-      return { remote: 'pending', error: e };
+      return { remote: shown('pending'), error: e };
     }
   },
 

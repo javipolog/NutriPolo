@@ -262,7 +262,13 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
             <input
               type="date"
               value={form.fecha}
-              onChange={e => setField('fecha', e.target.value)}
+              onChange={e => {
+                const fecha = e.target.value;
+                // A new invoice dated in another year belongs to that year's series
+                setForm(f => (!isEdit && f.numero === generateInvoiceNumber(f.fecha)
+                  ? { ...f, fecha, numero: generateInvoiceNumber(fecha) }
+                  : { ...f, fecha }));
+              }}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
             />
           </div>

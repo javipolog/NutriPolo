@@ -126,12 +126,15 @@ describe('asked once', () => {
 });
 
 describe('auto sending', () => {
-  const entry = (over) => ({ channel: 'email', state: 'due', record: null, ...over });
+  const entry = (over) => ({ channel: 'email', state: 'due', record: null, consultation: consult(), ...over });
   it('picks due emails and retries errors up to the limit', () => {
     expect(isReviewAutoSendable(entry())).toBe(true);
     expect(isReviewAutoSendable(entry({ state: 'error', record: { attempts: 1 } }))).toBe(true);
     expect(isReviewAutoSendable(entry({ state: 'error', record: { attempts: MAX_AUTO_ATTEMPTS } }))).toBe(false);
     expect(isReviewAutoSendable(entry({ channel: 'whatsapp' }))).toBe(false);
+  });
+  it('never sends on its own for a visit not marked as completed', () => {
+    expect(isReviewAutoSendable(entry({ consultation: consult({ estado: 'programada' }) }))).toBe(false);
   });
 });
 
