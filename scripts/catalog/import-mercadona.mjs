@@ -12,7 +12,8 @@
 //   node scripts/catalog/import-mercadona.mjs --all-brands     # other brands too
 //   node scripts/catalog/import-mercadona.mjs --all-formats    # every pack size, not just one
 //
-// Output: scripts/catalog/out/foods.json and the product photos in out/images/.
+// Output: public/catalog/foods.json and the product photos in public/catalog/images/,
+// served by Vite and bundled with the app (the Foods view reads them from /catalog/).
 // Every response is cached in .cache/ so re-runs don't hit the APIs again.
 
 import { mkdir, readFile, writeFile, access } from 'node:fs/promises';
@@ -21,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const CACHE = path.join(ROOT, '.cache');
-const OUT = path.join(ROOT, 'out');
+const OUT = path.join(ROOT, '..', '..', 'public', 'catalog');
 
 const MERCADONA_API = 'https://tienda.mercadona.es/api';
 const MERCADONA_PARAMS = 'lang=es&wh=vlc1';

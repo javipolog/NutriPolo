@@ -36,7 +36,9 @@ dulces, bollería, platos preparados…) y palabras que descartan un producto
 
 ## Resultado
 
-En `scripts/catalog/out/`:
+En `public/catalog/` (fuera de git), desde donde la app lo empaqueta y lo
+muestra en la vista **Alimentos**. Sin este paso la vista sale vacía, con un
+aviso de cómo generarlo:
 
 - `foods.json`: un registro por producto con `basico`, `por100g` (kcal, proteínas,
   hidratos, azúcares, grasas, saturadas, fibra, sal), ingredientes, alérgenos,

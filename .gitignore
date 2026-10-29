@@ -38,4 +38,4 @@ src-tauri/gen/
 
 # Catàleg d'aliments: memòria cau i sortida generada
 scripts/catalog/.cache/
-scripts/catalog/out/
+public/catalog/
