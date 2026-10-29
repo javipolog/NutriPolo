@@ -145,7 +145,7 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
           {filtered.map(doc => (
             <div
               key={doc.id}
-              className="flex items-center gap-3 p-3 bg-white dark:bg-sage-800 border border-sage-150 dark:border-sage-700 rounded-soft hover:shadow-card transition-shadow"
+              className="flex items-center gap-3 p-3 bg-white dark:bg-sage-800 border border-sage-200 dark:border-sage-700 rounded-soft hover:shadow-card transition-shadow"
             >
               {/* Icon */}
               <div className="flex-shrink-0 w-9 h-9 rounded-soft bg-sage-50 dark:bg-sage-700 flex items-center justify-center">

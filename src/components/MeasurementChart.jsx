@@ -120,7 +120,18 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
     grasa: m.grasaCorporal || null,
     musculo: m.masaMuscular || null,
     imc: m.imc || (m.peso && clientHeight ? calcIMC(m.peso, clientHeight) : null),
+    cintura: m.cintura || null,
+    cadera: m.cadera || null,
+    brazo: m.brazo || null,
+    muslo: m.muslo || null,
   }));
+  // Perimeters share one cm axis; only the ones with data are drawn.
+  const perimeters = [
+    { key: 'cintura', label: t.measurement_waist, color: c.primary },
+    { key: 'cadera', label: t.measurement_hip, color: c.accent },
+    { key: 'brazo', label: t.measurement_arm, color: c.info },
+    { key: 'muslo', label: t.measurement_thigh, color: c.axis },
+  ].filter(p => chartData.some(d => d[p.key] != null));
 
   const secondaryKey = { weight: 'imc', bodyfat: 'musculo' }[chartType];
   const hasSecondary = !!secondaryKey && chartData.some(d => d[secondaryKey] != null);
@@ -181,9 +192,9 @@ export const MeasurementChart = ({ clientId, measurements, clientHeight }) => {
                       {hasSecondary && <Line yAxisId="right" type="monotone" dataKey="musculo" stroke={c.primary} strokeWidth={2} dot={{ r: 3 }} name={t.measurement_muscle} connectNulls />}
                     </>
                   )}
-                  {chartType === 'circumferences' && (
-                    <Line yAxisId="left" type="monotone" dataKey="peso" stroke={c.primary} strokeWidth={2} dot={{ r: 3 }} name={t.chart_weight_ref} connectNulls />
-                  )}
+                  {chartType === 'circumferences' && perimeters.map(p => (
+                    <Line key={p.key} yAxisId="left" type="monotone" dataKey={p.key} stroke={p.color} strokeWidth={2} dot={{ r: 3 }} name={p.label} connectNulls />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             </div>

@@ -234,7 +234,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
             {consultations.length === 0 ? (
               <p className="text-center text-sage-400 py-12">{t.no_consultations}</p>
             ) : (
-              consultations.sort((a, b) => b.fecha.localeCompare(a.fecha)).map(c => (
+              [...consultations].sort((a, b) => b.fecha.localeCompare(a.fecha)).map(c => (
                 <div key={c.id} className="bg-white border border-sage-200 rounded-soft p-4 flex items-start gap-4">
                   <div className="text-center w-14 shrink-0">
                     <p className="text-xs font-bold text-wellness-500">{formatDate(c.fecha)}</p>
@@ -319,7 +319,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
             {invoices.length === 0 ? (
               <p className="text-center text-sage-400 py-12">{t.no_invoices}</p>
             ) : (
-              invoices.sort((a, b) => b.fecha.localeCompare(a.fecha)).map(inv => (
+              [...invoices].sort((a, b) => b.fecha.localeCompare(a.fecha)).map(inv => (
                 <div key={inv.id} className="bg-white border border-sage-200 rounded-soft p-4 flex items-center gap-4">
                   <div className="flex-1">
                     <p className="text-sm font-medium text-sage-800">{inv.numero}</p>

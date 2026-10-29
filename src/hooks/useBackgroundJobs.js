@@ -73,7 +73,7 @@ async function runReviewEmails() {
         consultation: fresh, client: entry.client, channel: 'email',
         config: state.config, now: Date.now(), history: state.consultations,
       });
-      if (!isReviewAutoSendable({ ...entry, state: current, record: fresh.reviewRequest?.email })) continue;
+      if (!isReviewAutoSendable({ ...entry, consultation: fresh, state: current, record: fresh.reviewRequest?.email })) continue;
       const result = await deliverReviewEmail(fresh, entry.client);
       if (result.success) sent++; else failed++;
     } finally {

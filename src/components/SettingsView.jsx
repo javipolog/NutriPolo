@@ -322,7 +322,6 @@ const SmtpSection = () => {
         password:  smtpPassword,
         fromName:  config.nombre || '',
         fromEmail: smtp.user || '',
-        useTls:    smtp.secure !== false,
       });
       if (result.success) toast.success(t.smtp_test_ok);
       else toast.error(result.error || t.smtp_test_fail);
@@ -370,7 +369,7 @@ const SmtpSection = () => {
         </div>
         <div>
           <label htmlFor="smtp-port" className="block text-xs font-medium text-sage-600 mb-1">{t.smtp_port}</label>
-          <Input id="smtp-port" type="number" value={smtp.port || 587} onChange={e => set('port', parseInt(e.target.value))} />
+          <Input id="smtp-port" type="number" value={smtp.port || 587} onChange={e => set('port', parseInt(e.target.value, 10) || null)} />
         </div>
       </div>
       <div>
@@ -463,6 +462,8 @@ const GoogleCalendarSection = () => {
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [calendars, setCalendars] = useState([]);
+  // null while loading; '' once loaded; the error text if it failed
+  const [calendarsError, setCalendarsError] = useState(null);
 
   useEffect(() => {
     if (gcal.connected) handleLoadCalendars();
@@ -581,12 +582,16 @@ const GoogleCalendarSection = () => {
   };
 
   const handleLoadCalendars = async () => {
+    setCalendarsError(null);
     try {
       const token = await googleCalendar.ensureToken();
       const calList = await googleCalendar.listCalendars(token);
       setCalendars(calList);
+      setCalendarsError('');
     } catch (e) {
-      toast.error(t.gcal_load_error.replace('{error}', String(e?.message || e)));
+      const msg = String(e?.message || e);
+      setCalendarsError(msg);
+      toast.error(t.gcal_load_error.replace('{error}', msg));
     }
   };
 
@@ -801,7 +806,11 @@ const GoogleCalendarSection = () => {
             </button>
           </div>
           {calendars.length === 0 ? (
-            <p className="text-xs text-sage-400">{t.gcal_loading_calendars}</p>
+            <p className={`text-xs ${calendarsError ? 'text-danger' : 'text-sage-400'}`}>
+              {calendarsError === null ? t.gcal_loading_calendars
+                : calendarsError ? t.gcal_load_error.replace('{error}', calendarsError)
+                : t.gcal_no_calendars}
+            </p>
           ) : (
             <div className="space-y-2">
               {calendars.map(cal => {
@@ -1791,6 +1800,9 @@ export const SettingsView = () => {
   const set = (k, v) => updateConfig({ [k]: v });
 
   const handleExportZip = async () => {
+    // The ZIP is a plain file: with at-rest encryption on, say so before it leaves the vault.
+    const encrypted = await invoke('encryption_is_enabled').catch(() => false);
+    if (encrypted && !(await confirm({ title: t.backup_export_plain_title, message: t.backup_export_plain_msg }))) return;
     try {
       const result = await exportDataToZip(({ current, total }) => setExportProgress({ current, total }));
       setExportProgress(null);

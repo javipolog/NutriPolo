@@ -222,9 +222,13 @@ export function getReviewCandidates({ consultations, history = consultations, cl
   return entries.sort((a, b) => b.end - a.end);
 }
 
-/** Whether automatic sending should pick this email entry up. */
+/**
+ * Whether automatic sending should pick this email entry up. Only for
+ * consultations marked `completada`: one still `programada` may not have
+ * taken place (it is offered in the panel, to be sent by hand).
+ */
 export function isReviewAutoSendable(entry) {
-  if (entry.channel !== 'email') return false;
+  if (entry.channel !== 'email' || entry.consultation?.estado !== 'completada') return false;
   if (entry.state === 'due') return true;
   return entry.state === 'error' && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
 }

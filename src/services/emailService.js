@@ -329,8 +329,8 @@ export const openMailClient = async ({ to, subject, body, provider = 'gmail' }) 
     await openUrl(url);
     return { success: true };
   } catch {
-    window.open(url, '_blank');
-    return { success: true };
+    // window.open returns null when nothing could be opened
+    return window.open(url, '_blank') ? { success: true } : { success: false, error: 'mail_client_open_failed' };
   }
 };
 
@@ -348,7 +348,6 @@ export const buildSmtpConfig = (config, password = '') => (config?.smtp?.host ? 
   password,
   fromEmail: config.smtp.user,
   fromName: config.nombre,
-  useTls: config.smtp.secure !== false,
 } : null);
 
 const uint8ArrayToBase64 = (bytes) => {
@@ -380,8 +379,8 @@ export const sendEmailSMTP = async ({ to, toName, subject, body, pdfBytes, pdfFi
   }
 
   // Field names are camelCase — the Rust SmtpConfig uses
-  // #[serde(rename_all = "camelCase")] so fromName/fromEmail/useTls
-  // map to from_name/from_email/use_tls in Rust.
+  // #[serde(rename_all = "camelCase")] so fromName/fromEmail
+  // map to from_name/from_email in Rust. The TLS mode follows the port (465 → SMTPS).
   const safeSmtp = {
     host:      sanitizeHeader(smtpConfig?.host),
     port:      Number(smtpConfig?.port) || 587,
@@ -389,7 +388,6 @@ export const sendEmailSMTP = async ({ to, toName, subject, body, pdfBytes, pdfFi
     password,
     fromName:  sanitizeHeader(smtpConfig?.fromName),
     fromEmail: sanitizeHeader(smtpConfig?.fromEmail),
-    useTls:    !!smtpConfig?.useTls,
   };
 
   try {
@@ -418,7 +416,6 @@ export const testSmtpConnection = async (smtpConfig) => {
     password:  smtpConfig?.password || '',
     fromName:  sanitizeHeader(smtpConfig?.fromName),
     fromEmail: sanitizeHeader(smtpConfig?.fromEmail),
-    useTls:    !!smtpConfig?.useTls,
   };
   try {
     const result = await invoke('test_smtp_connection', { smtpConfig: safeSmtp });

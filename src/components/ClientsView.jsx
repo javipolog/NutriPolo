@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Users, Plus, Edit2, Trash2, Search, MessageCircle, ChevronRight, Phone } from 'lucide-react';
 import { Button, Input, EmptyState, useToast, useConfirm } from './UI';
-import useStore, { formatDate } from '../stores/store';
+import useStore, { formatDate, lastVisitByClient } from '../stores/store';
 import { openWhatsAppChat } from '../services/reminderService';
 import { useT } from '../i18n';
 import { GOALS, optionLabel } from '../clientOptions';
@@ -21,6 +21,9 @@ export const ClientsView = () => {
   const clientFilters = useStore(s => s.clientFilters);
   const setClientFilters = useStore(s => s.setClientFilters);
   const config = useStore(s => s.config);
+  const consultations = useStore(s => s.consultations);
+  const measurements = useStore(s => s.measurements);
+  const lastVisit = useMemo(() => lastVisitByClient({ consultations, measurements }), [consultations, measurements]);
   const pendingSuggestions = useStore(s =>
     (s.patientSuggestions || []).filter(sg => sg.status === 'pending' || sg.status === 'pending-confirm').length
   );
@@ -53,7 +56,7 @@ export const ClientsView = () => {
     if (!ok) return;
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);
-    toast.success(`${client.nombre} eliminado`);
+    toast.success(t.client_deleted);
   };
 
   const openWhatsApp = async (client) => {
@@ -81,15 +84,15 @@ export const ClientsView = () => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        <div className="relative flex-1 min-w-48">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-sage-400" />
-          <Input
-            value={clientSearch}
-            onChange={e => setClientSearch(e.target.value)}
-            placeholder={t.search_clients}
-            className="pl-9"
-          />
-        </div>
+        {/* The icon goes through Input so the text is padded past it */}
+        <Input
+          icon={Search}
+          value={clientSearch}
+          onChange={e => setClientSearch(e.target.value)}
+          placeholder={t.search_clients}
+          aria-label={t.search_clients}
+          className="flex-1 min-w-48"
+        />
         <select
           value={clientFilters.estado}
           onChange={e => setClientFilters({ estado: e.target.value })}
@@ -148,8 +151,9 @@ export const ClientsView = () => {
                 </div>
                 <div className="flex items-center gap-3 mt-0.5 text-xs text-sage-500">
                   {client.telefono && <span className="flex items-center gap-1"><Phone size={10} />{client.telefono}</span>}
-                  {client.fechaUltimaConsulta && <span>Última visita: {formatDate(client.fechaUltimaConsulta)}</span>}
-                  {!client.fechaUltimaConsulta && <span className="text-warning">{t.client_no_visits}</span>}
+                  {lastVisit.has(client.id)
+                    ? <span>{t.client_last_visit}: {formatDate(lastVisit.get(client.id))}</span>
+                    : <span className="text-warning">{t.client_no_visits}</span>}
                 </div>
                 {(client.objetivos || []).length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1.5">

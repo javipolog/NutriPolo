@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast, useConfirm } from './UI';
-import useStore, { todayISO, canPushToCalendar } from '../stores/store';
+import useStore, { todayISO, canPushToCalendar, changedFields } from '../stores/store';
 import { useT, useLocale } from '../i18n';
 import { AlertTriangle, CheckCircle2, Mail, MessageCircle, Trash2 } from 'lucide-react';
 import { googleCalendar, shortGcalError } from '../services/googleCalendarService';
@@ -116,7 +116,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     if (sg) {
       confirmAutoMatch(sg.id);
     }
-    toast.success(t.inbox_confirmed_ok || 'Coincidencia confirmada');
+    toast.success(t.inbox_confirmed_ok);
     onClose();
   };
 
@@ -125,9 +125,14 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     if (Object.keys(e).length) { setErrors(e); return; }
 
     if (isEdit) {
-      updateConsultation(consultation.id, form);
+      // Only what was edited here: the form is a copy taken on open, and the
+      // sync or a reminder may have changed other fields since.
+      const changes = changedFields(consultation, form);
+      if (Object.keys(changes).length) {
+        updateConsultation(consultation.id, changes);
+        pushToGoogle(consultation.id);
+      }
       toast.success(t.consultation_updated);
-      pushToGoogle(consultation.id);
       onClose();
     } else {
       const newC = addConsultation(form);
@@ -180,7 +185,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             <AlertTriangle size={14} className="shrink-0 mt-0.5" />
             <span>
               {t.consultation_readonly_warning
-                ? t.consultation_readonly_warning.replace('{cal}', sourceCal?.name || 'calendario externo')
+                ? t.consultation_readonly_warning.replace('{cal}', sourceCal?.name || t.calendar_external)
                 : t.consultation_readonly_external.replace('{calendar}', sourceCal?.name || t.calendar_external)}
             </span>
           </div>
@@ -201,10 +206,10 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             </p>
             <div className="flex gap-2">
               <Button size="sm" variant="primary" onClick={handleInlineConfirm}>
-                {t.inbox_confirm || 'Confirmar'}
+                {t.inbox_confirm}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setReviewBannerDismissed(true)}>
-                {t.inbox_pick_other || 'Elegir otro'}
+                {t.inbox_pick_other}
               </Button>
             </div>
           </div>
