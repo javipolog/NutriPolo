@@ -221,7 +221,8 @@ export const dishKey = (title) => fold(String(title || '').trim()).replace(/\s+/
 // Canva: "Sepia / Patata / Cebolla, tomate"); la recepta completa és a l'enllaç.
 const NUM = '(?:\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?\\s*[½¼¾⅓⅔]?|[½¼¾⅓⅔]|(?:unas?|unos?|medi[oa]s?)\\b)(?:\\s*(?:-|a|y)\\s*(?:\\d+(?:[.,]\\d+)?|[½¼¾]))?';
 const UNIT = '(?:k?g|gr|gramos?|kilos?|m?l|cl|litros?|cucharad(?:it)?as?|cdas?|cdtas?|tazas?|vas(?:it)?os?|pizcas?|dientes?|hojas?|latas?|botes?|tarros?|puñados?|lonchas?|rodajas?|ramitas?|ramas?|chorr(?:it)?os?|sobres?|filetes?|rebanadas?|unidad(?:es)?|piezas?|trozos?|paquetes?|bolsas?|nidos?|lomos?|medidas?(?: de yogur)?)\\b\\.?(?:\\s+(?:soperas?|de postre|pequeñas?|grandes?|colmadas?|rasas?))?(?:\\s+aprox\\.?)?';
-const QTY_RE = new RegExp(`^(?:(?:${NUM})\\s*(?:${UNIT})?|(?:${UNIT}))\\s*(?:del?\\s+)?`, 'i');
+// Una unitat sense número només és quantitat si va seguida de "de" ("Hojas de laurel", però no "Lomo fresco")
+const QTY_RE = new RegExp(`^(?:(?:${NUM})\\s*(?:${UNIT})?|(?:${UNIT})(?=\\s*del?\\s))\\s*(?:del?\\s+)?`, 'i');
 const PREP_RE = /\s+(?:para|por persona|al gusto|a gusto|cortad[oa]s?|troceado?s?|pelad[oa]s?|lavad[oa]s?|laminad[oa]s?|en (?:dados|rodajas|tiras|láminas|trozos|juliana))\b.*$/i;
 const SIZE_RE = /\s+(?:grandes?|median[oa]s?|pequeñ[oa]s?|calientes?|frí[oa]s?|templad[oa]s?|madur[oa]s?)(?=\s|$)/gi;
 // Bàsics de rebost: no aporten res al menú
@@ -260,6 +261,30 @@ export function summarizeIngredients(lines, max = 6) {
   }
   const result = out.map(x => (Array.isArray(x) ? x.map((n, i) => (i ? n.charAt(0).toLowerCase() + n.slice(1) : n)).join(', ') : x)).map(capitalize);
   return result.length ? result.slice(0, max) : all.slice(0, 3).map(x => capitalize(x.name));
+}
+
+/**
+ * Aliments de la planificació (opcions i menú), sense quantitats, sense
+ * bàsics de rebost i un sol cop cadascun, en l'ordre en què surten. Són els
+ * que es poden lligar a una foto de la biblioteca de productes.
+ * @returns {{ nombre: string, key: string }[]}
+ */
+export function planFoods(plan) {
+  const p = normalizePlanificacion(plan);
+  const lines = [
+    ...OPTION_SECTIONS.flatMap(k => p[k].opciones.flatMap(o => linesOf(o.alimentos))),
+    ...p.menu.dias.flatMap(d => MENU_SLOTS.flatMap(s => MENU_VARIANTS.flatMap(v => linesOf(d[s][v].alimentos)))),
+  ];
+  const byKey = new Map();
+  for (const line of lines) {
+    if (/:\s*$/.test(line) || /al gusto|a gusto|que quieras|que te apetezca/.test(fold(line))) continue;
+    // "Opcional: …", "Ej.: …" i l'asterisc de producte concret no formen part del nom
+    const name = ingredientName(line.replace(/^[^:\d]{1,12}:\s*/, '').replace(/\*/g, ''));
+    const key = dishKey(name);
+    if (!key || PANTRY_RE.test(key) || byKey.has(key)) continue;
+    byKey.set(key, { nombre: capitalize(name), key });
+  }
+  return [...byKey.values()];
 }
 
 /** Ingredients resumits d'una recepta de la web, un per línia. */

@@ -10,7 +10,7 @@ import useStore, { todayISO, generateId, errMsg } from '../../stores/store';
 import { useT } from '../../i18n';
 import {
   createPlanificacion, latestPlanificacion, normalizePlanificacion, copyContent, buildDishIndex, collectOwnRecipes,
-  emptyOption, emptyDish, isDishEmpty, linesOf, safeUrl, planificacionStats,
+  emptyOption, emptyDish, isDishEmpty, linesOf, safeUrl, planificacionStats, planFoods, dishKey,
   DEFAULT_CANTIDADES, DEFAULT_CANTIDADES_NOTA, WEEK_DAYS, MENU_SLOTS, MENU_VARIANTS, PLAN_FORMAT,
 } from '../../services/planificacion';
 import { imageFileToDataUrl, planPdfFileName } from '../../services/planPdf';
@@ -401,9 +401,9 @@ const MenuEditor = ({ value, onChange, dishIndex }) => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// Biblioteca de productes
+// Aliments de la planificació + biblioteca de productes
 // ─────────────────────────────────────────────────────────────
-const ProductsEditor = ({ selected, onChange }) => {
+const ProductsEditor = ({ selected, onChange, foods }) => {
   const t = useT();
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
@@ -412,6 +412,14 @@ const ProductsEditor = ({ selected, onChange }) => {
   const updatePlanProduct = useStore(s => s.updatePlanProduct);
   const deletePlanProduct = useStore(s => s.deletePlanProduct);
   const fileRef = useRef(null);
+  const foodFileRef = useRef(null);
+  const [photoFor, setPhotoFor] = useState(null);
+
+  // Cada aliment amb la foto de la biblioteca que es diu igual (si n'hi ha)
+  const productByKey = useMemo(() => new Map(products.map(pr => [dishKey(pr.nombre), pr])), [products]);
+  const foodRows = foods.map(f => ({ ...f, product: productByKey.get(f.key) || null }));
+  const unmarked = foodRows.filter(f => f.product && !selected.includes(f.product.id)).map(f => f.product.id);
+  const toggle = (id) => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
 
   const onFiles = async (files) => {
     const added = [];
@@ -426,6 +434,18 @@ const ProductsEditor = ({ selected, onChange }) => {
     if (added.length) onChange([...selected, ...added]);
   };
 
+  // La foto d'un aliment crea el producte amb el seu nom i el marca
+  const onFoodFile = async (file) => {
+    if (!file || !photoFor) return;
+    try {
+      const imagen = await imageFileToDataUrl(file);
+      onChange([...selected, addPlanProduct({ nombre: photoFor.nombre, imagen }).id]);
+    } catch {
+      toast.error(t.pf_image_error.replace('{name}', file.name));
+    }
+    setPhotoFor(null);
+  };
+
   const remove = async (pr) => {
     if (!(await confirm(t.pf_product_delete_confirm.replace('{name}', pr.nombre)))) return;
     deletePlanProduct(pr.id);
@@ -434,6 +454,63 @@ const ProductsEditor = ({ selected, onChange }) => {
 
   return (
     <div className="space-y-4">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="text-sm font-semibold text-sage-800">{t.pf_plan_foods}</h4>
+          {unmarked.length > 0 && (
+            <Button variant="ghost" size="sm" className="ml-auto" onClick={() => onChange([...selected, ...unmarked])}>{t.pf_plan_foods_mark_all}</Button>
+          )}
+        </div>
+        {foodRows.length === 0 ? (
+          <p className="text-sm text-sage-500 py-6 px-4 text-center border border-dashed border-sage-300 rounded-soft">{t.pf_plan_foods_empty}</p>
+        ) : (
+          <>
+            <p className="text-sm text-sage-600 flex gap-2"><Info size={15} className="shrink-0 mt-0.5 text-sage-500" />{t.pf_plan_foods_hint}</p>
+            <input
+              ref={foodFileRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="hidden"
+              onChange={e => { onFoodFile(e.target.files[0]); e.target.value = ''; }}
+            />
+            <div className="flex flex-wrap gap-2">
+              {foodRows.map(f => {
+                if (!f.product) {
+                  return (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => { setPhotoFor(f); foodFileRef.current?.click(); }}
+                      aria-label={t.pf_food_add_photo.replace('{name}', f.nombre)}
+                      title={t.pf_food_add_photo.replace('{name}', f.nombre)}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-dashed border-sage-300 bg-white text-xs text-sage-600 hover:border-wellness-400 hover:text-sage-800 transition-colors"
+                    >
+                      <ImagePlus size={13} className="text-sage-400" aria-hidden="true" />
+                      {f.nombre}
+                    </button>
+                  );
+                }
+                const on = selected.includes(f.product.id);
+                return (
+                  <button
+                    key={f.key}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggle(f.product.id)}
+                    title={`${t.pf_in_plan}: ${f.nombre}`}
+                    className={`flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border text-xs transition-colors ${on ? 'border-wellness-400 bg-wellness-50 text-sage-800' : 'border-sage-200 bg-white text-sage-500 hover:border-sage-300'}`}
+                  >
+                    <img src={f.product.imagen} alt="" className="w-6 h-6 rounded-full object-contain bg-white" />
+                    {f.nombre}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+
+      <h4 className="text-sm font-semibold text-sage-800 pt-4 border-t border-sage-200">{t.pf_products_library}</h4>
       <p className="text-sm text-sage-600 flex gap-2"><Info size={15} className="shrink-0 mt-0.5 text-sage-500" />{t.pf_products_hint}</p>
       <div>
         <input
@@ -784,7 +861,7 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
               )}
               {section === 'cantidades' && <CantidadesEditor value={form.cantidades} onChange={v => patch('cantidades', v)} />}
               {section === 'menu' && <MenuEditor value={form.menu} onChange={v => patch('menu', v)} dishIndex={dishIndex} />}
-              {section === 'productos' && <ProductsEditor selected={form.productos} onChange={ids => patch('productos', ids)} />}
+              {section === 'productos' && <ProductsEditor selected={form.productos} onChange={ids => patch('productos', ids)} foods={planFoods(form)} />}
             </div>
           </main>
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PLAN_FORMAT, WEEK_DAYS, linesOf, nextPlanNumber, latestPlanificacion, createPlanificacion,
   copyContent, normalizeWeek, visibleSections, planificacionStats, isDishEmpty, safeUrl, buildDishIndex,
-  summarizeIngredients, collectOwnRecipes, mergeOwnRecipes,
+  summarizeIngredients, collectOwnRecipes, mergeOwnRecipes, planFoods,
 } from './planificacion';
 import { samplePlanificacion } from './planificacion.fixture';
 
@@ -104,6 +104,25 @@ describe('safeUrl', () => {
     expect(safeUrl('  ')).toBeNull();
     expect(safeUrl('javascript:alert(1)')).toBeNull();
     expect(safeUrl('file:///C:/x.pdf')).toBeNull();
+  });
+});
+
+describe('planFoods', () => {
+  it('lists each food of the options and the menu once, without quantities or pantry basics', () => {
+    const names = planFoods(samplePlanificacion()).map(f => f.nombre);
+    expect(names.slice(0, 3)).toEqual(['Café con 150 ml de leche semidesnatada o de avena', 'Yogur griego natural ligero', 'Cereales']);
+    expect(names).toContain('Arándanos');         // "Opcional: 1 puñado de arándanos"
+    expect(names).toContain('Salteado rústico');  // sense l'asterisc
+    expect(names).toContain('Salsa de soja');
+    expect(names).toContain('Lomo fresco');
+    expect(names.filter(n => n === 'Pollo')).toHaveLength(1);
+    expect(names).not.toContain('AOVE');
+    expect(names).not.toContain('Canela');
+    expect(names.some(n => /que quieras/.test(n))).toBe(false);
+  });
+
+  it('is empty for a plan without foods', () => {
+    expect(planFoods(createPlanificacion({ clienteId: 'c1', plans: [] }))).toEqual([]);
   });
 });
 
