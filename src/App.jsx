@@ -328,16 +328,16 @@ function AppContent() {
         document.head.appendChild(link);
       }
     };
-    const font = config.appFont || 'Inter';
+    const font = config.appFont || 'Onest';
     document.documentElement.style.setProperty('--font-ui', `'${font}', system-ui, sans-serif`);
-    if (font !== 'Inter') loadGoogleFont(font, `gf-ui-${font.replace(/\s+/g, '-').toLowerCase()}`);
-    // Playfair Display and JetBrains Mono are already loaded by index.html
-    const heading = config.appFontHeading || 'Playfair Display';
-    document.documentElement.style.setProperty('--font-heading', `'${heading}', Georgia, ui-serif, serif`);
-    if (heading !== 'Playfair Display') loadGoogleFont(heading, `gf-heading-${heading.replace(/\s+/g, '-').toLowerCase()}`);
-    const mono = config.appFontMono || 'JetBrains Mono';
-    document.documentElement.style.setProperty('--font-mono', `'${mono}', monospace`);
-    if (mono !== 'JetBrains Mono') loadGoogleFont(mono, `gf-mono-${mono.replace(/\s+/g, '-').toLowerCase()}`);
+    if (font !== 'Onest') loadGoogleFont(font, `gf-ui-${font.replace(/\s+/g, '-').toLowerCase()}`);
+    // Onest is bundled (main.jsx); only other families are fetched
+    const heading = config.appFontHeading || 'Onest';
+    document.documentElement.style.setProperty('--font-heading', `'${heading}', system-ui, sans-serif`);
+    if (heading !== 'Onest') loadGoogleFont(heading, `gf-heading-${heading.replace(/\s+/g, '-').toLowerCase()}`);
+    const mono = config.appFontMono || 'Onest';
+    document.documentElement.style.setProperty('--font-mono', `'${mono}', system-ui, sans-serif`);
+    if (mono !== 'Onest') loadGoogleFont(mono, `gf-mono-${mono.replace(/\s+/g, '-').toLowerCase()}`);
   }, [config.appFont, config.appFontHeading, config.appFontMono]);
 
   // Post-hydration: backup + integrity check

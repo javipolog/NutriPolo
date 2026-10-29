@@ -19,7 +19,7 @@ Aplicacio d'escriptori per a Windows 11 per a la gestio de consultes de nutricio
 - **Tailwind CSS 3.3** - Estils utility-first
 - **Lucide React** - Icones
 - **Recharts 2.10** - Grafics i visualitzacions
-- **pdf-lib + fontkit** - Generacio de PDFs vectorials (factures i plans)
+- **pdf-lib + fontkit** - Generacio de PDFs vectorials (factures i plans), tots amb Onest
 
 ### Backend (Rust)
 - **Tauri 1.5** - Framework d'apps d'escriptori
@@ -80,9 +80,10 @@ nutripolo-app/
 │   │   ├── googleCalendarService.js  # Sync bidireccional amb Google Calendar
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
 │   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
+│   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
-│   │   ├── pdfPlanificacionGenerator.js # PDF de la planificació (substitueix Canva; Poppins)
+│   │   ├── pdfPlanificacionGenerator.js # PDF de la planificació (substitueix Canva; Onest + icones Lucide)
 │   │   ├── planificacion.js          # Model de la planificació (pur, amb tests)
 │   │   ├── planPdf.js                # Tria generador segons format + imatges de productes
 │   │   ├── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
@@ -227,7 +228,9 @@ fn quit_app()                                         // el JS el crida despres 
 - Seccions: `desayunos` / `mediaManana` / `merienda` (opcions), `cantidades`, `menu.dias[]` (7 dies × `comida`/`cena` × `a`/`b`, amb `receta` enllaçada al PDF) i `productos` (ids)
 - Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
 - Una planificació nova copia el contingut de l'última del client; els títols ja usats autocompleten ingredients (`buildDishIndex`)
-- Fonts del PDF: Poppins (OFL) a `public/fonts`
+- PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt
+- Ingredients "Nom (170 g)" → quantitat alineada a la dreta (`splitQuantity`); a la guia, "Pa: 60 g" → taula aliment | ració
+- El menú va en una pàgina horitzontal si el text hi cap a mida llegible; si no, es parteix en comidas i cenas
 - Receptes de la web (`webRecipes.js`): llista per l'API REST de WordPress (tipus `receta`) i ingredients/temps/etiquetes llegits de l'HTML de cada recepta (camps ACF que l'API no exposa). Memòria cau a `planLibrary.recetasWeb` (`{ items, syncedAt }`); es resincronitza en obrir l'editor si té més de 6 h i només es baixen les receptes amb `modified` nou. El servidor atén les peticions en sèrie (~6 s cadascuna): les pàgines es baixen d'una en una, la llista es mostra de seguida amb `ingredientes: null` per a les pendents, i una recepta pendent es baixa a l'acte si es tria (`loadWebRecipeNow`). Triar-ne una omple títol, ingredients i enllaç (`receta`); també surten a l'autocompletat de títols (`buildDishIndex`, per darrere dels plans)
 - Les imatges de la web porten `referrerPolicy="no-referrer"`: el servidor talla la connexió si rep un Referer d'un altre lloc
 
@@ -237,8 +240,8 @@ fn quit_app()                                         // el JS el crida despres 
 - Contrast WCAG AA: `sage-400`+ com a text; `wellness-400` / `terra-500` porten text blanc
 - Dark mode via `data-theme` a `<html>`; les excepcions (`bg-white`, text semàntic) són a `styles.css`
 - Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Combobox` (llistes llargues, p. ex. clients), `Modal` (prop `footer` fora del scroll)
-- Tipografia: títols de vista `font-serif text-title`; xifres amb `tabular-nums`; res per sota d'11 px
-- Fonts empaquetades amb @fontsource (`main.jsx`), sense peticions a Google Fonts
+- Tipografia: **Onest a tot arreu** (UI, títols i PDFs). `font-serif` / `font-mono` són només rols (títols de vista `font-serif text-title`, codis) i també són Onest; xifres amb `tabular-nums`; res per sota d'11 px
+- UI: Onest empaquetada amb @fontsource (`main.jsx`); PDFs: instàncies estàtiques completes (latin-ext, fletxes) a `public/fonts` amb `Onest-OFL.txt`, via `pdfFonts.js`. Cap petició a Google Fonts
 
 ### Nomenclatura
 - **Components:** PascalCase (`InvoiceModal.jsx`)

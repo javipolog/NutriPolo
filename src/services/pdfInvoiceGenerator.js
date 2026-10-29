@@ -9,6 +9,7 @@
 import { PDFDocument, rgb, LineCapStyle, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { validateDesign } from './invoiceDesignPresets';
+import { ONEST_FILES, fetchFont } from './pdfFonts';
 
 // ─── Constants A4 ───────────────────────────────────────────
 const A4_W = 595.28;  // punts (210mm)
@@ -150,50 +151,16 @@ const PAYMENT_LABELS = {
   tarjeta: 'Tarjeta',
 };
 
-// ─── Font loading amb cache ─────────────────────────────────
-const bytesCache = {};
-
-async function loadFontBytes(filename) {
-  if (bytesCache[filename]) return bytesCache[filename];
-  const resp = await fetch(`/fonts/${filename}`);
-  if (!resp.ok) throw new Error(`Font not found: ${filename}`);
-  const buf = await resp.arrayBuffer();
-  bytesCache[filename] = new Uint8Array(buf);
-  return bytesCache[filename];
-}
-
-async function embedFonts(pdfDoc, fontFamily = 'worksans') {
+// ─── Fonts (Onest, pdfFonts.js) ─────────────────────────────
+async function embedFonts(pdfDoc) {
   try {
-    if (fontFamily === 'helvetica') {
-      const reg  = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-      let mono = reg;
-      try { mono = await pdfDoc.embedFont(await loadFontBytes('JetBrainsMono-Regular.ttf')); } catch { /* Mono font unavailable — falls back to regular */ }
-      return { priReg: reg, priBold: bold, priMed: bold, secReg: reg, secBold: bold, secMed: bold, mono };
-    }
-
-    const [wsReg, wsBold, wsMed, rbReg, rbBold, rbMed, monoReg] = await Promise.all([
-      loadFontBytes('WorkSans-Regular.ttf'),
-      loadFontBytes('WorkSans-Bold.ttf'),
-      loadFontBytes('WorkSans-Medium.ttf'),
-      loadFontBytes('Roboto-Regular.ttf'),
-      loadFontBytes('Roboto-Bold.ttf'),
-      loadFontBytes('Roboto-Medium.ttf'),
-      loadFontBytes('JetBrainsMono-Regular.ttf'),
-    ]);
-
-    const ws  = { reg: await pdfDoc.embedFont(wsReg), bold: await pdfDoc.embedFont(wsBold), med: await pdfDoc.embedFont(wsMed) };
-    const rb  = { reg: await pdfDoc.embedFont(rbReg), bold: await pdfDoc.embedFont(rbBold), med: await pdfDoc.embedFont(rbMed) };
-    const mono = await pdfDoc.embedFont(monoReg);
-
-    // 'roboto' swaps primary/secondary roles
-    const pri = fontFamily === 'roboto' ? rb : ws;
-    const sec = fontFamily === 'roboto' ? ws : rb;
-
+    const [reg, med, bold] = await Promise.all(['reg', 'med', 'bold'].map(async (k) =>
+      pdfDoc.embedFont(await fetchFont(ONEST_FILES[k]), { subset: true })));
+    // Una sola família: els rols primari / secundari / xifres comparteixen Onest
     return {
-      priReg: pri.reg, priBold: pri.bold, priMed: pri.med,
-      secReg: sec.reg, secBold: sec.bold, secMed: sec.med,
-      mono,
+      priReg: reg, priBold: bold, priMed: med,
+      secReg: reg, secBold: bold, secMed: med,
+      mono: reg,
     };
   } catch (err) {
     if (import.meta.env.DEV) console.error('Font loading failed, using fallback:', err);
@@ -800,7 +767,7 @@ export async function generateInvoicePDF(invoice, client, config) {
   const pdfDoc = await PDFDocument.create();
   pdfDoc.registerFontkit(fontkit);
 
-  const fonts = await embedFonts(pdfDoc, design.fontFamily);
+  const fonts = await embedFonts(pdfDoc);
   const page0 = pdfDoc.addPage([A4_W, A4_H]);
   const tokens = buildTokens(fonts, design.colors);
   const layout = computeLayout();

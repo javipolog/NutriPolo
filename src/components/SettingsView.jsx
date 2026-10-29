@@ -3,16 +3,13 @@ import {
   Upload, Sun, Moon, Monitor,
   Eye, EyeOff, RotateCcw, Send, Loader2, X, Plus, Edit2,
   Trash2, MapPin, Languages, Calendar, RefreshCw,
-  LogOut, Wifi, Palette, Image, Type, ChevronDown, ChevronUp, FileText,
+  LogOut, Wifi, Palette, Image, ChevronDown, ChevronUp, FileText,
   Archive, History, ShieldCheck, Clock, AlertTriangle, Settings2, AlertCircle, Lock
 } from 'lucide-react';
 import { Button, Input, Textarea, Modal, useToast, useConfirm } from './UI';
 import useStore, { generateId, inferCalendarPurpose, flushAllPending, errMsg } from '../stores/store';
-import { PRESETS, FONT_OPTIONS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
+import { PRESETS, getPresetColors, validateDesign } from '../services/invoiceDesignPresets';
 import { testSmtpConnection } from '../services/emailService';
-// Invoice design preview fonts, loaded only with this view
-import '@fontsource/work-sans/latin-700.css';
-import '@fontsource/roboto/latin-700.css';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { RemindersSection } from './settings/RemindersSection';
@@ -1510,7 +1507,7 @@ const InvoiceDesignSection = () => {
               {design.logo?.data ? (
                 <img src={design.logo.data} alt="Logo" style={{ maxHeight: 36, maxWidth: 140 }} />
               ) : (
-                <span style={{ fontFamily: design.fontFamily === 'roboto' ? 'Roboto' : 'Work Sans, sans-serif', fontSize: 20, fontWeight: 700, color: c.accent, letterSpacing: 3 }}>NUTRIPOLO</span>
+                <span style={{ fontFamily: 'Onest, sans-serif', fontSize: 20, fontWeight: 700, color: c.accent, letterSpacing: 3 }}>NUTRIPOLO</span>
               )}
               {design.showTagline && (
                 <div style={{ fontSize: 7, color: c.muted, marginTop: 2 }}>{design.taglineText}</div>
@@ -1646,24 +1643,6 @@ const InvoiceDesignSection = () => {
             {colorRow(t.design_alt_bg, 'cardBg')}
           </div>
         )}
-      </div>
-
-      {/* Font selector */}
-      <div>
-        <label htmlFor="design-font" className="block text-xs font-medium text-sage-600 mb-2">
-          <Type size={13} className="inline mr-1" />
-          {t.design_font}
-        </label>
-        <select
-          id="design-font"
-          value={design.fontFamily}
-          onChange={(e) => setDesign({ fontFamily: e.target.value })}
-          className="px-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
-        >
-          {FONT_OPTIONS.map(f => (
-            <option key={f.id} value={f.id}>{f.label}</option>
-          ))}
-        </select>
       </div>
 
       {/* Tagline */}
