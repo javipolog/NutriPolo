@@ -844,6 +844,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
+    whats_new_library_title: 'Biblioteca de alimentos con fotos',
+    whats_new_library_desc:  'En Planes → Alimentos tienes una biblioteca de alimentos con foto real: genéricos y unos 290 básicos de Mercadona con su información nutricional. Los alimentos que escribes en la planificación cogen su foto con un clic en Productos, y puedes cambiar la foto o los valores nutricionales de cualquiera. Además, esta versión corrige recordatorios duplicados, la fecha de la última visita y la restauración de copias de seguridad.',
     whats_new_foods_title:   'Los alimentos del plan, en Productos',
     whats_new_foods_desc:    'La sección Productos de la planificación ya muestra los alimentos que has escrito en los desayunos, la media mañana, la merienda y el menú. Márcalos para que salgan en el PDF, o añade con un clic una foto a los que aún no la tienen.',
     whats_new_reviews_title: 'Pide reseñas en Google después de la consulta',
@@ -2068,6 +2070,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
+    whats_new_library_title: 'Biblioteca d\'aliments amb fotos',
+    whats_new_library_desc:  'A Plans → Aliments tens una biblioteca d\'aliments amb foto real: genèrics i uns 290 bàsics de Mercadona amb la seva informació nutricional. Els aliments que escrius a la planificació agafen la seva foto amb un clic a Productes, i pots canviar la foto o els valors nutricionals de qualsevol. A més, aquesta versió corregeix recordatoris duplicats, la data de l\'última visita i la restauració de còpies de seguretat.',
     whats_new_foods_title:   'Els aliments del pla, a Productes',
     whats_new_foods_desc:    'La secció Productes de la planificació ja mostra els aliments que has escrit als esmorzars, el mig matí, el berenar i el menú. Marca\'ls perquè surtin al PDF, o afegeix amb un clic una foto als que encara no en tenen.',
     whats_new_reviews_title: 'Demana ressenyes a Google després de la consulta',
@@ -3294,6 +3298,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
+    whats_new_library_title: 'Food library with photos',
+    whats_new_library_desc:  'Plans → Foods now has a food library with real photos: generic foods and about 290 Mercadona basics with their nutrition facts. Foods you write in a plan get their photo in one click in Products, and you can change the photo or nutrition values of any food. This version also fixes duplicate reminders, the last visit date and backup restores.',
     whats_new_foods_title:   'The plan\'s foods, in Products',
     whats_new_foods_desc:    'The plan\'s Products section now lists the foods you wrote in breakfasts, mid-morning, afternoon snack and the menu. Tick them to show them in the PDF, or add a photo in one click to those that don\'t have one yet.',
     whats_new_reviews_title: 'Ask for Google reviews after the appointment',

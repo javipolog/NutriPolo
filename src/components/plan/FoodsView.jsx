@@ -254,7 +254,8 @@ export const FoodsView = () => {
 
   return (
     <div className="space-y-5">
-      {!library.mercadona && (
+      {/* Avís per a qui compila: l'instal·lador publicat no porta el catàleg de Mercadona */}
+      {!library.mercadona && import.meta.env.DEV && (
         <p className="text-xs text-warning bg-warning-light rounded-button px-3 py-2 flex gap-2">
           <AlertTriangle size={14} className="shrink-0 mt-px" aria-hidden="true" />
           <span><strong className="font-semibold">{t.foods_missing_title}.</strong> {t.foods_missing_desc}</span>
