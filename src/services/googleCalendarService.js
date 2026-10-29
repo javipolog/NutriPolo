@@ -8,14 +8,182 @@
  *
  * Bidirectional calendars: push local changes to Google, pull remote changes.
  * Read-only calendars: pull only, never write.
+ *
+ * Guarantees:
+ *  - Every Google write (push, delete, sync) runs through one queue, so a
+ *    save in the modal never races the background sync.
+ *  - Events are created with a deterministic id derived from the consultation
+ *    id, so a retry or a race can never create the same appointment twice.
+ *  - Writes made here are flagged `{ sync: true }` so they never look like
+ *    user edits (which would bounce them back to Google).
  */
 
 import { invoke } from '@tauri-apps/api/tauri';
-import useStore from '../stores/store';
+import useStore, { canPushToCalendar, localISODate } from '../stores/store';
 import { extractPatientName, findBestMatches } from './fuzzyMatcher.js';
+
+/** Sync window: days before / after today. */
+export const SYNC_PAST_DAYS = 30;
+export const SYNC_FUTURE_DAYS = 90;
+/** Scope the app needs; checked against what the user granted. */
+export const REQUIRED_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+/** A failing push is retried this many times before it waits for a new edit. */
+const MAX_SYNC_ATTEMPTS = 5;
+/** Linked events missing from the window that are looked up one by one per sync. */
+const MAX_RECONCILE_PER_SYNC = 25;
+/** Read-only tombstones only need to outlive the sync window. */
+const TOMBSTONE_TTL_DAYS = SYNC_PAST_DAYS + SYNC_FUTURE_DAYS + 30;
+
+const SYNC = { sync: true };
+const RATE_LIMIT_REASONS = new Set(['rateLimitExceeded', 'userRateLimitExceeded']);
 
 let _refreshPromise = null;
 let _syncPromise = null;
+let _queue = Promise.resolve();
+
+/** Run `task` after every Google write queued before it, one at a time. */
+function enqueue(task) {
+  const run = _queue.then(task, task);
+  _queue = run.catch(() => {});
+  return run;
+}
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const pad = (n) => String(n).padStart(2, '0');
+const ts = (iso) => (iso ? new Date(iso).getTime() || 0 : 0);
+const nowISO = () => new Date().toISOString();
+
+// ── Error classification ─────────────────────────────────────────────────
+
+/**
+ * Parse an error from the Rust backend:
+ * `"<op> failed (<status>) [<reason>]: <message>"`, network errors carry no status.
+ */
+export function parseGcalError(e) {
+  const message = String(e?.message || e || '');
+  const m = message.match(/\((\d{3})\)(?:\s*\[([^\]]+)\])?/);
+  return { status: m ? Number(m[1]) : 0, reason: m?.[2] || '', message };
+}
+
+/** Network errors, 5xx and rate limits are worth retrying. */
+export function isRetryableError(e) {
+  const { status, reason, message } = parseGcalError(e);
+  if (status === 0) return !message.startsWith('oauth_') || message === 'oauth_network_error';
+  return status >= 500 || status === 429 || (status === 403 && RATE_LIMIT_REASONS.has(reason));
+}
+
+const isGoneError = (e) => [404, 410].includes(parseGcalError(e).status);
+
+/** The token cannot be used any more: stop the whole sync and ask to reconnect. */
+function isAuthFailure(e) {
+  const { status, reason, message } = parseGcalError(e);
+  return message.includes('oauth_invalid_grant')
+    || message.includes('No valid token available')
+    || (status === 403 && (reason === 'insufficientPermissions' || reason === 'ACCESS_TOKEN_SCOPE_INSUFFICIENT'));
+}
+
+/** Short, user-facing version of an error. */
+export function shortGcalError(e) {
+  const { status, message } = parseGcalError(e);
+  const text = message.replace(/^.*?failed\s*/, '').replace(/^\(\d{3}\)\s*(\[[^\]]*\])?:?\s*/, '');
+  return (status ? `${status} ` : '') + (text || message).slice(0, 160);
+}
+
+// ── Pure helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Parse a Google start/end value into local wall time. Timed values are
+ * converted to the computer's timezone (an event stored in `Z` or another
+ * timezone shows at the right local hour); all-day values keep their date.
+ * Returns null for an empty or invalid value (e.g. a deleted event).
+ */
+export function parseGoogleDateTime(str) {
+  if (!str) return null;
+  if (!str.includes('T')) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(str.slice(0, 10)) ? { fecha: str.slice(0, 10), hora: null, allDay: true, ms: null } : null;
+  }
+  const d = new Date(str);
+  if (Number.isNaN(d.getTime())) return null;
+  return { fecha: localISODate(d), hora: `${pad(d.getHours())}:${pad(d.getMinutes())}`, allDay: false, ms: d.getTime() };
+}
+
+/** Local fecha / hora / duration of an event, or null when it has no usable start. */
+function eventTiming(event, allDayHora, allDayMinutes) {
+  const start = parseGoogleDateTime(event.start_datetime);
+  if (!start) return null;
+  if (start.allDay) return { fecha: start.fecha, hora: allDayHora, duracion: allDayMinutes, allDay: true };
+  const end = parseGoogleDateTime(event.end_datetime);
+  const endMs = end && !end.allDay ? end.ms : start.ms + 3600000;
+  return { fecha: start.fecha, hora: start.hora, duracion: Math.max(1, Math.round((endMs - start.ms) / 60000)), allDay: false };
+}
+
+/**
+ * Deterministic Google event id for a consultation: `np` + hex of its id.
+ * Google accepts base32hex ids ([a-v0-9], 5–1024 chars), which hex satisfies.
+ */
+export function googleEventIdFor(consultationId) {
+  const bytes = new TextEncoder().encode(String(consultationId));
+  return 'np' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Sync window as UTC instants (for Google) and local dates (for consultations). */
+export function syncWindow(now = new Date()) {
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate() - SYNC_PAST_DAYS);
+  const to = new Date(now.getFullYear(), now.getMonth(), now.getDate() + SYNC_FUTURE_DAYS + 1);
+  return {
+    timeMin: from.toISOString(),
+    timeMax: to.toISOString(),
+    fromFecha: localISODate(from),
+    toFecha: localISODate(new Date(to.getTime() - 1)),
+  };
+}
+
+const localTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid';
+
+/** The local copy changed since it was last pushed or pulled. */
+function hasLocalChange(c) {
+  return !!c.localUpdatedAt && ts(c.localUpdatedAt) > ts(c.lastSyncedAt);
+}
+
+/** The consultation has something to send to Google. */
+function needsPush(c) {
+  if (c.restoreRemote) return true;
+  // A failure that gave up waits for the next user edit.
+  if (c.syncError && !c.syncPending && c.syncErrorFor === (c.localUpdatedAt || null)) return false;
+  return !!c.syncPending || hasLocalChange(c);
+}
+
+/**
+ * Whether a consultation whose Google event was deleted holds data worth
+ * keeping (notes, measurements, invoices, or a past outcome). Those stay as a
+ * record; empty scheduled appointments are deleted like in Google.
+ */
+function hasOwnRecord(state, c) {
+  if (c.estado !== 'programada') return true;
+  if ((c.notasPrivadas || '').trim()) return true;
+  if ((state.measurements || []).some(m => m.consultaId === c.id)) return true;
+  return (state.invoices || []).some(inv => (inv.items || []).some(it => it.consultationId === c.id));
+}
+
+const tombstonedIds = (calId) => new Set(
+  (useStore.getState().gcalPendingDeletes || []).filter(d => d.calendarId === calId).map(d => d.eventId)
+);
+
+/** "Synced — 2 uploaded, 1 imported" style summary for a toast. */
+export function formatSyncStats(stats, t) {
+  const parts = [];
+  if (stats.pushed) parts.push(`${stats.pushed} ${t.gcal_sync_pushed}`);
+  if (stats.pulled) parts.push(`${stats.pulled} ${t.gcal_sync_pulled}`);
+  if (stats.updated) parts.push(`${stats.updated} ${t.gcal_sync_updated}`);
+  if (stats.deleted) parts.push(`${stats.deleted} ${t.gcal_sync_deleted}`);
+  return `${t.gcal_synced}${parts.length ? ' — ' + parts.join(', ') : ''}`;
+}
+
+/** Which calendars failed and why, for an error toast. */
+export function formatSyncErrors(stats, t) {
+  const details = (stats.errorDetails || []).slice(0, 3).map(d => `${d.calendar}: ${d.message}`).join(' · ');
+  return t.gcal_sync_errors_detail.replace('{n}', stats.errors).replace('{details}', details);
+}
 
 export const googleCalendar = {
   // ── OAuth flow ─────────────────────────────────────────────────────────────
@@ -36,18 +204,25 @@ export const googleCalendar = {
     return invoke('gcal_revoke_token', { token });
   },
 
+  /** True when the granted scopes let the app edit events. */
+  hasRequiredScope(scope) {
+    const granted = String(scope || '').split(/\s+/);
+    return granted.includes(REQUIRED_SCOPE) || granted.includes('https://www.googleapis.com/auth/calendar');
+  },
+
   // ── Calendar / Events API ──────────────────────────────────────────────────
 
   async listCalendars(accessToken) {
     return await invoke('gcal_list_calendars', { accessToken });
   },
 
+  /** Live and cancelled events (recurring series expanded) in the range. */
   async listEvents(accessToken, calendarId, timeMin, timeMax) {
-    return await invoke('gcal_list_events', { accessToken, calendarId, timeMin, timeMax });
+    return await invoke('gcal_list_events', { accessToken, calendarId, timeMin, timeMax, timeZone: localTimeZone() });
   },
 
-  async listDeletedEventIds(accessToken, calendarId, timeMin, timeMax) {
-    return await invoke('gcal_list_deleted_events', { accessToken, calendarId, timeMin, timeMax });
+  async getEvent(accessToken, calendarId, eventId) {
+    return await invoke('gcal_get_event', { accessToken, calendarId, eventId });
   },
 
   async createEvent(accessToken, calendarId, event) {
@@ -120,8 +295,9 @@ export const googleCalendar = {
   },
 
   /** Valid access token string, refreshing and persisting it when needed. */
-  async ensureToken() {
-    const tokenResult = await this.getValidToken(useStore.getState().config.googleCalendar);
+  async ensureToken({ force = false } = {}) {
+    const gc = useStore.getState().config.googleCalendar;
+    const tokenResult = await this.getValidToken(force ? { ...gc, expiresAt: 0 } : gc);
     this.persistToken(tokenResult);
     return typeof tokenResult === 'string' ? tokenResult : tokenResult.newToken;
   },
@@ -141,44 +317,21 @@ export const googleCalendar = {
 
   /**
    * Convert a Google Calendar event into a partial consultation object
-   * suitable for merging into the NutriPolo store.
-   *
-   * Parses date/time directly from the ISO string to avoid UTC conversion
-   * issues that arise when using new Date() across different timezones.
-   * All-day events (no "T" in the datetime string) get a default 09:00 / 60 min.
+   * suitable for merging into the NutriPolo store, or null when the event
+   * has no usable start (e.g. a deleted event).
+   * Timed events are shown at the local hour; all-day events get 09:00 / 60 min.
    *
    * @param {object} event            Google Calendar event (as returned by Rust backend)
    * @param {Array}  clients
    * @param {string} sourceCalendarId  ID of the calendar this event was fetched from
    */
   eventToConsultation(event, clients, sourceCalendarId) {
-    const startStr = event.start_datetime || '';
-    const endStr   = event.end_datetime   || '';
-
-    // All-day events have no "T" separator — just a date like "2026-04-01"
-    const isAllDay = !startStr.includes('T');
-
-    let fecha, hora, durMin;
-
-    if (isAllDay) {
-      fecha  = startStr.slice(0, 10);
-      hora   = '09:00';
-      durMin = 60;
-    } else {
-      // Parse date and time directly from the string — no UTC conversion.
-      // Format: "2026-04-01T09:00:00+02:00" or "2026-04-01T09:00:00Z"
-      fecha = startStr.slice(0, 10);   // "YYYY-MM-DD"
-      hora  = startStr.slice(11, 16);  // "HH:MM"
-
-      // Duration: use UTC timestamps so offset differences cancel out correctly
-      const startMs = new Date(startStr).getTime();
-      const endMs   = endStr ? new Date(endStr).getTime() : startMs + 3600000;
-      durMin = Math.max(1, Math.round((endMs - startMs) / 60000));
-    }
+    const timing = eventTiming(event, '09:00', 60);
+    if (!timing) return null;
 
     // Try to match a client by name from the event summary (accent-insensitive)
     let clienteId = null;
-    const normalize = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const normalize = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
     const summaryName = (event.summary || '').replace(/^Consulta\s*-\s*/i, '').trim();
     const normalizedSummary = normalize(summaryName);
     if (normalizedSummary && clients) {
@@ -187,15 +340,15 @@ export const googleCalendar = {
     }
 
     return {
-      fecha,
-      hora,
-      duracion: durMin,
+      fecha: timing.fecha,
+      hora: timing.hora,
+      duracion: timing.duracion,
       clienteId,
       googleEventId: event.id,
       googleSummary: event.summary || '',
       estado: event.status === 'cancelled' ? 'cancelada' : 'programada',
       notasCliente: event.description || '',
-      lastSyncedAt: new Date().toISOString(),
+      lastSyncedAt: nowISO(),
       sourceCalendarId: sourceCalendarId || null,
     };
   },
@@ -203,38 +356,24 @@ export const googleCalendar = {
   // ── Event → PersonalEvent conversion ───────────────────────────────────
 
   /**
-   * Convert a Google Calendar event into a partial personalEvent object.
+   * Convert a Google Calendar event into a partial personalEvent object, or
+   * null when the event has no usable start.
    * Used for calendars whose purpose === 'personal' (ballet, birthdays, etc.).
    * No client matching, no clinical fields — stays strictly isolated from
    * consultations so these events never contaminate billing / stats / dashboard.
    */
   eventToPersonalEvent(event, sourceCalendarId) {
-    const startStr = event.start_datetime || '';
-    const endStr   = event.end_datetime   || '';
-    const isAllDay = !startStr.includes('T');
-
-    let fecha, hora, durMin;
-    if (isAllDay) {
-      fecha  = startStr.slice(0, 10);
-      hora   = '00:00';
-      durMin = 24 * 60;
-    } else {
-      fecha = startStr.slice(0, 10);
-      hora  = startStr.slice(11, 16);
-      const startMs = new Date(startStr).getTime();
-      const endMs   = endStr ? new Date(endStr).getTime() : startMs + 3600000;
-      durMin = Math.max(1, Math.round((endMs - startMs) / 60000));
-    }
-
+    const timing = eventTiming(event, '00:00', 24 * 60);
+    if (!timing) return null;
     return {
       googleEventId: event.id,
       sourceCalendarId: sourceCalendarId || null,
       title: event.summary || '(sin título)',
-      fecha,
-      hora,
-      duracion: durMin,
-      allDay: isAllDay,
-      lastSyncedAt: new Date().toISOString(),
+      fecha: timing.fecha,
+      hora: timing.hora,
+      duracion: timing.duracion,
+      allDay: timing.allDay,
+      lastSyncedAt: nowISO(),
       remoteUpdated: event.updated || null,
       cancelled: event.status === 'cancelled',
     };
@@ -244,7 +383,8 @@ export const googleCalendar = {
 
   /**
    * Convert a NutriPolo consultation into a CalendarEvent object
-   * matching the Rust CalendarEvent struct.
+   * matching the Rust CalendarEvent struct. `id` is the event id to use when
+   * creating (deterministic, see googleEventIdFor).
    *
    * @param {object} consultation  NutriPolo consultation
    * @param {Array}  clients       All clients (to resolve clienteId → name)
@@ -262,7 +402,6 @@ export const googleCalendar = {
     const startDate = new Date(`${fecha}T${hora}:00`);
     const endDate = new Date(startDate.getTime() + durMin * 60000);
     const formatLocalISO = (d) => {
-      const pad = (n) => String(n).padStart(2, '0');
       const off = -d.getTimezoneOffset();
       const sign = off >= 0 ? '+' : '-';
       const hh = pad(Math.floor(Math.abs(off) / 60));
@@ -273,7 +412,7 @@ export const googleCalendar = {
     const statusMap = { programada: 'confirmed', completada: 'confirmed', cancelada: 'cancelled', no_show: 'confirmed' };
 
     return {
-      id: consultation.googleEventId || null,
+      id: consultation.googleEventId || (consultation.id ? googleEventIdFor(consultation.id) : null),
       summary,
       description: consultation.notasCliente || null,
       location: null,
@@ -282,159 +421,286 @@ export const googleCalendar = {
       status: statusMap[consultation.estado] || 'confirmed',
       updated: null,
       nutripolo_id: consultation.id || null,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid',
+      timezone: localTimeZone(),
     };
   },
 
   // ── Retry utility ─────────────────────────────────────────────────────
 
   /**
-   * Retry an async operation with exponential backoff.
-   * `fn` receives the access token to use. Retries on network errors and
-   * 5xx. On 401 the token is refreshed once and `fn` is called again with
-   * the new token. Other 4xx errors are not retried.
+   * Retry an async operation with exponential backoff and jitter.
+   * `fn` receives the access token to use. Retries network errors, 5xx and
+   * rate limits (429, 403 rateLimitExceeded). On 401 the token is refreshed
+   * once and `fn` is called again with the new token. Other errors are thrown.
    */
-  async withRetry(fn, { maxRetries = 3, backoffMs = 1000, gcalConfig = null, token = null } = {}) {
-    let lastError;
+  async withRetry(fn, { maxRetries = 3, backoffMs = 1000, token = null } = {}) {
     let currentToken = token;
     let refreshed = false;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    for (let attempt = 0; ; attempt++) {
       try {
         return await fn(currentToken);
       } catch (e) {
-        lastError = e;
-        const status = Number(String(e?.message || e).match(/\((\d{3})\)/)?.[1]) || 0;
-        if (status === 401 && gcalConfig && !refreshed) {
+        if (parseGcalError(e).status === 401 && !refreshed) {
           refreshed = true;
-          const latest = useStore.getState().config.googleCalendar;
-          const result = await this.getValidToken({ ...latest, expiresAt: 0 });
-          this.persistToken(result);
-          currentToken = typeof result === 'string' ? result : result.newToken;
+          currentToken = await this.ensureToken({ force: true });
           continue;
         }
-        if (status >= 400 && status < 500) throw e;
-        if (attempt < maxRetries) {
-          await new Promise(r => setTimeout(r, backoffMs * Math.pow(2, attempt)));
-        }
+        if (attempt >= maxRetries || !isRetryableError(e)) throw e;
+        const delay = backoffMs * Math.pow(2, attempt);
+        await sleep(delay + Math.random() * delay * 0.25);
       }
     }
-    throw lastError;
   },
 
   // ── Push (App → Google) ───────────────────────────────────────────────
 
-  /**
-   * Push a consultation to Google Calendar (create or update).
-   * Returns the updated consultation fields to persist (googleEventId, etc.).
-   */
-  async pushConsultation(store, consultation) {
-    const gcalConfig = store.config.googleCalendar;
-    if (!gcalConfig?.connected || !gcalConfig.defaultPushCalendarId) return null;
-
-    const pushCalId = gcalConfig.defaultPushCalendarId;
-    const pushCal = (gcalConfig.calendars || []).find(c => c.id === pushCalId);
-    if (!pushCal || pushCal.syncMode !== 'bidirectional') return null;
-
-    const token = await this.ensureToken();
-
-    const event = this.consultationToEvent(consultation, store.clients);
-
-    let result;
-    if (consultation.googleEventId) {
-      result = await this.withRetry(
-        (tk) => this.updateEvent(tk, pushCalId, consultation.googleEventId, event),
-        { gcalConfig, token }
-      );
-    } else {
-      result = await this.withRetry(
-        (tk) => this.createEvent(tk, pushCalId, event),
-        { gcalConfig, token }
-      );
+  /** Calendar a consultation should be written to, or null (pull-only / not connected). */
+  pushTargetFor(gcalConfig, consultation) {
+    if (!gcalConfig?.connected || !consultation) return null;
+    if (consultation.sourceCalendarId) {
+      return canPushToCalendar(gcalConfig, consultation.sourceCalendarId) ? consultation.sourceCalendarId : null;
     }
-
-    // Persist Google event link — use sync-op pattern to avoid bumping localUpdatedAt
-    const syncFields = {
-      googleEventId: result.id,
-      sourceCalendarId: pushCalId,
-      lastSyncedAt: new Date().toISOString(),
-      // Google's own timestamp for our write, so the next pull does not
-      // mistake it for a remote edit.
-      remoteUpdated: result.updated || new Date().toISOString(),
-      syncPending: false,
-    };
-    store.updateConsultation(consultation.id, syncFields);
-
-    return syncFields;
+    if (consultation.detachedFromGoogle) return null;
+    return canPushToCalendar(gcalConfig, gcalConfig.defaultPushCalendarId) ? gcalConfig.defaultPushCalendarId : null;
   },
 
   /**
-   * Delete a consultation's linked Google Calendar event.
-   * Only acts if the consultation was pushed to the default push calendar.
+   * Push one consultation to Google (create or update) right after a save.
+   * Queued behind any running sync. Returns the sync fields written, or null
+   * when there is nothing to push. On failure the consultation keeps its
+   * local change and the next sync retries it.
    */
-  async deleteConsultationFromGoogle(store, consultation) {
-    const gcalConfig = store.config.googleCalendar;
-    if (!gcalConfig?.connected || !consultation.googleEventId) return;
-    if (consultation.sourceCalendarId !== gcalConfig.defaultPushCalendarId) return;
+  async pushConsultation(consultationId) {
+    return enqueue(async () => {
+      const state = useStore.getState();
+      const c = state.consultations.find(x => x.id === consultationId);
+      const calId = this.pushTargetFor(state.config.googleCalendar, c);
+      if (!calId || !this._shouldPush(c)) return null;
+      const token = await this.ensureToken();
+      return this._pushOne(token, calId, c);
+    });
+  },
 
-    const token = await this.ensureToken();
+  /** Skip writes that would resurrect or upload something by mistake. */
+  _shouldPush(c) {
+    if (c.restoreRemote) return true;
+    if (!c.googleEventId && c.estado === 'cancelada') return false;
+    if (c.remoteDeleted && c.estado !== 'programada') return false;
+    return true;
+  },
 
-    await this.withRetry(
-      (tk) => this.deleteEvent(tk, gcalConfig.defaultPushCalendarId, consultation.googleEventId),
-      { gcalConfig, token }
-    );
+  /**
+   * Create or update the event for `c` in `calId` and record the result.
+   * `lastSyncedAt` is the time *before* the request, so an edit made while it
+   * was in flight still counts as a local change and is pushed next time.
+   * Throws after recording a failure.
+   */
+  async _pushOne(token, calId, c) {
+    const pushedAt = nowISO();
+    const event = this.consultationToEvent(c, useStore.getState().clients);
+    if (c.restoreRemote) event.status = c.estado === 'cancelada' ? 'cancelled' : 'confirmed';
+    try {
+      const result = c.googleEventId
+        ? await this.withRetry(tk => this.updateEvent(tk, calId, c.googleEventId, event), { token })
+        : await this.withRetry(tk => this.createEvent(tk, calId, event), { token });
+      const fields = {
+        googleEventId: result?.id || c.googleEventId || event.id,
+        sourceCalendarId: calId,
+        lastSyncedAt: pushedAt,
+        // Google's own timestamp for our write, so the next pull does not
+        // mistake it for a remote edit.
+        remoteUpdated: result?.updated || pushedAt,
+        syncPending: false,
+        syncError: undefined,
+        syncErrorFor: undefined,
+        syncAttempts: 0,
+        remoteDeleted: false,
+        restoreRemote: false,
+      };
+      useStore.getState().updateConsultation(c.id, fields, SYNC);
+      return fields;
+    } catch (e) {
+      if (isAuthFailure(e)) throw e;
+      if (c.googleEventId && isGoneError(e) && !c.restoreRemote) {
+        // Deleted in Google meanwhile: the deletion wins over the local edit.
+        this._applyRemoteRemoval([c.id], { conflict: true });
+        throw e;
+      }
+      const attempts = (c.syncAttempts || 0) + 1;
+      const giveUp = !isRetryableError(e) || attempts >= MAX_SYNC_ATTEMPTS;
+      useStore.getState().updateConsultation(c.id, {
+        syncPending: !giveUp,
+        syncAttempts: attempts,
+        syncError: shortGcalError(e),
+        syncErrorFor: c.localUpdatedAt || null,
+      }, SYNC);
+      throw e;
+    }
+  },
+
+  /**
+   * Delete a consultation here and its event in Google. Read-only calendars
+   * keep their event (a tombstone stops the pull from importing it again).
+   * Returns { remote: 'none' | 'deleted' | 'pending' | 'kept' }.
+   */
+  async deleteConsultation(consultationId) {
+    const state = useStore.getState();
+    const c = state.consultations.find(x => x.id === consultationId);
+    if (!c) return { remote: 'none' };
+    state.deleteConsultation(consultationId);
+    if (!c.googleEventId || !c.sourceCalendarId) return { remote: 'none' };
+
+    const gc = state.config.googleCalendar;
+    const remote = canPushToCalendar(gc, c.sourceCalendarId);
+    useStore.getState().addGcalPendingDelete({
+      calendarId: c.sourceCalendarId, eventId: c.googleEventId, consultationId, remote,
+    });
+    if (!remote) return { remote: 'kept' };
+    if (!gc?.connected) return { remote: 'pending' };
+    try {
+      await enqueue(async () => {
+        const token = await this.ensureToken();
+        await this.withRetry(tk => this.deleteEvent(tk, c.sourceCalendarId, c.googleEventId), { token });
+        useStore.getState().removeGcalPendingDelete(c.sourceCalendarId, c.googleEventId);
+      });
+      return { remote: 'deleted' };
+    } catch (e) {
+      if (import.meta.env.DEV) console.warn('[GCal Delete] queued for retry:', e);
+      return { remote: 'pending', error: e };
+    }
+  },
+
+  /** Retry the Google deletions that could not be sent earlier; prune old tombstones. */
+  async _flushPendingDeletes(token, totals) {
+    const store = useStore.getState();
+    const cutoff = Date.now() - TOMBSTONE_TTL_DAYS * 86400000;
+    for (const d of store.gcalPendingDeletes || []) {
+      if (!d.remote) {
+        if (ts(d.at) < cutoff) store.removeGcalPendingDelete(d.calendarId, d.eventId);
+        continue;
+      }
+      // Restored by undo, or the calendar is no longer writable: nothing to delete.
+      const restored = useStore.getState().consultations.some(c => c.googleEventId === d.eventId);
+      if (restored || !canPushToCalendar(useStore.getState().config.googleCalendar, d.calendarId)) {
+        store.removeGcalPendingDelete(d.calendarId, d.eventId);
+        continue;
+      }
+      try {
+        await this.withRetry(tk => this.deleteEvent(tk, d.calendarId, d.eventId), { token });
+        store.removeGcalPendingDelete(d.calendarId, d.eventId);
+        totals.deleted++;
+      } catch (e) {
+        if (isAuthFailure(e)) throw e;
+        // Permanent errors drop the tombstone; transient ones keep it for later.
+        if (!isRetryableError(e)) store.removeGcalPendingDelete(d.calendarId, d.eventId);
+        totals.errors++;
+        totals.errorDetails.push({ calendarId: d.calendarId, calendar: d.calendarId, message: shortGcalError(e) });
+      }
+    }
+  },
+
+  // ── Remote deletions (Google → App) ───────────────────────────────────
+
+  /**
+   * Apply the deletion of the Google events of these consultations.
+   * Empty scheduled appointments are deleted; consultations holding notes,
+   * measurements, invoices or a past outcome are kept as a record
+   * (scheduled ones become `cancelada`). Returns how many changed.
+   */
+  _applyRemoteRemoval(consultationIds, { conflict = false } = {}) {
+    const state = useStore.getState();
+    const ids = new Set(consultationIds);
+    const toDelete = [];
+    let changed = 0;
+    for (const c of state.consultations) {
+      if (!ids.has(c.id) || c.restoreRemote) continue;
+      if (!hasOwnRecord(state, c)) {
+        toDelete.push(c.id);
+        continue;
+      }
+      if (c.remoteDeleted && c.estado !== 'programada') continue;
+      state.updateConsultation(c.id, {
+        estado: c.estado === 'programada' ? 'cancelada' : c.estado,
+        remoteDeleted: true,
+        syncPending: false,
+        syncError: undefined,
+        syncAttempts: 0,
+        lastSyncedAt: nowISO(),
+        ...(conflict || hasLocalChange(c) ? { syncConflict: true } : {}),
+      }, SYNC);
+      changed++;
+    }
+    if (toDelete.length) state.removeConsultationsSync(toDelete);
+    return changed + toDelete.length;
   },
 
   // ── Sync (bidirectional + read-only) ──────────────────────────────────
 
   /**
-   * Sync consultations ±30 days from all enabled Google Calendars.
-   * Bidirectional calendars: push local changes, then pull remote.
-   * Read-only calendars: pull only.
+   * Sync every enabled Google Calendar (window: SYNC_PAST_DAYS back,
+   * SYNC_FUTURE_DAYS ahead). Bidirectional calendars: push local changes,
+   * then pull remote. Read-only calendars: pull only.
+   * Concurrent calls share the running sync.
    *
-   * @param {object} store  Zustand store state (useStore.getState())
-   * @returns {{ pushed: number, pulled: number, updated: number, errors: number }}
+   * Throws when the session is no longer valid (reconnect needed) or when
+   * every calendar failed; otherwise returns the stats, with `errorDetails`
+   * listing the calendars that failed.
+   *
+   * @returns {{ pushed, pulled, updated, deleted, conflicts, errors, errorDetails }}
    */
-  async syncAll(store) {
-    // Mutex: prevent concurrent syncs (auto-sync interval vs manual trigger)
+  async syncAll() {
     if (_syncPromise) return _syncPromise;
-    _syncPromise = this._syncAllImpl(store).finally(() => { _syncPromise = null; });
+    _syncPromise = enqueue(() => this._syncAllImpl()).finally(() => { _syncPromise = null; });
     return _syncPromise;
   },
 
-  async _syncAllImpl(store) {
-    const { config } = store;
-    const gcalConfig = config.googleCalendar;
+  async _syncAllImpl() {
+    const gcalConfig = useStore.getState().config.googleCalendar;
     if (!gcalConfig?.connected) throw new Error('Google Calendar not connected');
 
-    // Get enabled calendars
-    let enabledCalendars = (gcalConfig.calendars || []).filter(c => c.syncMode !== 'disabled');
-    // Backwards compat: old single-calendar format (always readonly now)
-    if (!enabledCalendars.length && gcalConfig.calendarId) {
-      enabledCalendars = [{ id: gcalConfig.calendarId, syncMode: 'readonly' }];
-    }
-    if (!enabledCalendars.length) {
-      if (import.meta.env.DEV) console.warn('[GCal Sync] No enabled calendars found');
-      return { pushed: 0, pulled: 0, updated: 0, deleted: 0, errors: 0 };
-    }
+    const enabledIds = (gcalConfig.calendars || []).filter(c => c.syncMode !== 'disabled').map(c => c.id);
+    const totals = { pushed: 0, pulled: 0, updated: 0, deleted: 0, conflicts: 0, errors: 0, errorDetails: [] };
 
-    const totalStats = { pushed: 0, pulled: 0, updated: 0, conflicts: 0, errors: 0 };
-    for (const cal of enabledCalendars) {
-      try {
-        // Re-validate token per calendar to handle mid-sync expiration
-        const token = await this.ensureToken();
+    try {
+      let token = await this.ensureToken();
+      await this._flushPendingDeletes(token, totals);
 
-        const freshStore = useStore.getState();
-        const stats = await this.syncCalendar(freshStore, token, cal);
-        totalStats.pushed  += stats.pushed || 0;
-        totalStats.pulled  += stats.pulled;
-        totalStats.updated += stats.updated;
-        totalStats.conflicts += stats.conflicts || 0;
-      } catch (e) {
-        if (import.meta.env.DEV) console.error(`[GCal Sync] Error for calendar ${cal.name || cal.id}:`, e);
-        totalStats.errors++;
+      for (const calId of enabledIds) {
+        // Fresh calendar config: an earlier calendar may have changed it.
+        const cal = (useStore.getState().config.googleCalendar?.calendars || []).find(c => c.id === calId);
+        if (!cal || cal.syncMode === 'disabled') continue;
+        try {
+          token = await this.ensureToken();
+          const stats = await this.syncCalendar(token, cal);
+          for (const k of ['pushed', 'pulled', 'updated', 'deleted', 'conflicts', 'errors']) totals[k] += stats[k] || 0;
+          if (stats.errorDetails) totals.errorDetails.push(...stats.errorDetails);
+        } catch (e) {
+          if (isAuthFailure(e)) throw e;
+          if (import.meta.env.DEV) console.error(`[GCal Sync] Error for calendar ${cal.name || cal.id}:`, e);
+          totals.errors++;
+          totals.errorDetails.push({ calendarId: cal.id, calendar: cal.name || cal.id, message: shortGcalError(e), failed: true });
+        }
       }
+    } catch (e) {
+      if (isAuthFailure(e) && !String(e).includes('oauth_invalid_grant')) {
+        // Missing permission (scope unticked or old grant): keep the settings
+        // but ask the user to reconnect.
+        const gc = useStore.getState().config.googleCalendar;
+        useStore.getState().updateConfig({ googleCalendar: { ...gc, needsReauth: true } });
+      }
+      throw e;
     }
-    return totalStats;
+
+    const failedCalendars = totals.errorDetails.filter(d => d.failed).length;
+    if (enabledIds.length && failedCalendars === enabledIds.length) {
+      const err = new Error(totals.errorDetails[0].message);
+      err.stats = totals;
+      throw err;
+    }
+
+    const { errorDetails, ...summary } = totals;
+    useStore.getState().setSyncAudit({ lastFullSyncAt: nowISO(), lastSyncStats: summary });
+    return totals;
   },
 
   /**
@@ -465,6 +731,55 @@ export const googleCalendar = {
   },
 
   /**
+   * Fetch a calendar's events in the window and split them into live events
+   * and cancelled ids. Returns { suspended: true } when the mass-delete guard
+   * trips (nothing must be applied then).
+   */
+  async _fetchCalendar(token, calendarConfig, label) {
+    const { timeMin, timeMax } = syncWindow();
+    const all = await this.withRetry(tk => this.listEvents(tk, calendarConfig.id, timeMin, timeMax), { token });
+    const active = all.filter(ev => ev.id && ev.status !== 'cancelled');
+    const cancelledIds = new Set(all.filter(ev => ev.id && ev.status === 'cancelled').map(ev => ev.id));
+
+    if (this._detectMassDelete(calendarConfig, active)) {
+      const prev = calendarConfig.lastKnownRemoteCount;
+      useStore.getState().markCalendarMassDeletePending(calendarConfig.id, {
+        prevCount: prev, newCount: active.length, drop: prev - active.length,
+      });
+      if (import.meta.env.DEV) console.warn(`[GCal ${label}] Mass-delete detected on ${calendarConfig.id} — sync suspended`);
+      return { suspended: true };
+    }
+    return { active, cancelledIds };
+  },
+
+  /**
+   * Linked records inside the window that Google did not list (moved far
+   * away, or deleted long ago) are looked up one by one. Moved events are
+   * returned to be applied like any other; gone ones join `cancelledIds`.
+   */
+  async _reconcileMissing(token, calId, records, active, cancelledIds) {
+    const { fromFecha, toFecha } = syncWindow();
+    const listed = new Set(active.map(ev => ev.id));
+    const missing = records
+      .filter(r => r.googleEventId && r.fecha >= fromFecha && r.fecha <= toFecha
+        && !listed.has(r.googleEventId) && !cancelledIds.has(r.googleEventId))
+      .slice(0, MAX_RECONCILE_PER_SYNC);
+    const moved = [];
+    for (const r of missing) {
+      try {
+        const ev = await this.withRetry(tk => this.getEvent(tk, calId, r.googleEventId), { token });
+        if (!ev?.id || ev.status === 'cancelled') cancelledIds.add(r.googleEventId);
+        else moved.push(ev);
+      } catch (e) {
+        if (isGoneError(e)) cancelledIds.add(r.googleEventId);
+        else if (isAuthFailure(e)) throw e;
+        // Anything else: try again next sync.
+      }
+    }
+    return moved;
+  },
+
+  /**
    * Dispatcher: picks the correct sync strategy based on the calendar's
    * `purpose` field (introduced in store v8). Preserves pre-v8 behavior when
    * `purpose` is missing by falling through to the consultation-based sync.
@@ -475,13 +790,10 @@ export const googleCalendar = {
    *   external-clinic  → _syncExternalClinic (pull-only + fuzzy patient matching)
    *   other / missing  → _syncConsultationsCalendar (legacy behavior)
    *
-   * Mass-delete detection runs here — BEFORE any sync strategy — for all calendars.
-   *
-   * @param {object} store           Zustand store state (useStore.getState())
    * @param {string} token           Valid Google OAuth access token
    * @param {object} calendarConfig  { id, syncMode, purpose, ... }
    */
-  async syncCalendar(store, token, calendarConfig) {
+  async syncCalendar(token, calendarConfig) {
     const purpose = calendarConfig.purpose || 'other';
     if (purpose === 'holidays') {
       return { pushed: 0, pulled: 0, updated: 0, skipped: true };
@@ -494,12 +806,12 @@ export const googleCalendar = {
     }
 
     if (purpose === 'personal') {
-      return this._syncPersonalCalendar(store, token, calendarConfig);
+      return this._syncPersonalCalendar(token, calendarConfig);
     }
     if (purpose === 'external-clinic') {
-      return this._syncExternalClinic(store, token, calendarConfig);
+      return this._syncExternalClinic(token, calendarConfig);
     }
-    return this._syncConsultationsCalendar(store, token, calendarConfig);
+    return this._syncConsultationsCalendar(token, calendarConfig);
   },
 
   /**
@@ -592,36 +904,27 @@ export const googleCalendar = {
    *      can back-fill clienteId on every affected consultation in one shot.
    *   6. On re-sync: orphaned existing consultations (matchStatus='unknown', no live
    *      suggestion) are back-filled with a new suggestion automatically.
+   * Events deleted in Google are removed / cancelled via _applyRemoteRemoval.
    */
-  async _syncExternalClinic(store, token, calendarConfig) {
+  async _syncExternalClinic(token, calendarConfig) {
     const calId = calendarConfig.id;
     const autoThreshold    = calendarConfig.fuzzyAutoThreshold    ?? 0.92;
     const suggestThreshold = calendarConfig.fuzzySuggestThreshold ?? 0.75;
 
-    const now = new Date();
-    const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
-    const timeMax = new Date(now.getTime() + 30 * 86400000).toISOString();
+    const fetched = await this._fetchCalendar(token, calendarConfig, 'ExternalClinic');
+    if (fetched.suspended) return { pushed: 0, pulled: 0, updated: 0, suspended: true };
+    const { cancelledIds } = fetched;
+    const ownRecords = useStore.getState().consultations.filter(c => c.sourceCalendarId === calId);
+    const moved = await this._reconcileMissing(token, calId, ownRecords, fetched.active, cancelledIds);
+    const remoteEvents = [...fetched.active, ...moved];
 
-    const [remoteEvents, deletedIds] = await Promise.all([
-      this.listEvents(token, calId, timeMin, timeMax),
-      this.listDeletedEventIds(token, calId, timeMin, timeMax),
-    ]);
-
-    // ── Mass-delete guard ──────────────────────────────────────────────────────
-    if (this._detectMassDelete(calendarConfig, remoteEvents)) {
-      const prev = calendarConfig.lastKnownRemoteCount;
-      useStore.getState().markCalendarMassDeletePending(calId, {
-        prevCount: prev, newCount: remoteEvents.length, drop: prev - remoteEvents.length,
-      });
-      if (import.meta.env.DEV) console.warn(`[GCal ExternalClinic] Mass-delete detected on ${calId} — sync suspended`);
-      return { pushed: 0, pulled: 0, updated: 0, suspended: true };
-    }
-
-    const stats = { pushed: 0, pulled: 0, updated: 0 };
+    const stats = { pushed: 0, pulled: 0, updated: 0, deleted: 0 };
 
     // Re-read store after async I/O to get the freshest state
-    let freshStore = useStore.getState();
+    const freshStore = useStore.getState();
     const { clients } = freshStore;
+    const tombstoned = tombstonedIds(calId);
+    const allGoogleIds = new Set(freshStore.consultations.map(c => c.googleEventId).filter(Boolean));
 
     // Names already dismissed by the user for this calendar → skip re-proposing
     const dismissedNames = new Set(
@@ -639,22 +942,25 @@ export const googleCalendar = {
     }
 
     const _normalize = (s) =>
-      (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
 
     for (const ev of remoteEvents) {
-      if (!ev.id) continue;
       const existing = existingByGoogleId[ev.id];
+      const partial = this.eventToConsultation(ev, clients, calId);
+      if (!partial) continue;
 
       if (existing) {
         // Update only if the remote version is newer than our last known snapshot
-        const remoteTs = ev.updated ? new Date(ev.updated).getTime() : 0;
-        const knownTs  = existing.remoteUpdated ? new Date(existing.remoteUpdated).getTime() : 0;
-        const needsUpdate = remoteTs > knownTs || (ev.status === 'cancelled' && existing.estado !== 'cancelada');
+        const needsUpdate = ts(ev.updated) > ts(existing.remoteUpdated) || existing.remoteDeleted;
         if (needsUpdate) {
           // If the user has already manually approved a match, never override their
           // decision — only update clinical fields (fecha, hora, estado, summary).
           const isUserDecision = existing.matchedBy === 'user' || existing.matchStatus === 'manual' || existing.matchStatus === 'exact';
-          const partial = this.eventToConsultation(ev, clients, calId);
+          const common = {
+            remoteUpdated: ev.updated || null,
+            lastSyncedAt: nowISO(),
+            remoteDeleted: false,
+          };
           if (isUserDecision) {
             // Protect clienteId / matchStatus — only sync mutable clinical fields
             useStore.getState().updateConsultation(existing.id, {
@@ -663,25 +969,23 @@ export const googleCalendar = {
               duracion: partial.duracion,
               estado: this.mergeRemoteEstado(existing.estado, partial.estado),
               googleSummary: partial.googleSummary,
-              remoteUpdated: ev.updated || null,
-              lastSyncedAt: new Date().toISOString(),
-            });
+              ...common,
+            }, SYNC);
           } else if (existing.matchStatus === 'auto-pending-review' && ev.summary !== existing.googleSummary) {
             // Summary changed on a still-pending-confirm consultation — re-run fuzzy match
             const newRawName = extractPatientName(ev.summary || '');
-            const newNormName = _normalize(newRawName);
             const latestStore = useStore.getState();
             const { auto: newAuto, candidates: newCandidates } = findBestMatches(
               newRawName, latestStore.clients, { autoThreshold, suggestThreshold }
             );
             useStore.getState().updateConsultation(existing.id, {
               ...partial,
+              estado: this.mergeRemoteEstado(existing.estado, partial.estado),
               clienteId: null, // still unconfirmed
               suggestedClienteId: newAuto?.clienteId || null,
               matchScore: newAuto?.score ?? (newCandidates[0]?.score ?? null),
-              remoteUpdated: ev.updated || null,
-              lastSyncedAt: new Date().toISOString(),
-            });
+              ...common,
+            }, SYNC);
           } else {
             useStore.getState().updateConsultation(existing.id, {
               ...partial,
@@ -689,8 +993,8 @@ export const googleCalendar = {
               // exact-matches, so it would nuke the link on any receptionist edit.
               clienteId: partial.clienteId || existing.clienteId,
               estado: this.mergeRemoteEstado(existing.estado, partial.estado),
-              remoteUpdated: ev.updated || null,
-            });
+              ...common,
+            }, SYNC);
           }
           stats.updated++;
         }
@@ -712,8 +1016,7 @@ export const googleCalendar = {
                 sg.id === existing.suggestedFromId &&
                 (sg.status === 'pending' || sg.status === 'pending-confirm'))
             : null;
-          const isOrphan = !activeSg;
-          if (isOrphan) {
+          if (!activeSg) {
             const backRaw  = extractPatientName(existing.googleSummary || ev.summary || '');
             const backNorm = _normalize(backRaw);
             const result = this._buildSuggestionForName(
@@ -724,11 +1027,11 @@ export const googleCalendar = {
             useStore.getState().updateConsultation(existing.id, {
               matchStatus:        result.matchStatus,
               matchedBy:          'system',
-              matchedAt:          new Date().toISOString(),
+              matchedAt:          nowISO(),
               suggestedFromId:    result.suggestedFromId    || undefined,
               suggestedClienteId: result.suggestedClienteId || undefined,
               matchScore:         result.matchScore         ?? undefined,
-            });
+            }, SYNC);
             if (result.suggestedFromId) {
               useStore.getState().attachConsultationToSuggestion(result.suggestedFromId, existing.id);
             }
@@ -737,18 +1040,18 @@ export const googleCalendar = {
         continue;
       }
 
-      // Brand-new event — skip cancelled ones (nothing to import)
-      if (ev.status === 'cancelled') continue;
+      // Brand-new event. Skip ones already imported from another calendar
+      // (shared events keep their id) and ones deleted here by the user.
+      if (allGoogleIds.has(ev.id) || tombstoned.has(ev.id)) continue;
 
       // ── Patient name extraction + matching ──────────────────────────────────
       const rawName        = extractPatientName(ev.summary || '');
       const normalizedName = _normalize(rawName);
 
       // eventToConsultation already tries exact-match via its internal normalize
-      const partial = this.eventToConsultation(ev, clients, calId);
       let { clienteId } = partial;
       let matchStatus, suggestedClienteId = null, matchScore = null, suggestedFromId;
-      const matchedAt = new Date().toISOString();
+      const matchedAt = nowISO();
 
       if (clienteId) {
         // Exact match found by eventToConsultation
@@ -776,7 +1079,8 @@ export const googleCalendar = {
         ...(suggestedClienteId != null ? { suggestedClienteId } : {}),
         ...(matchScore != null         ? { matchScore }          : {}),
         ...(suggestedFromId            ? { suggestedFromId }     : {}),
-      });
+      }, SYNC);
+      allGoogleIds.add(ev.id);
 
       // Attach the new consultation ID to the suggestion for back-fill tracking
       if (suggestedFromId && newC?.id) {
@@ -785,337 +1089,230 @@ export const googleCalendar = {
       stats.pulled++;
     }
 
-    // Cancelled / deleted remote events → mark consultation cancelled (never hard-delete)
-    const cancelledSet = new Set(deletedIds);
-    for (const c of useStore.getState().consultations) {
-      if (c.sourceCalendarId === calId && c.googleEventId && cancelledSet.has(c.googleEventId)) {
-        if (c.estado !== 'cancelada') {
-          useStore.getState().updateConsultation(c.id, {
-            estado: 'cancelada',
-            lastSyncedAt: new Date().toISOString(),
-          });
-          stats.updated++;
-        }
-      }
-    }
+    // Deleted / cancelled in Google
+    const removed = useStore.getState().consultations
+      .filter(c => c.sourceCalendarId === calId && c.googleEventId && cancelledIds.has(c.googleEventId))
+      .map(c => c.id);
+    stats.deleted += this._applyRemoteRemoval(removed);
 
-    useStore.getState().updateCalendarTracking(calId, remoteEvents.length);
+    useStore.getState().updateCalendarTracking(calId, fetched.active.length);
     return stats;
   },
 
   /**
    * Sync a personal calendar (ballet, birthdays, etc.) into `personalEvents`.
-   * Pull-only. Never touches `consultations` — keeps clinical data clean.
+   * Pull-only mirror. Never touches `consultations` — keeps clinical data clean.
    *
    * @returns {{ pushed: number, pulled: number, updated: number }}
    */
-  async _syncPersonalCalendar(store, token, calendarConfig) {
+  async _syncPersonalCalendar(token, calendarConfig) {
     const calId = calendarConfig.id;
-    const now = new Date();
-    const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
-    const timeMax = new Date(now.getTime() + 30 * 86400000).toISOString();
+    const fetched = await this._fetchCalendar(token, calendarConfig, 'Personal');
+    if (fetched.suspended) return { pushed: 0, pulled: 0, updated: 0, suspended: true };
+    const { cancelledIds } = fetched;
+    const own = useStore.getState().personalEvents.filter(e => e.sourceCalendarId === calId);
+    const moved = await this._reconcileMissing(token, calId, own, fetched.active, cancelledIds);
 
-    const [remoteEvents, deletedIds] = await Promise.all([
-      this.listEvents(token, calId, timeMin, timeMax),
-      this.listDeletedEventIds(token, calId, timeMin, timeMax),
-    ]);
-
-    // ── Mass-delete guard ──────────────────────────────────────────────────────
-    if (this._detectMassDelete(calendarConfig, remoteEvents)) {
-      const prev = calendarConfig.lastKnownRemoteCount;
-      useStore.getState().markCalendarMassDeletePending(calId, {
-        prevCount: prev, newCount: remoteEvents.length, drop: prev - remoteEvents.length,
-      });
-      if (import.meta.env.DEV) console.warn(`[GCal Personal] Mass-delete detected on ${calId} — sync suspended`);
-      return { pushed: 0, pulled: 0, updated: 0, suspended: true };
-    }
-
-    const stats = { pushed: 0, pulled: 0, updated: 0 };
+    const stats = { pushed: 0, pulled: 0, updated: 0, deleted: 0 };
+    const store = useStore.getState();
 
     // Index existing personalEvents from THIS calendar for O(1) lookups.
-    const freshStore = useStore.getState();
     const existingByGoogleId = {};
-    for (const e of freshStore.personalEvents) {
+    for (const e of store.personalEvents) {
       if (e.sourceCalendarId === calId && e.googleEventId) {
         existingByGoogleId[e.googleEventId] = e;
       }
     }
 
-    for (const ev of remoteEvents) {
-      if (!ev.id) continue;
-      const existing = existingByGoogleId[ev.id];
+    for (const ev of [...fetched.active, ...moved]) {
       const partial = this.eventToPersonalEvent(ev, calId);
-
+      if (!partial) continue;
+      const existing = existingByGoogleId[ev.id];
       if (!existing) {
-        // Never add cancelled events as brand-new entries
-        if (ev.status === 'cancelled') continue;
-        freshStore.addPersonalEvent(partial);
+        store.addPersonalEvent(partial);
+        existingByGoogleId[ev.id] = partial;
         stats.pulled++;
-      } else {
+      } else if (ts(ev.updated) > ts(existing.remoteUpdated)) {
         // Update only if remote is newer (remoteUpdated shadow)
-        const remoteTs = ev.updated ? new Date(ev.updated).getTime() : 0;
-        const knownTs  = existing.remoteUpdated ? new Date(existing.remoteUpdated).getTime() : 0;
-        if (remoteTs > knownTs) {
-          freshStore.updatePersonalEvent(existing.id, partial);
-          stats.updated++;
-        }
+        store.updatePersonalEvent(existing.id, partial);
+        stats.updated++;
       }
     }
 
-    // Cancelled events → mark personalEvent.cancelled = true (never hard-delete).
-    const cancelledSet = new Set(deletedIds);
-    const latest = useStore.getState().personalEvents;
-    for (const e of latest) {
-      if (e.sourceCalendarId === calId && e.googleEventId && cancelledSet.has(e.googleEventId)) {
-        if (!e.cancelled) {
-          useStore.getState().updatePersonalEvent(e.id, { cancelled: true });
-          stats.updated++;
-        }
+    // Deleted in Google → gone here too (personal events are a pure mirror).
+    for (const e of useStore.getState().personalEvents) {
+      if (e.sourceCalendarId === calId && e.googleEventId && cancelledIds.has(e.googleEventId)) {
+        useStore.getState().deletePersonalEvent(e.id);
+        stats.deleted++;
       }
     }
 
-    useStore.getState().updateCalendarTracking(calId, remoteEvents.length);
+    useStore.getState().updateCalendarTracking(calId, fetched.active.length);
     return stats;
   },
 
   /**
-   * Sync consultations ±30 days for a single Google Calendar.
-   * Bidirectional calendars: push locally-modified consultations, then pull.
-   * Read-only calendars: pull only. Cancelled events → "cancelada" (never delete).
+   * Sync consultations for a single Google Calendar.
+   * Bidirectional calendars: push locally-modified consultations (three-way
+   * merge on conflicts), then pull. Unlinked local consultations are created
+   * only in the default push calendar. Read-only calendars: pull only.
    *
-   * @param {object} store           Zustand store state (useStore.getState())
    * @param {string} token           Valid Google OAuth access token
    * @param {object} calendarConfig  { id, syncMode }
-   * @returns {{ pushed: number, pulled: number, updated: number }}
+   * @returns {{ pushed, pulled, updated, deleted, conflicts, errors, errorDetails }}
    */
-  async _syncConsultationsCalendar(store, token, calendarConfig) {
-    const { clients, updateConsultation, addConsultation } = store;
+  async _syncConsultationsCalendar(token, calendarConfig) {
     const calId = calendarConfig.id;
-    const isBidirectional = calendarConfig.syncMode === 'bidirectional';
+    const gc = useStore.getState().config.googleCalendar;
+    const canPush = canPushToCalendar(gc, calId);
+    const isDefaultPush = canPush && gc.defaultPushCalendarId === calId;
+    const { fromFecha } = syncWindow();
 
-    const now = new Date();
-    const timeMin = new Date(now.getTime() - 30 * 86400000).toISOString();
-    const timeMax = new Date(now.getTime() + 30 * 86400000).toISOString();
+    const fetched = await this._fetchCalendar(token, calendarConfig, 'Primary');
+    if (fetched.suspended) return { pushed: 0, pulled: 0, updated: 0, suspended: true };
+    const { cancelledIds } = fetched;
+    const ownRecords = useStore.getState().consultations.filter(c => c.sourceCalendarId === calId);
+    const moved = await this._reconcileMissing(token, calId, ownRecords, fetched.active, cancelledIds);
+    const remoteEvents = [...fetched.active, ...moved];
+    const remoteById = new Map(remoteEvents.map(ev => [ev.id, ev]));
 
-    const [remoteEvents, deletedIds] = await Promise.all([
-      this.listEvents(token, calId, timeMin, timeMax),
-      this.listDeletedEventIds(token, calId, timeMin, timeMax),
-    ]);
-
-    // ── Mass-delete guard ──────────────────────────────────────────────────────
-    if (this._detectMassDelete(calendarConfig, remoteEvents)) {
-      const prev = calendarConfig.lastKnownRemoteCount;
-      useStore.getState().markCalendarMassDeletePending(calId, {
-        prevCount: prev, newCount: remoteEvents.length, drop: prev - remoteEvents.length,
-      });
-      if (import.meta.env.DEV) console.warn(`[GCal Primary] Mass-delete detected on ${calId} — sync suspended`);
-      return { pushed: 0, pulled: 0, updated: 0, suspended: true };
-    }
-
-    const consultations = store.consultations;
-    const localConsultations = consultations.filter(c => {
-      const d = new Date(c.fecha);
-      return d >= new Date(timeMin) && d <= new Date(timeMax);
-    });
-
-    const stats = { pushed: 0, pulled: 0, updated: 0, conflicts: 0 };
-
-    // Index remote events for O(1) lookups
-    const remoteByGoogleId = {};
-    for (const ev of remoteEvents) {
-      if (ev.id) remoteByGoogleId[ev.id] = ev;
-    }
+    const stats = { pushed: 0, pulled: 0, updated: 0, deleted: 0, conflicts: 0, errors: 0, errorDetails: [] };
+    const handled = new Set(); // consultation ids settled by the push phase
 
     // ── PUSH phase (bidirectional only) ──────────────────────────────────
-    if (isBidirectional) {
-      const gcalConfig = useStore.getState().config.googleCalendar;
-      for (const c of localConsultations) {
+    if (canPush) {
+      const candidates = useStore.getState().consultations
+        .filter(c => (c.fecha || '') >= fromFecha)
+        .filter(c => c.sourceCalendarId === calId
+          || (isDefaultPush && !c.sourceCalendarId && !c.googleEventId && !c.detachedFromGoogle))
+        .map(c => c.id);
+
+      for (const id of candidates) {
+        // Re-read: the user may have edited it while earlier requests ran.
+        const c = useStore.getState().consultations.find(x => x.id === id);
+        if (!c || !this._shouldPush(c)) continue;
         try {
-          // Case 0: Retry previously failed pushes
-          if (c.syncPending && c.googleEventId && c.sourceCalendarId === calId) {
-            const event = this.consultationToEvent(c, clients);
-            const result = await this.withRetry(
-              (tk) => this.updateEvent(tk, calId, c.googleEventId, event),
-              { gcalConfig, token }
-            );
-            updateConsultation(c.id, {
-              lastSyncedAt: new Date().toISOString(),
-              syncPending: false,
-              remoteUpdated: result?.updated || new Date().toISOString(),
-            });
+          if (!c.googleEventId) {
+            // Not linked yet → create (idempotent id, see googleEventIdFor)
+            await this._pushOne(token, calId, c);
             stats.pushed++;
+            handled.add(c.id);
             continue;
           }
+          if (!needsPush(c)) continue;
+          // Deleted in Google: the deletion wins (applied below), unless the
+          // user restored the consultation with undo.
+          if (cancelledIds.has(c.googleEventId) && !c.restoreRemote) continue;
 
-          // Case 1: Local consultation not yet linked → create on Google
-          if (!c.googleEventId && !c.sourceCalendarId) {
-            const event = this.consultationToEvent(c, clients);
-            const result = await this.withRetry(
-              (tk) => this.createEvent(tk, calId, event),
-              { gcalConfig, token }
-            );
-            updateConsultation(c.id, {
-              googleEventId: result.id,
-              sourceCalendarId: calId,
-              lastSyncedAt: new Date().toISOString(),
-              remoteUpdated: result.updated || new Date().toISOString(),
-            });
-            stats.pushed++;
-            continue;
-          }
-
-          // Case 2: Three-way merge — linked consultation, detect local+remote change
-          if (c.googleEventId && c.sourceCalendarId === calId && c.localUpdatedAt && c.lastSyncedAt) {
-            const localTs  = new Date(c.localUpdatedAt).getTime();
-            const syncTs   = new Date(c.lastSyncedAt).getTime();
-            const localChanged = localTs > syncTs;
-
-            const remote = remoteByGoogleId[c.googleEventId];
-            const remoteTs   = remote?.updated ? new Date(remote.updated).getTime() : 0;
-            const knownTs    = c.remoteUpdated  ? new Date(c.remoteUpdated).getTime()  : 0;
-            const remoteChanged = remoteTs > 0 && remoteTs > knownTs;
-
-            if (localChanged && remoteChanged) {
-              // ── True conflict: both sides changed since last sync ─────────────
-              if (localTs >= remoteTs) {
-                // Local wins → push to Google; save remote as shadow for possible undo
-                const conflictShadow = remote ? {
-                  fecha: remote.start_datetime?.slice(0, 10),
-                  hora:  remote.start_datetime?.includes('T') ? remote.start_datetime.slice(11, 16) : undefined,
-                  duracion: remote.end_datetime && remote.start_datetime?.includes('T')
-                    ? Math.round((new Date(remote.end_datetime) - new Date(remote.start_datetime)) / 60000)
-                    : undefined,
-                } : null;
-                const event = this.consultationToEvent(c, clients);
-                const result = await this.withRetry(
-                  (tk) => this.updateEvent(tk, calId, c.googleEventId, event),
-                  { gcalConfig, token }
-                );
-                updateConsultation(c.id, {
-                  lastSyncedAt: new Date().toISOString(),
-                  remoteUpdated: result?.updated || new Date().toISOString(),
-                  syncConflict: true,
-                  conflictShadow,
-                });
-              } else {
-                // Remote wins → pull remote; save local as shadow for possible undo
-                const conflictShadow = {
-                  fecha: c.fecha, hora: c.hora, duracion: c.duracion,
-                };
-                const partial = this.eventToConsultation(remote, clients, calId);
-                updateConsultation(c.id, {
-                  ...partial,
-                  clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
-                  estado: this.mergeRemoteEstado(c.estado, partial.estado),
-                  lastSyncedAt: new Date().toISOString(),
-                  remoteUpdated: remote.updated || new Date().toISOString(),
-                  syncConflict: true,
-                  conflictShadow,
-                });
-              }
+          const remote = remoteById.get(c.googleEventId);
+          const remoteChanged = !!remote && ts(remote.updated) > ts(c.remoteUpdated);
+          if (remoteChanged && hasLocalChange(c) && ts(c.localUpdatedAt) < ts(remote.updated)) {
+            // ── True conflict, remote is newer → pull it, keep local as shadow
+            const partial = this.eventToConsultation(remote, useStore.getState().clients, calId);
+            if (partial) {
+              useStore.getState().updateConsultation(c.id, {
+                ...partial,
+                clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
+                estado: this.mergeRemoteEstado(c.estado, partial.estado),
+                lastSyncedAt: nowISO(),
+                remoteUpdated: remote.updated || nowISO(),
+                syncPending: false,
+                syncError: undefined,
+                syncConflict: true,
+                conflictShadow: { fecha: c.fecha, hora: c.hora, duracion: c.duracion },
+              }, SYNC);
               stats.conflicts++;
-            } else if (localChanged) {
-              // Only local changed → push to Google
-              const event = this.consultationToEvent(c, clients);
-              const result = await this.withRetry(
-                (tk) => this.updateEvent(tk, calId, c.googleEventId, event),
-                { gcalConfig, token }
-              );
-              updateConsultation(c.id, {
-                lastSyncedAt: new Date().toISOString(),
-                remoteUpdated: result?.updated || new Date().toISOString(),
-                syncConflict: false,
-              });
-              stats.pushed++;
+              handled.add(c.id);
             }
-            // If only remoteChanged (no local change) → handled in PULL phase below
+            continue;
           }
+
+          // Local wins (only local changed, or both changed and local is newer)
+          const conflictShadow = remoteChanged ? (() => {
+            const timing = eventTiming(remote, undefined, undefined);
+            return timing ? { fecha: timing.fecha, hora: timing.hora, duracion: timing.duracion } : null;
+          })() : null;
+          await this._pushOne(token, calId, c);
+          if (remoteChanged) {
+            useStore.getState().updateConsultation(c.id, { syncConflict: true, conflictShadow }, SYNC);
+            stats.conflicts++;
+          } else {
+            stats.pushed++;
+          }
+          handled.add(c.id);
         } catch (e) {
+          if (isAuthFailure(e)) throw e;
           if (import.meta.env.DEV) console.error(`[GCal Push] Error for consultation ${c.id}:`, e);
-          // Sync op (lastSyncedAt unchanged): flag for retry without bumping localUpdatedAt.
-          updateConsultation(c.id, { syncPending: true, lastSyncedAt: c.lastSyncedAt });
+          stats.errors++;
+          stats.errorDetails.push({ calendarId: calId, calendar: calendarConfig.name || calId, message: shortGcalError(e) });
+          handled.add(c.id);
         }
       }
     }
 
     // ── PULL phase (all calendars) ───────────────────────────────────────
-
-    // Re-read store after push phase may have modified consultations
-    const freshStore = useStore.getState();
-    const freshConsultations = freshStore.consultations;
-    const freshLocal = freshConsultations.filter(c => {
-      const d = new Date(c.fecha);
-      return d >= new Date(timeMin) && d <= new Date(timeMax);
-    });
-
-    // Update existing local consultations from remote data
-    for (const c of freshLocal) {
-      if (c.googleEventId && remoteByGoogleId[c.googleEventId]) {
-        const remote = remoteByGoogleId[c.googleEventId];
-
-        // For bidirectional: skip if we already handled this above (local changed)
-        if (isBidirectional && c.localUpdatedAt && c.lastSyncedAt) {
-          const localTs = new Date(c.localUpdatedAt).getTime();
-          const syncTs  = new Date(c.lastSyncedAt).getTime();
-          if (localTs > syncTs) continue;  // handled in push phase
-        }
-
-        const remoteTs = remote.updated ? new Date(remote.updated).getTime() : 0;
-        const knownTs  = c.remoteUpdated ? new Date(c.remoteUpdated).getTime() : 0;
-        if (remoteTs <= knownTs) continue;  // no change on remote side
-
-        const partial = this.eventToConsultation(remote, clients, calId);
-        updateConsultation(c.id, {
-          ...partial,
-          clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
-          estado: this.mergeRemoteEstado(c.estado, partial.estado),
-          lastSyncedAt: new Date().toISOString(),
-          remoteUpdated: remote.updated || new Date().toISOString(),
-          syncPending: false,
-          syncConflict: false,
-        });
-        stats.updated++;
-      }
-    }
-
-    // Pull remote-only → local (new events from Google not yet in NutriPolo)
-    const currentConsultations = useStore.getState().consultations;
-    const localByGoogleId = {};
-    for (const c of currentConsultations) {
-      if (c.googleEventId) localByGoogleId[c.googleEventId] = c;
-    }
+    const clients = useStore.getState().clients;
+    const tombstoned = tombstonedIds(calId);
 
     for (const ev of remoteEvents) {
-      const hasLocalByNpId = ev.nutripolo_id
-        ? currentConsultations.find(c => c.id === ev.nutripolo_id)
-        : null;
-      const hasLocalByGId = ev.id ? localByGoogleId[ev.id] : null;
-      if (!hasLocalByNpId && !hasLocalByGId && ev.status !== 'cancelled') {
-        const partial = this.eventToConsultation(ev, clients, calId);
-        addConsultation({
-          ...partial,
-          tipo: partial.tipo || 'Google Calendar',
-          sourceCalendarId: calId,
-          remoteUpdated: ev.updated || new Date().toISOString(),
-        });
-        stats.pulled++;
-      }
-    }
+      const state = useStore.getState();
+      let local = state.consultations.find(c => c.googleEventId === ev.id && c.sourceCalendarId === calId);
 
-    // Cancelled events in Google → mark local consultation as "cancelada" (never delete)
-    const cancelledSet = new Set(deletedIds);
-    const latestConsultations = useStore.getState().consultations;
-    for (const c of latestConsultations) {
-      if (c.googleEventId && c.sourceCalendarId === calId && cancelledSet.has(c.googleEventId)) {
-        if (c.estado !== 'cancelada') {
-          updateConsultation(c.id, { estado: 'cancelada', lastSyncedAt: new Date().toISOString() });
-          stats.updated++;
+      // Created by NutriPolo but the response was lost: re-link it.
+      if (!local && ev.nutripolo_id) {
+        const own = state.consultations.find(c => c.id === ev.nutripolo_id && !c.googleEventId && !c.sourceCalendarId);
+        if (own) {
+          state.updateConsultation(own.id, {
+            googleEventId: ev.id, sourceCalendarId: calId, remoteUpdated: ev.updated || nowISO(),
+          }, SYNC);
+          continue; // its local data is pushed next sync if it changed
         }
       }
+
+      if (local) {
+        if (handled.has(local.id)) continue;
+        // A pending local change is pushed (not overwritten) unless the push failed for good.
+        if (canPush && needsPush(local)) continue;
+        if (ts(ev.updated) <= ts(local.remoteUpdated) && !local.remoteDeleted) continue;
+
+        const partial = this.eventToConsultation(ev, clients, calId);
+        if (!partial) continue;
+        state.updateConsultation(local.id, {
+          ...partial,
+          clienteId: partial.clienteId || local.clienteId, // preserve manual/fuzzy link
+          estado: this.mergeRemoteEstado(local.estado, partial.estado),
+          lastSyncedAt: nowISO(),
+          remoteUpdated: ev.updated || nowISO(),
+          remoteDeleted: false,
+          syncPending: false,
+          syncConflict: false,
+        }, SYNC);
+        stats.updated++;
+        continue;
+      }
+
+      // Remote-only → import. Skip events already imported (from another
+      // calendar, or created by NutriPolo) and ones deleted here.
+      if (tombstoned.has(ev.id)) continue;
+      if (state.consultations.some(c => c.googleEventId === ev.id || (ev.nutripolo_id && c.id === ev.nutripolo_id))) continue;
+      const partial = this.eventToConsultation(ev, clients, calId);
+      if (!partial) continue;
+      state.addConsultation({
+        ...partial,
+        tipo: 'Google Calendar',
+        remoteUpdated: ev.updated || nowISO(),
+      }, SYNC);
+      stats.pulled++;
     }
 
+    // ── Deleted in Google (skipping events this sync just restored) ──────
+    const removed = useStore.getState().consultations
+      .filter(c => c.sourceCalendarId === calId && c.googleEventId && cancelledIds.has(c.googleEventId) && !handled.has(c.id))
+      .map(c => c.id);
+    stats.deleted += this._applyRemoteRemoval(removed);
+
     // ── Update baseline tracking for next mass-delete check ───────────────────
-    useStore.getState().updateCalendarTracking(calId, remoteEvents.length);
+    useStore.getState().updateCalendarTracking(calId, fetched.active.length);
 
     return stats;
   },

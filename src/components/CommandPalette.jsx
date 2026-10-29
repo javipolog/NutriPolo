@@ -33,7 +33,7 @@ export const CommandPalette = ({ open, onClose }) => {
     if (!config.googleCalendar?.connected || syncing) return;
     setSyncing(true);
     try {
-      await googleCalendar.syncAll(useStore.getState());
+      await googleCalendar.syncAll();
     } catch (e) {
       if (import.meta.env.DEV) console.warn('[CommandPalette sync]', e);
     } finally {
