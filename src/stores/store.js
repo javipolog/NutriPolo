@@ -756,6 +756,57 @@ export async function syncGoogleSecrets() {
   });
 }
 
+// Fields owned by the Google Calendar sync. Only sync writes may set them.
+const SYNC_FIELDS = [
+  'googleEventId', 'sourceCalendarId', 'googleSummary', 'lastSyncedAt', 'remoteUpdated',
+  'syncPending', 'syncError', 'syncErrorFor', 'syncAttempts', 'syncConflict', 'conflictShadow',
+  'detachedFromGoogle', 'remoteDeleted', 'restoreRemote',
+];
+
+function withoutSyncFields(data) {
+  if (!data) return data;
+  const out = { ...data };
+  for (const f of SYNC_FIELDS) delete out[f];
+  return out;
+}
+
+/**
+ * True when NutriPolo may write to this Google calendar: bidirectional and
+ * meant for consultations (external clinic and personal calendars are pull-only).
+ */
+export function canPushToCalendar(googleCalendarConfig, calendarId) {
+  if (!calendarId) return false;
+  const cal = (googleCalendarConfig?.calendars || []).find(c => c.id === calendarId);
+  return !!cal && cal.syncMode === 'bidirectional' && cal.purpose !== 'external-clinic' && cal.purpose !== 'personal';
+}
+
+// Undo of a consultation delete: drop its tombstone and ask the next sync to
+// restore the Google event (it may already be deleted there).
+function restoreDeletedConsultation(s, item) {
+  const restored = item.googleEventId
+    ? { ...item, restoreRemote: true, remoteDeleted: false, localUpdatedAt: new Date().toISOString() }
+    : item;
+  return {
+    consultations: [restored, ...s.consultations],
+    gcalPendingDeletes: s.gcalPendingDeletes.filter(d => d.consultationId !== item.id),
+  };
+}
+
+// Redo of a consultation delete: same as the original delete (tombstone).
+function redeleteConsultation(s, item) {
+  const patch = { consultations: s.consultations.filter(c => c.id !== item.id) };
+  if (item.googleEventId && item.sourceCalendarId) {
+    patch.gcalPendingDeletes = [
+      ...s.gcalPendingDeletes.filter(d => d.eventId !== item.googleEventId),
+      {
+        calendarId: item.sourceCalendarId, eventId: item.googleEventId, consultationId: item.id,
+        remote: canPushToCalendar(s.config.googleCalendar, item.sourceCalendarId), at: new Date().toISOString(),
+      },
+    ];
+  }
+  return patch;
+}
+
 // Removes a client together with the records that only make sense with it.
 // Invoices are kept (fiscal records). Google-synced consultations are
 // unlinked instead of deleted, otherwise the next pull would re-import them.
@@ -862,33 +913,70 @@ const useStore = create(
       },
       updateConfig: (updates) => set(s => ({ config: { ...s.config, ...updates } })),
 
+      // Disconnect: forget the credentials but keep the calendar settings and
+      // the consultations' links to their Google events. Reconnecting the same
+      // account re-pairs them instead of uploading everything again as new
+      // events; calendars that are gone after reconnecting are detached by
+      // detachConsultationsFromCalendars.
       clearGoogleCalendarData: () => set(s => ({
         config: {
           ...s.config,
           googleCalendar: {
+            ...s.config.googleCalendar,
             connected: false,
+            needsReauth: false,
             clientId: '',
             clientSecret: '',
             accessToken: '',
             refreshToken: '',
             expiresAt: 0,
-            calendars: [],
-            defaultPushCalendarId: null,
+            grantedScopes: '',
             autoSync: false,
-            userEmail: '',
           },
         },
         consultations: s.consultations.map(c => {
-          if (!c.googleEventId) return c;
-          const { googleEventId, lastSyncedAt, googleSummary, sourceCalendarId, remoteUpdated, ...rest } = c;
+          if (!c.syncPending && !c.syncError && !c.syncConflict && !c.restoreRemote) return c;
+          const { syncPending, syncError, syncErrorFor, syncAttempts, syncConflict, conflictShadow, restoreRemote, ...rest } = c;
           return rest;
         }),
-        // Personal events come 100% from Google; disconnecting orphans them.
+        // Personal events come 100% from Google and are pulled again on reconnect.
         personalEvents: [],
-        // Patient suggestions are generated from external-clinic pulls → same rule.
-        patientSuggestions: [],
+        gcalPendingDeletes: [],
         syncAudit: { lastFullSyncAt: null, lastSyncStats: {}, massDeleteEvents: [] },
       })),
+
+      // After (re)connecting: consultations linked to calendars this account
+      // cannot see any more become local records. They are flagged so the sync
+      // never uploads them as new events (they already exist in Google).
+      detachConsultationsFromCalendars: (visibleCalendarIds) => set(s => {
+        const visible = new Set(visibleCalendarIds);
+        return {
+          consultations: s.consultations.map(c => {
+            if (!c.sourceCalendarId || visible.has(c.sourceCalendarId)) return c;
+            const { googleEventId, sourceCalendarId, lastSyncedAt, remoteUpdated, syncPending, syncError, syncErrorFor,
+              syncAttempts, syncConflict, conflictShadow, remoteDeleted, restoreRemote, ...rest } = c;
+            return { ...rest, detachedFromGoogle: true };
+          }),
+          personalEvents: s.personalEvents.filter(e => !e.sourceCalendarId || visible.has(e.sourceCalendarId)),
+        };
+      }),
+
+      // Tombstones of Google events whose consultation was deleted here.
+      // `remote: true` → the event still has to be deleted in Google (offline
+      // or failed); the sync retries it. `remote: false` → read-only calendar:
+      // the event stays in Google and the tombstone only stops the pull from
+      // importing it again. Either way the pull skips tombstoned events.
+      gcalPendingDeletes: [],
+      addGcalPendingDelete: ({ calendarId, eventId, consultationId = null, remote = true }) => set(s => ({
+        gcalPendingDeletes: [
+          ...s.gcalPendingDeletes.filter(d => !(d.calendarId === calendarId && d.eventId === eventId)),
+          { calendarId, eventId, consultationId, remote, at: new Date().toISOString() },
+        ],
+      })),
+      removeGcalPendingDelete: (calendarId, eventId) => set(s => ({
+        gcalPendingDeletes: s.gcalPendingDeletes.filter(d => !(d.calendarId === calendarId && d.eventId === eventId)),
+      })),
+      setSyncAudit: (patch) => set(s => ({ syncAudit: { ...s.syncAudit, ...patch } })),
 
       // ---- CLIENTS ----
       clients: [],
@@ -968,13 +1056,14 @@ const useStore = create(
       // ---- CONSULTATIONS ----
       consultations: [],
 
-      addConsultation: (consultation) => {
-        // Detect sync operations the same way updateConsultation does — sync-pulled
-        // records must NOT get a fresh localUpdatedAt or they'll be pushed back to
-        // Google on the next sync cycle, creating a perpetual loop.
-        const isSyncOp = 'lastSyncedAt' in consultation || 'googleEventId' in consultation;
+      // `{ sync: true }` marks writes made by the Google Calendar sync: they must
+      // NOT get a fresh localUpdatedAt or they would be pushed back to Google
+      // on the next cycle. User writes never touch the sync bookkeeping fields.
+      addConsultation: (consultation, { sync = false } = {}) => {
+        const isSyncOp = sync;
+        const data = isSyncOp ? consultation : withoutSyncFields(consultation);
         const newC = {
-          ...consultation,
+          ...data,
           id: consultation.id || generateId(),
           estado: consultation.estado || 'programada',
           notasPrivadas: consultation.notasPrivadas || '',
@@ -991,11 +1080,12 @@ const useStore = create(
         }
         return newC;
       },
-      updateConsultation: (id, data) => {
-        // Only bump localUpdatedAt for user edits. Sync operations pass lastSyncedAt
-        // or googleEventId so we can distinguish them and avoid falsely marking the
-        // record as locally newer than Google's copy on the next sync.
-        const isSyncOp = 'lastSyncedAt' in data || 'googleEventId' in data;
+      updateConsultation: (id, input, { sync = false } = {}) => {
+        // Only user edits bump localUpdatedAt. They also drop the sync fields:
+        // the modal saves a copy taken when it opened, and a sync may have
+        // updated them in the meantime.
+        const isSyncOp = sync;
+        const data = isSyncOp ? input : withoutSyncFields(input);
         const extra = isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() };
 
         // Hook: if a user manually changes clienteId on a pending-review consultation,
@@ -1317,12 +1407,22 @@ const useStore = create(
           : c),
       })),
 
+      // Local delete with undo. Use googleCalendar.deleteConsultation from the
+      // UI so the linked Google event is deleted (or tombstoned) as well.
       deleteConsultation: (id) => {
         const item = get().consultations.find(c => c.id === id);
+        if (!item) return;
         set(s => ({
           consultations: s.consultations.filter(c => c.id !== id),
           _history: [{ type: 'delete_consultation', item }, ...s._history].slice(0, 20),
+          _future: [],
         }));
+      },
+
+      // Deletes made by the sync (the event was deleted in Google): no undo entry.
+      removeConsultationsSync: (ids) => {
+        const drop = new Set(ids);
+        set(s => ({ consultations: s.consultations.filter(c => !drop.has(c.id)) }));
       },
 
       getTodayConsultations: () => {
@@ -1602,7 +1702,7 @@ const useStore = create(
           };
           if (last.type === 'delete_client')       Object.assign(next, restoreClientDeletion(s, last));
           if (last.type === 'add_client')          next.clients         = s.clients.filter(c => c.id !== last.item.id);
-          if (last.type === 'delete_consultation') next.consultations   = [last.item, ...s.consultations];
+          if (last.type === 'delete_consultation') Object.assign(next, restoreDeletedConsultation(s, last.item));
           if (last.type === 'delete_plan')         next.nutritionPlans  = [last.item, ...s.nutritionPlans];
           if (last.type === 'delete_invoice')      next.invoices        = [last.item, ...s.invoices];
           if (last.type === 'delete_document')     next.clientDocuments = [last.item, ...s.clientDocuments];
@@ -1620,7 +1720,7 @@ const useStore = create(
           };
           if (next.type === 'delete_client')       Object.assign(update, buildClientDeletion(s, next.item.id).patch);
           if (next.type === 'add_client')          update.clients         = [next.item, ...s.clients];
-          if (next.type === 'delete_consultation') update.consultations   = s.consultations.filter(c => c.id !== next.item.id);
+          if (next.type === 'delete_consultation') Object.assign(update, redeleteConsultation(s, next.item));
           if (next.type === 'delete_plan')         update.nutritionPlans  = s.nutritionPlans.filter(p => p.id !== next.item.id);
           if (next.type === 'delete_invoice')      update.invoices        = s.invoices.filter(i => i.id !== next.item.id);
           if (next.type === 'delete_document')     update.clientDocuments = s.clientDocuments.filter(d => d.id !== next.item.id);
@@ -1961,6 +2061,7 @@ const useStore = create(
           personalEvents: s.personalEvents,
           patientSuggestions: s.patientSuggestions,
           syncAudit: s.syncAudit,
+          gcalPendingDeletes: s.gcalPendingDeletes,
           nutritionPlans: s.nutritionPlans,
           services: s.services,
           invoices: s.invoices,

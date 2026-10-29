@@ -1160,7 +1160,7 @@ fn main() {
             google_calendar::gcal_revoke_token,
             google_calendar::gcal_list_calendars,
             google_calendar::gcal_list_events,
-            google_calendar::gcal_list_deleted_events,
+            google_calendar::gcal_get_event,
             google_calendar::gcal_create_event,
             google_calendar::gcal_update_event,
             google_calendar::gcal_delete_event,

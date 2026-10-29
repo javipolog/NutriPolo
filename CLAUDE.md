@@ -183,9 +183,10 @@ fn gcal_exchange_token(client_id, client_secret, code, redirect_uri) -> Result<T
 fn gcal_refresh_token(client_id, client_secret, refresh_token) -> Result<TokenResponse, String>
 fn gcal_revoke_token(token) -> Result<(), String>
 fn gcal_list_calendars(token) -> Result<String, String>
-fn gcal_list_events(token, calendar_id, time_min, time_max) -> Result<String, String>
-fn gcal_create_event(token, calendar_id, event_json) -> Result<String, String>
-fn gcal_update_event(token, calendar_id, event_id, event_json) -> Result<String, String>
+fn gcal_list_events(token, calendar_id, time_min, time_max, time_zone) -> Result<String, String>  // inclou cancel·lats (showDeleted)
+fn gcal_get_event(token, calendar_id, event_id) -> Result<String, String>
+fn gcal_create_event(token, calendar_id, event_json) -> Result<String, String>      // id determinista; 409 → PATCH
+fn gcal_update_event(token, calendar_id, event_id, event_json) -> Result<String, String>  // PATCH
 fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
 
 // Receptari de la web (nomes nutripoloraquel.com: /wp-json/wp/v2/receta i /receta/...)
@@ -214,6 +215,14 @@ fn quit_app()                                         // el JS el crida despres 
 - Migracions a `migrateStore` (STORE_VERSION); `config` es fusiona amb els valors per defecte en hidratar
 - Si el fitxer de dades no es pot llegir, les escriptures queden bloquejades (`getLoadFailure`)
 - Canvis de sincronitzacio o de recordatoris no han de tocar `localUpdatedAt` (si no, es fa push a Google)
+
+### Google Calendar
+- Scopes minims: `calendar.events` + `calendar.calendarlist.readonly`; OAuth loopback a `127.0.0.1` amb PKCE + `state`
+- Totes les escriptures a Google (push, esborrat, sync) passen per una sola cua a `googleCalendarService`
+- Escriptures del sync: `updateConsultation(id, data, { sync: true })`; les de l'usuari descarten els camps de sync (`SYNC_FIELDS`) i actualitzen `localUpdatedAt`
+- Esdeveniments creats amb id determinista (`googleEventIdFor`) → mai duplicats
+- Esborrar: `googleCalendar.deleteConsultation` (tombstone a `gcalPendingDeletes` si no hi ha xarxa o el calendari es de nomes lectura); esborrat a Google → s'esborra si la cita es buida, si no queda `cancelada` + `remoteDeleted`
+- Errors del backend: `"<op> failed (<status>) [<reason>]: <msg>"`; es reintenten xarxa, 5xx, 429 i 403 de rate limit
 
 ### Recordatoris de cites
 - Configuracio a `config.reminders` (valors per defecte a `DEFAULT_REMINDER_CONFIG`)

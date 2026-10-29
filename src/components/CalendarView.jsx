@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Plus, MapPin, RefreshCw, Check, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, MapPin, RefreshCw, Check, Trash2, AlertCircle, AlertTriangle, EyeOff, CheckCircle2, UserPlus, X as XIcon, CloudOff, GitMerge } from 'lucide-react';
 import { Button, Badge, SegmentedControl, useToast, useConfirm, clickableProps } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
-import { googleCalendar } from '../services/googleCalendarService';
+import { googleCalendar, formatSyncStats, formatSyncErrors } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { ConsultationModal } from './ConsultationModal';
 import { useNow } from '../hooks/useNow';
@@ -92,6 +92,14 @@ function consultationMatchVisual(c, t) {
   }
 }
 
+/** Google sync problem of a consultation (failed upload or resolved conflict), or null. */
+function syncVisual(c, t) {
+  if (c.syncError && !c.syncPending) return { Icon: AlertTriangle, cls: 'text-danger', tooltip: t.calendar_sync_item_failed.replace('{error}', c.syncError) };
+  if (c.syncPending) return { Icon: CloudOff, cls: 'text-warning', tooltip: t.calendar_sync_pending };
+  if (c.syncConflict) return { Icon: GitMerge, cls: 'text-info', tooltip: t.calendar_sync_conflict };
+  return null;
+}
+
 // ── Weekly View ────────────────────────────────────────────────────────────
 // Appointments are placed by start minute and sized by duration, so 16:30 sits
 // halfway down the 16:00 row and overlapping ones share the column side by side.
@@ -170,6 +178,14 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
     return map;
   }, [consultations, personalEvents, defaultDuration]);
 
+  // All-day personal events (birthdays, holidays...) get their own row
+  const allDayByDay = useMemo(() => {
+    const map = {};
+    (personalEvents || []).forEach(e => { if (e.allDay) (map[e.fecha] ||= []).push(e); });
+    return map;
+  }, [personalEvents]);
+  const hasAllDay = days.some(d => allDayByDay[toISO(d)]?.length);
+
   // 8–20 by default, widened so early/late appointments are never hidden.
   const [firstHour, lastHour] = useMemo(() => {
     let first = DEFAULT_FIRST_HOUR, last = DEFAULT_LAST_HOUR;
@@ -229,6 +245,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
       ? c.googleSummary?.replace(/^Consulta\s*-\s*/i, '') || '?'
       : client?.nombre || c.googleSummary || '?';
     const tall = ((it.end - it.start) / 60) * hourPx >= 36;
+    const sync = syncVisual(c, t);
     return (
       <div
         {...clickableProps(e => { e.stopPropagation(); onEditConsultation(c); })}
@@ -240,13 +257,14 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
               : `${STATUS_BG[c.estado] || STATUS_BG.programada} ${locColor}`
         }`}
         style={(!matchVisual && cStyle) || undefined}
-        title={matchVisual ? matchVisual.tooltip : `${c.hora} · ${name}${c.tipo ? ` — ${c.tipo}` : ''} · ${t[`status_${c.estado}`] || c.estado}`}
+        title={[matchVisual ? matchVisual.tooltip : `${c.hora} · ${name}${c.tipo ? ` — ${c.tipo}` : ''} · ${t[`status_${c.estado}`] || c.estado}`, sync?.tooltip].filter(Boolean).join('\n')}
       >
         <p className="truncate">
           <span className="font-semibold tabular-nums">{c.hora}</span>{' '}
           {MatchIcon && <MatchIcon size={10} className="inline -mt-0.5 mr-0.5" aria-hidden="true" />}
           <span className="font-medium">{name}</span>
           {c.estado === 'completada' && <Check size={10} className="inline -mt-0.5 ml-1" aria-label={t.status_completada} />}
+          {sync && <sync.Icon size={10} className={`inline -mt-0.5 ml-1 ${sync.cls}`} aria-label={sync.tooltip} />}
         </p>
         {tall && c.tipo && <p className="truncate opacity-80">{c.tipo}</p>}
       </div>
@@ -282,6 +300,20 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
               </div>
             );
           })}
+          {hasAllDay && (
+            <>
+              <div className="text-[11px] text-sage-500 text-right pr-2 py-1 self-center">{t.calendar_all_day}</div>
+              {days.map(d => (
+                <div key={toISO(d)} className="border-l border-t border-sage-200 p-0.5 space-y-0.5 min-w-0">
+                  {(allDayByDay[toISO(d)] || []).map(e => (
+                    <p key={e.id} className="truncate rounded-[4px] px-1.5 text-[11px] bg-sage-200/60 text-sage-700 italic" title={`[${t.personal_event_prefix}] ${e.title}`}>
+                      {e.title}
+                    </p>
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
         </div>
 
         <div className="grid grid-cols-[48px_repeat(7,1fr)]">
@@ -509,7 +541,13 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sage-900 text-sm">{client?.nombre || c.googleSummary || t.calendar_no_client}</p>
+                    <p className="font-medium text-sage-900 text-sm">
+                      {client?.nombre || c.googleSummary || t.calendar_no_client}
+                      {(() => {
+                        const sync = syncVisual(c, t);
+                        return sync && <span title={sync.tooltip}><sync.Icon size={12} className={`inline -mt-0.5 ml-1.5 ${sync.cls}`} aria-label={sync.tooltip} /></span>;
+                      })()}
+                    </p>
                     <div className="flex items-center gap-2 mt-0.5 text-xs text-sage-400">
                       <span>{c.tipo}</span>
                       {c.locationId && <span className="flex items-center gap-0.5"><MapPin size={9} />{locationName(c.locationId)}</span>}
@@ -584,7 +622,8 @@ export const CalendarView = () => {
   const [editConsultation, setEditConsultation] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [lastSyncTime, setLastSyncTime] = useState(null);
+  const lastFullSyncAt = useStore(s => s.syncAudit?.lastFullSyncAt);
+  const lastSyncTime = lastFullSyncAt ? new Date(lastFullSyncAt) : null;
   const [syncError, setSyncError] = useState(null);
   const [showPersonalEvents, setShowPersonalEvents] = useState(true);
 
@@ -593,17 +632,12 @@ export const CalendarView = () => {
     setSyncing(true);
     setSyncError(null);
     try {
-      const stats = await googleCalendar.syncAll(useStore.getState());
-      const parts = [];
-      if (stats.pushed) parts.push(`${stats.pushed} ${t.gcal_sync_pushed}`);
-      if (stats.pulled) parts.push(`${stats.pulled} ${t.gcal_sync_pulled}`);
-      if (stats.updated) parts.push(`${stats.updated} ${t.gcal_sync_updated}`);
-      if (stats.errors > 0) parts.push(`${stats.errors} ${t.gcal_sync_errors}`);
-      toast.success(`${t.gcal_synced}${parts.length ? ' — ' + parts.join(', ') : ''}`);
+      const stats = await googleCalendar.syncAll();
+      toast.success(formatSyncStats(stats, t));
+      if (stats.errors > 0) toast.error(formatSyncErrors(stats, t));
       if (stats.conflicts > 0) {
         toast.info(`${stats.conflicts} ${stats.conflicts > 1 ? t.sync_conflict_resolved_plural : t.sync_conflict_resolved}`);
       }
-      setLastSyncTime(new Date());
     } catch (e) {
       setSyncError(e?.message || String(e));
       toast.error(t.gcal_sync_error_detail.replace('{error}', e?.message || String(e)));
