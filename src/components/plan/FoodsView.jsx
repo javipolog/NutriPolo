@@ -1,0 +1,235 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Apple, Search, AlertTriangle } from 'lucide-react';
+import { Input, Modal, Badge, EmptyState, Spinner, SegmentedControl, clickableProps } from '../UI';
+import { loadFoodCatalog, foodImageUrl, filterFoods, groupFoods, needsReview } from '../../services/foodCatalog';
+import { formatCurrency } from '../../stores/store';
+import { useT, useLocale, plural } from '../../i18n';
+
+const NUTRIENT_ROWS = [
+  ['kcal', 'foods_kcal', 'kcal'],
+  ['proteinas', 'foods_protein', 'g'],
+  ['hidratos', 'foods_carbs', 'g'],
+  ['azucares', 'foods_sugars', 'g'],
+  ['grasas', 'foods_fat', 'g'],
+  ['grasasSaturadas', 'foods_saturated', 'g'],
+  ['fibra', 'foods_fiber', 'g'],
+  ['sal', 'foods_salt', 'g'],
+];
+
+const useNumber = () => {
+  const locale = useLocale();
+  return useMemo(() => {
+    const fmt = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
+    return v => (v == null ? '—' : fmt.format(v));
+  }, [locale]);
+};
+
+const SourceBadge = ({ food }) => {
+  const t = useT();
+  const { fuente, aproximado } = food.nutricion || {};
+  if (fuente === 'openfoodfacts') return <Badge tone="neutral">{t.foods_source_label}</Badge>;
+  if (fuente === 'bedca') return <Badge tone="info">{aproximado ? t.foods_source_bedca_approx : t.foods_source_bedca}</Badge>;
+  return null;
+};
+
+const ReviewBadge = ({ food }) => {
+  const t = useT();
+  const control = food.nutricion?.control;
+  if (control === 'sin_datos') return <Badge tone="danger" icon={AlertTriangle}>{t.foods_no_data}</Badge>;
+  if (needsReview(food)) return <Badge tone="warning" icon={AlertTriangle}>{t.foods_check}</Badge>;
+  return null;
+};
+
+const FoodPhoto = ({ food, className }) => {
+  const src = foodImageUrl(food);
+  return src
+    ? <img src={src} alt="" loading="lazy" className={`aspect-square w-full object-contain rounded-button ${className}`} />
+    : <div className={`aspect-square w-full rounded-button bg-sage-100 flex items-center justify-center ${className}`}><Apple size={28} className="text-sage-300" /></div>;
+};
+
+const FoodCard = ({ food, onOpen }) => {
+  const t = useT();
+  const num = useNumber();
+  const p = food.por100g;
+  return (
+    <div
+      {...clickableProps(onOpen)}
+      aria-label={food.basico}
+      className="bg-white border border-sage-200 rounded-soft shadow-card p-3 flex flex-col gap-2 cursor-pointer hover:border-sage-300 transition-colors"
+    >
+      <FoodPhoto food={food} />
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-sage-900 leading-snug">{food.basico}</p>
+        <p className="text-xs text-sage-500 truncate" title={food.nombre}>{food.nombre}</p>
+      </div>
+      {p ? (
+        <p className="text-xs text-sage-600 tabular-nums">
+          <span className="font-semibold text-sage-800">{num(p.kcal)}</span> kcal
+          {' · '}{t.foods_protein_short} {num(p.proteinas)}
+          {' · '}{t.foods_carbs_short} {num(p.hidratos)}
+          {' · '}{t.foods_fat_short} {num(p.grasas)}
+        </p>
+      ) : null}
+      <div className="mt-auto flex flex-wrap gap-1">
+        <ReviewBadge food={food} />
+        <SourceBadge food={food} />
+      </div>
+    </div>
+  );
+};
+
+const FoodDetail = ({ food, onClose }) => {
+  const t = useT();
+  const num = useNumber();
+  const p = food.por100g || {};
+  const { formato = {}, precio = {}, nutricion = {} } = food;
+
+  return (
+    <Modal open onClose={onClose} title={food.basico}>
+      <div className="grid sm:grid-cols-[200px_1fr] gap-6">
+        <div className="space-y-2">
+          <FoodPhoto food={food} className="border border-sage-200" />
+          <p className="text-sm text-sage-700">{food.nombre}</p>
+          <p className="text-xs text-sage-500 tabular-nums">
+            {[formato.envase, formato.cantidad != null && `${num(formato.cantidad)} ${formato.unidad || ''}`].filter(Boolean).join(' · ')}
+            {precio.unidad != null && <> · {formatCurrency(precio.unidad)}</>}
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-xs font-semibold text-sage-700 mb-2">{t.foods_per_100}</h3>
+            <table className="w-full text-sm">
+              <tbody>
+                {NUTRIENT_ROWS.map(([key, label, unit]) => (
+                  <tr key={key} className="border-b border-sage-100 last:border-0">
+                    <td className={`py-1.5 ${key === 'azucares' || key === 'grasasSaturadas' ? 'pl-4 text-sage-500' : 'text-sage-700'}`}>{t[label]}</td>
+                    <td className="py-1.5 text-right tabular-nums text-sage-900">
+                      {num(p[key])}{p[key] != null && <span className="text-sage-500"> {unit}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <ReviewBadge food={food} />
+              <SourceBadge food={food} />
+            </div>
+            <p className="text-xs text-sage-500 mt-2">
+              {nutricion.fuente === 'bedca'
+                ? t.foods_source_bedca_desc.replace('{name}', nutricion.alimentoGenerico || '')
+                : nutricion.fuente === 'openfoodfacts' ? t.foods_source_label_desc : t.foods_no_data_desc}
+            </p>
+          </div>
+
+          {food.ingredientes && (
+            <div>
+              <h3 className="text-xs font-semibold text-sage-700 mb-1">{t.foods_ingredients}</h3>
+              <p className="text-sm text-sage-600">{food.ingredientes}</p>
+            </div>
+          )}
+          {food.alergenos && (
+            <div>
+              <h3 className="text-xs font-semibold text-sage-700 mb-1">{t.foods_allergens}</h3>
+              <p className="text-sm text-sage-600">{food.alergenos}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+export const FoodsView = () => {
+  const t = useT();
+  const [catalog, setCatalog] = useState(undefined); // undefined = loading, null = not generated
+  const [query, setQuery] = useState('');
+  const [grupo, setGrupo] = useState('all');
+  const [show, setShow] = useState('all');
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadFoodCatalog().then(data => { if (!cancelled) setCatalog(data); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const foods = catalog?.alimentos || [];
+  const groups = useMemo(() => groupFoods(foods).map(g => g.grupo), [foods]);
+  const reviewCount = useMemo(() => foods.filter(needsReview).length, [foods]);
+  const visible = useMemo(
+    () => groupFoods(filterFoods(foods, { query, grupo, onlyReview: show === 'review' })),
+    [foods, query, grupo, show],
+  );
+  const visibleCount = visible.reduce((n, g) => n + g.items.length, 0);
+
+  if (catalog === undefined) {
+    return <div className="flex justify-center py-24"><Spinner /></div>;
+  }
+
+  return (
+    <div className="space-y-5">
+      {!catalog ? (
+        <EmptyState icon={Apple} title={t.foods_missing_title} description={t.foods_missing_desc} />
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-3">
+            <Input
+              icon={Search}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder={t.foods_search}
+              aria-label={t.foods_search}
+              className="flex-1 min-w-48"
+            />
+            <select
+              value={grupo}
+              onChange={e => setGrupo(e.target.value)}
+              aria-label={t.foods_group}
+              className="px-3 py-2 text-sm bg-white border border-sage-300 rounded-button text-sage-700 focus:outline-none focus:border-wellness-400"
+            >
+              <option value="all">{t.foods_all_groups}</option>
+              {groups.map(g => <option key={g} value={g}>{g}</option>)}
+            </select>
+            <SegmentedControl
+              ariaLabel={t.foods_show}
+              value={show}
+              onChange={setShow}
+              options={[
+                { value: 'all', label: t.foods_show_all },
+                { value: 'review', label: `${t.foods_show_review} (${reviewCount})` },
+              ]}
+            />
+          </div>
+
+          <p className="text-xs text-sage-500 tabular-nums">
+            {visibleCount === foods.length
+              ? plural(t, 'foods_count', foods.length)
+              : t.foods_count_filtered.replace('{n}', visibleCount).replace('{total}', foods.length)}
+          </p>
+
+          {visibleCount === 0 ? (
+            <EmptyState icon={Search} title={t.foods_no_results} />
+          ) : (
+            visible.map(({ grupo: name, items }) => (
+              <section key={name} className="space-y-3">
+                <h2 className="text-sm font-semibold text-sage-700">
+                  {name} <span className="font-normal text-sage-500 tabular-nums">{items.length}</span>
+                </h2>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                  {items.map(food => <FoodCard key={food.id} food={food} onOpen={() => setSelected(food)} />)}
+                </div>
+              </section>
+            ))
+          )}
+
+          <p className="text-xs text-sage-500">{t.foods_sources_note}</p>
+        </>
+      )}
+
+      {selected && <FoodDetail food={selected} onClose={() => setSelected(null)} />}
+    </div>
+  );
+};
+
+export default FoodsView;

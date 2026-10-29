@@ -1673,9 +1673,11 @@ const useStore = create(
       clientFilters: { estado: 'all', objetivo: 'all' },
       consultationFilters: { dateRange: 'week', locationId: 'all', tipo: 'all', estado: 'all' },
       planFilters: { estado: 'all', clienteId: 'all' },
+      plansSection: 'plans', // Planes tab: 'plans' | 'foods' | 'recipes'
       invoiceFilters: { estado: 'all', year: 'all' },
 
       setCurrentView: (view) => set({ currentView: view }),
+      setPlansSection: (section) => set({ plansSection: section }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
       setAppTheme: (theme) => set({ appTheme: theme }),
       setClientSearch: (v) => set({ clientSearch: v }),

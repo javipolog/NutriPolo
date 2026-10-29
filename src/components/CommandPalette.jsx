@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, Home, Calendar, Users, ClipboardList, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, Inbox } from 'lucide-react';
+import { Search, Home, Calendar, Users, ClipboardList, Apple, BookOpen, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, Inbox } from 'lucide-react';
 import useStore, { formatCurrency, formatDateShort } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
 import { useT, plural } from '../i18n';
@@ -26,6 +26,7 @@ export const CommandPalette = ({ open, onClose }) => {
   const patientSuggestions = useStore(s => s.patientSuggestions);
   const config = useStore(s => s.config);
   const setCurrentView = useStore(s => s.setCurrentView);
+  const setPlansSection = useStore(s => s.setPlansSection);
   const setSelectedClientId = useStore(s => s.setSelectedClientId);
 
   const [syncing, setSyncing] = useState(false);
@@ -61,7 +62,9 @@ export const CommandPalette = ({ open, onClose }) => {
     { id: 'agenda',    label: t.nav_agenda,    icon: Calendar,      description: t.cmd_desc_agenda },
     { id: 'clients',   label: t.nav_clients,   icon: Users,         description: t.cmd_desc_clients },
     { id: 'inbox',     label: t.inbox_title, icon: Inbox,    description: inboxDescription },
-    { id: 'plans',     label: t.nav_plans,     icon: ClipboardList, description: t.cmd_desc_plans },
+    { id: 'plans',     label: t.nav_plans,     icon: ClipboardList, description: t.cmd_desc_plans,   plansSection: 'plans' },
+    { id: 'foods',     label: t.plans_tab_foods,   icon: Apple,    description: t.cmd_desc_foods,   view: 'plans', plansSection: 'foods' },
+    { id: 'recipes',   label: t.plans_tab_recipes, icon: BookOpen, description: t.cmd_desc_recipes, view: 'plans', plansSection: 'recipes' },
     { id: 'invoices',  label: t.nav_invoices,  icon: Receipt,       description: t.cmd_desc_invoices },
     { id: 'services',  label: t.nav_services,  icon: Package,       description: t.cmd_desc_services },
     { id: 'settings',  label: t.nav_settings,  icon: Settings,      description: t.cmd_desc_settings },
@@ -176,7 +179,8 @@ export const CommandPalette = ({ open, onClose }) => {
         onClose();
         return;
       }
-      setCurrentView(item.id);
+      if (item.plansSection) setPlansSection(item.plansSection);
+      setCurrentView(item.view || item.id);
     } else if (item.type === 'client') {
       setSelectedClientId(item.id);
       setCurrentView('clients');

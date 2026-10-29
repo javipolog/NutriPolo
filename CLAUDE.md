@@ -54,10 +54,11 @@ nutripolo-app/
 │   │   ├── Invoices.jsx              # Llistat de factures
 │   │   ├── MeasurementChart.jsx      # Grafic d'evolucio de mesures
 │   │   ├── LoadErrorScreen.jsx       # Pantalla si el fitxer de dades no es pot llegir
-│   │   ├── NutritionPlanEditor.jsx   # Llista de plans + editor antic (per àpats)
+│   │   ├── NutritionPlanEditor.jsx   # Vista Planes (pestanyes Planes / Alimentos / Recetas) + editor antic (per àpats)
+│   │   ├── plan/FoodsView.jsx        # Pestanya Alimentos: catàleg d'aliments bàsics (Mercadona + nutrició)
 │   │   ├── plan/PlanificacionEditor.jsx # Editor a pantalla completa de la planificació setmanal
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
-│   │   ├── plan/WebRecipePicker.jsx  # Selector de receptes de nutripoloraquel.com
+│   │   ├── plan/WebRecipePicker.jsx  # Llista de receptes de nutripoloraquel.com (WebRecipeList: selector i pestanya Recetas)
 │   │   ├── plan/FoodCatalogPicker.jsx # Selector del catàleg d'aliments amb foto
 │   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
 │   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
@@ -80,6 +81,7 @@ nutripolo-app/
 │   │   ├── emailService.js           # Enviament d'emails via SMTP
 │   │   ├── googleCalendarService.js  # Sync bidireccional amb Google Calendar
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
+│   │   ├── foodCatalog.js            # Càrrega i filtres del catàleg d'aliments (pur, amb tests)
 │   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
 │   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
@@ -247,6 +249,13 @@ fn quit_app()                                         // el JS el crida despres 
 - El menú va en una pàgina horitzontal si el text hi cap a mida llegible; si no, es parteix en comidas i cenas
 - Receptes de la web (`webRecipes.js`): llista per l'API REST de WordPress (tipus `receta`) i ingredients/temps/etiquetes llegits de l'HTML de cada recepta (camps ACF que l'API no exposa). Memòria cau a `planLibrary.recetasWeb` (`{ items, syncedAt }`); es resincronitza en obrir l'editor si té més de 6 h i només es baixen les receptes amb `modified` nou. El servidor atén les peticions en sèrie (~6 s cadascuna): les pàgines es baixen d'una en una, la llista es mostra de seguida amb `ingredientes: null` per a les pendents, i una recepta pendent es baixa a l'acte si es tria (`loadWebRecipeNow`). Triar-ne una omple títol, enllaç (`receta`) i només els ingredients clau (`summarizeIngredients`: sense quantitats, rebost, espècies ni opcionals, i les verdures de sofrit en una línia), o la versió retocada si n'hi ha una a "Mis recetas"; també surten a l'autocompletat de títols (`buildDishIndex`, per darrere de "Mis recetas")
 - Les imatges de la web porten `referrerPolicy="no-referrer"`: el servidor talla la connexió si rep un Referer d'un altre lloc
+
+### Catàleg d'aliments (pestanya Alimentos de Planes)
+- Planes té tres pestanyes (`plansSection` al store, no es desa): Planes, Alimentos i Recetas (receptari de la web; en prémer una recepta s'obre al navegador). La paleta (Ctrl+K) porta directament a cada pestanya
+- El genera `node scripts/catalog/import-mercadona.mjs` a `public/catalog/` (`foods.json` + `images/<id>.jpg`, fora de git); s'empaqueta amb l'app i es llegeix amb `fetch('/catalog/foods.json')` (`foodCatalog.js`). No passa pel store ni per les còpies de seguretat
+- Llista curta a `scripts/catalog/basics.json`: ~290 bàsics, cadascun amb un producte de Mercadona (`id`), el nom genèric (`basico`) i, si cal, l'aliment genèric de BEDCA (`bedca`, `aprox`)
+- Nutrició per 100 g: Open Food Facts per EAN; si no hi és o no quadra (control Atwater), BEDCA. `nutricion.fuente` / `nutricion.control` (`ok`, `revisar`, `incompleto`, `sin_datos`)
+- Fotos: les originals de la botiga (600×600 sobre blanc), sense retocar
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)
