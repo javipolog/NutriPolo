@@ -58,6 +58,7 @@ nutripolo-app/
 │   │   ├── plan/PlanificacionEditor.jsx # Editor a pantalla completa de la planificació setmanal
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
 │   │   ├── plan/WebRecipePicker.jsx  # Selector de receptes de nutripoloraquel.com
+│   │   ├── plan/FoodCatalogPicker.jsx # Selector del catàleg d'aliments amb foto
 │   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
 │   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
@@ -79,6 +80,7 @@ nutripolo-app/
 │   │   ├── emailService.js           # Enviament d'emails via SMTP
 │   │   ├── googleCalendarService.js  # Sync bidireccional amb Google Calendar
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
+│   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
 │   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
@@ -108,6 +110,7 @@ nutripolo-app/
 │   └── tauri.conf.json               # Configuracio Tauri + CSP + bundle
 │
 ├── public/                           # Assets estatics
+│   ├── alimentos/                    # Fotos del catàleg d'aliments (480 px, fons blanc)
 │   ├── icon.svg                      # Icona SVG
 │   └── icon-nutripolo.svg            # Icona NutriPolo
 │
@@ -236,6 +239,7 @@ fn quit_app()                                         // el JS el crida despres 
 - Format nou: `nutritionPlans` amb `formato: 'planificacion'` (model a `planificacion.js`); els plans sense `formato` són els antics per àpats i conserven el seu editor i PDF
 - Seccions: `desayunos` / `mediaManana` / `merienda` (opcions), `cantidades`, `menu.dias[]` (7 dies × `comida`/`cena` × `a`/`b`, amb `receta` enllaçada al PDF) i `productos` (ids)
 - Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
+- Aliments genèrics (`genericFoods.js`): fotos reals de Pixabay a `public/alimentos/<id>.jpg`, totes retallades sobre blanc amb la mateixa mida i ombra (`scripts/food-catalog-photos.py`, cal Pillow). Un aliment de la planificació que es diu igual (nom o àlies, `findCatalogFood`) agafa la foto amb un clic; triar-la la copia a `planLibrary.productos`. Res d'imatges generades amb IA
 - Una planificació nova copia el contingut de l'última del client; els títols de "Mis recetas" i de la web autocompleten ingredients (`buildDishIndex`)
 - "Mis recetas": `planLibrary.recetas` (`{ id, titulo, alimentos, receta, nota, updatedAt }`, clau = `dishKey(titulo)`). En desar una planificació s'hi desen sols els plats i opcions amb títol i aliments nous o canviats des que es va obrir l'editor (`collectOwnRecipes` + `mergeOwnRecipes`), excepte receptes de la web sense retocar (així una recepta esborrada no torna); la migració v13 la sembra amb les planificacions existents. Es tria i s'esborra des de la pestanya del selector de receptes
 - PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt

@@ -45,3 +45,19 @@ export async function imageFileToDataUrl(file, maxSide = 480) {
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL('image/jpeg', 0.86);
 }
+
+/**
+ * Foto del catàleg d'aliments → data URL per copiar-la a la biblioteca de
+ * productes. Ja són JPEG de 480 px sobre blanc, no cal tornar-les a comprimir.
+ */
+export async function catalogPhotoDataUrl(path) {
+  const resp = await fetch(path);
+  if (!resp.ok) throw new Error(`catalog photo ${resp.status}`);
+  const blob = await resp.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
