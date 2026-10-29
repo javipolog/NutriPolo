@@ -4,7 +4,7 @@
  * PDF de la planificació setmanal (substitueix el disseny de Canva):
  * portada amb índex, opcions d'esmorzar / mig matí / berenar, guia de
  * quantitats, menú setmanal en horitzontal (amb enllaços a receptes) i
- * productes. Vectorial amb pdf-lib + fontkit (fonts OFL a public/fonts,
+ * productes. Vectorial amb pdf-lib + fontkit (Onest via pdfFonts.js,
  * icones de Lucide, ISC).
  */
 
@@ -14,6 +14,7 @@ import {
   normalizePlanificacion, visibleSections, linesOf, isDishEmpty, safeUrl,
   MENU_SLOTS, MENU_VARIANTS, OPTION_SECTIONS,
 } from './planificacion';
+import { ONEST_FILES, fetchFont } from './pdfFonts';
 
 // ── Pàgina ─────────────────────────────────────────────────────────────────
 const PORTRAIT = [595.28, 841.89];
@@ -45,11 +46,6 @@ const C = Object.fromEntries(Object.entries({
   white:      '#FFFFFF',
 }).map(([k, v]) => [k, hex(v)]));
 
-// Onest (OFL): títols en ExtraBold, subtítol de portada en Light
-const FONT_FILES = {
-  light: 'Onest-Light.ttf', reg: 'Onest-Regular.ttf', med: 'Onest-Medium.ttf',
-  semi: 'Onest-SemiBold.ttf', bold: 'Onest-Bold.ttf', display: 'Onest-ExtraBold.ttf',
-};
 
 const L = {
   planning: 'Planificación',
@@ -138,19 +134,11 @@ const GROUP_ICONS = [
 const groupIcon = (title) => (GROUP_ICONS.find(([re]) => re.test(fold(title))) || [null, 'leaf'])[1];
 
 // ── Fonts ──────────────────────────────────────────────────────────────────
-const fontCache = {};
-async function fetchFont(filename) {
-  if (fontCache[filename]) return fontCache[filename];
-  const resp = await fetch(`/fonts/${filename}`);
-  if (!resp.ok) throw new Error(`Font not found: ${filename}`);
-  fontCache[filename] = new Uint8Array(await resp.arrayBuffer());
-  return fontCache[filename];
-}
-
+// Onest: títols en ExtraBold, subtítol de portada en Light
 async function embedFonts(doc, loadFont) {
   try {
     doc.registerFontkit(fontkit);
-    const pairs = await Promise.all(Object.entries(FONT_FILES).map(async ([k, file]) =>
+    const pairs = await Promise.all(Object.entries(ONEST_FILES).map(async ([k, file]) =>
       [k, await doc.embedFont(await loadFont(file), { subset: true })]));
     return Object.fromEntries(pairs);
   } catch (err) {

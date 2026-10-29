@@ -20,7 +20,7 @@
   --text: #1C1B18;
   --text-secondary: #65635B;
   --text-muted: #75726A;
-  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-ui: 'Onest', system-ui, sans-serif;
   color-scheme: light;
   --card: 255 255 255;
   --sage-50: 250 249 246;
@@ -108,7 +108,7 @@ html,
 body,
 #root {
   height: 100%;
-  font-family: var(--font-ui, 'Inter', system-ui, sans-serif);
+  font-family: var(--font-ui, 'Onest', system-ui, sans-serif);
   background-color: var(--bg);
   color: var(--text);
 }
@@ -144,17 +144,17 @@ body,
 
 [data-theme="dark"] .shadow-sidebar { box-shadow: 1px 0 0 0 rgb(var(--sage-300)); }
 
-/* Les tres famílies són configurables a Settings (--font-ui, --font-heading,
-   --font-mono, definides a App.jsx); els valors per defecte coincideixen amb
-   tailwind.config.js */
+/* Rols tipogràfics (--font-ui, --font-heading, --font-mono, definits a App.jsx
+   des de config); per defecte tots són Onest, com a tailwind.config.js */
 .font-sans {
-  font-family: var(--font-ui, 'Inter', system-ui, sans-serif);
+  font-family: var(--font-ui, 'Onest', system-ui, sans-serif);
 }
 .font-serif {
-  font-family: var(--font-heading, 'Playfair Display', Georgia, ui-serif, serif);
+  font-family: var(--font-heading, 'Onest', system-ui, sans-serif);
 }
 .font-mono {
-  font-family: var(--font-mono, 'JetBrains Mono', monospace);
+  font-family: var(--font-mono, 'Onest', system-ui, sans-serif);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ============================================

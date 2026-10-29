@@ -9,9 +9,10 @@ export default {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-        serif: ['"Playfair Display"', 'Georgia', 'ui-serif', 'serif'],
-        mono: ['"JetBrains Mono"', 'monospace'],
+        // Onest a tot arreu; serif/mono es mantenen com a rols (títols, codis)
+        sans: ['Onest', 'system-ui', 'sans-serif'],
+        serif: ['Onest', 'system-ui', 'sans-serif'],
+        mono: ['Onest', 'system-ui', 'sans-serif'],
       },
       colors: {
         // Accent; channels defined in styles.css (light + dark)

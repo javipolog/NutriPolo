@@ -260,7 +260,7 @@ export const EMPTY_PLAN_LIBRARY = { productos: [] };
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 11;
+const STORE_VERSION = 12;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -275,7 +275,6 @@ export const DEFAULT_INVOICE_DESIGN = {
     muted:       '#65635B',  // labels
     cardBg:      '#FAFAF8',  // filas alternas tabla
   },
-  fontFamily: 'worksans',    // 'worksans' | 'roboto' | 'helvetica'
   logo: null,                // { data: 'data:image/...;base64,...', type: 'png'|'jpg', width, height } | null
   showTagline: true,
   taglineText: 'Nutrición Clínica',
@@ -289,6 +288,16 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 12 && s.config) {
+    // v11 → v12: Onest a tota l'app (UI i PDFs). Les famílies no es poden
+    // triar enlloc, així que es reescriuen.
+    const { fontFamily, ...invoiceDesign } = s.config.invoiceDesign || {};
+    s.config = {
+      ...s.config,
+      appFont: 'Onest', appFontHeading: 'Onest', appFontMono: 'Onest',
+      ...(s.config.invoiceDesign ? { invoiceDesign } : {}),
+    };
+  }
   if (version < 11) {
     // v10 → v11: appointment reminders. The old WhatsApp stamp becomes a
     // reminder record (config.reminders defaults arrive via the config merge).
@@ -811,9 +820,9 @@ const useStore = create(
         locations: DEFAULT_LOCATIONS,
         consultationTypes: ['Primera visita', 'Seguimiento', 'Revisión', 'Urgencia'],
         defaultConsultationDuration: 45,
-        appFont: 'Inter',
-        appFontHeading: 'Playfair Display',
-        appFontMono: 'JetBrains Mono',
+        appFont: 'Onest',
+        appFontHeading: 'Onest',
+        appFontMono: 'Onest',
         appTheme: 'auto',
         appLang: 'es',
         invoiceDesign: DEFAULT_INVOICE_DESIGN,
