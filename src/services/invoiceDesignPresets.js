@@ -1,6 +1,6 @@
 /**
  * invoiceDesignPresets.js — NutriPolo
- * Presets de color, opciones de fuente y validacion para el diseno de facturas/planes.
+ * Presets de color y validacion para el diseno de facturas/planes (fuente: Onest).
  */
 
 import { DEFAULT_INVOICE_DESIGN } from '../stores/store';
@@ -52,13 +52,6 @@ export const PRESETS = {
   },
 };
 
-// ── Font options ────────────────────────────────────────────
-export const FONT_OPTIONS = [
-  { id: 'worksans',   label: 'Work Sans' },
-  { id: 'roboto',     label: 'Roboto' },
-  { id: 'helvetica',  label: 'Helvetica (Estandar)' },
-];
-
 // ── Helpers ─────────────────────────────────────────────────
 export function getPresetColors(presetId) {
   return PRESETS[presetId]?.colors ?? PRESETS.terra.colors;
@@ -70,7 +63,6 @@ export function validateDesign(design) {
   return {
     preset:      design.preset || base.preset,
     colors:      { ...base.colors, ...(design.colors || {}) },
-    fontFamily:  design.fontFamily || base.fontFamily,
     logo:        design.logo && design.logo.data ? design.logo : null,
     showTagline: typeof design.showTagline === 'boolean' ? design.showTagline : base.showTagline,
     taglineText: design.taglineText || base.taglineText,

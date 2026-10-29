@@ -1,12 +1,14 @@
 /**
  * pdfPlanGenerator.js — NutriPolo
  * =================================
- * Genera el PDF d'un pla nutricional amb pdf-lib.
+ * Genera el PDF d'un pla nutricional amb pdf-lib (Onest via pdfFonts.js).
  * Retorna Uint8Array amb els bytes del PDF.
  */
 
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import { validateDesign } from './invoiceDesignPresets';
+import { ONEST_FILES, fetchFont } from './pdfFonts';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const A4_W = 595.28;
@@ -54,9 +56,18 @@ export async function generateNutritionPlanPDF(plan, client, config) {
   const design = validateDesign(config?.invoiceDesign);
   const doc = await PDFDocument.create();
 
-  // Embed standard fonts (no fetch needed)
-  const fontReg  = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  // Onest; si no es pot carregar, Helvetica
+  let fontReg;
+  let fontBold;
+  try {
+    doc.registerFontkit(fontkit);
+    [fontReg, fontBold] = await Promise.all(['reg', 'bold'].map(async (k) =>
+      doc.embedFont(await fetchFont(ONEST_FILES[k]), { subset: true })));
+  } catch (err) {
+    if (import.meta.env.DEV) console.warn('Plan PDF: Onest unavailable, using Helvetica:', err);
+    fontReg = await doc.embedFont(StandardFonts.Helvetica);
+    fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  }
 
   // Embed logo image if provided
   let logoImage = null;
