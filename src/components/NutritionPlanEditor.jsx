@@ -9,6 +9,9 @@ import useStore, { formatDate, todayISO, generateId, errMsg } from '../stores/st
 import { useT, plural } from '../i18n';
 import { SendEmailModal } from './SendEmailModal';
 import { PlanificacionEditor } from './plan/PlanificacionEditor';
+import { FoodsView } from './plan/FoodsView';
+import { WebRecipeList } from './plan/WebRecipePicker';
+import { open as openUrl } from '@tauri-apps/api/shell';
 import { PLAN_FORMAT, planificacionStats } from '../services/planificacion';
 import { generatePlanPdf, planPdfFileName } from '../services/planPdf';
 
@@ -407,9 +410,9 @@ const PLAN_STATUS_LABEL = {
 };
 
 // ─────────────────────────────────────────────────────────────
-// Main view — plan list
+// Plans tab — plan list
 // ─────────────────────────────────────────────────────────────
-export const NutritionPlanEditor = () => {
+const PlansList = () => {
   const nutritionPlans = useStore(s => s.nutritionPlans);
   const clients = useStore(s => s.clients);
   const deleteNutritionPlan = useStore(s => s.deleteNutritionPlan);
@@ -438,25 +441,22 @@ export const NutritionPlanEditor = () => {
   };
 
   return (
-    <div className="space-y-5 animate-fadeIn">
-      <div className="flex items-center justify-between">
-        <h1 className="font-serif text-title text-sage-900">{t.plans_title}</h1>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SegmentedControl
+          value={filterEstado}
+          onChange={setFilterEstado}
+          options={[
+            { value: 'all',        label: t.all },
+            { value: 'borrador',   label: t.plan_status_draft },
+            { value: 'activo',     label: t.plan_status_active },
+            { value: 'completado', label: t.plan_status_completed },
+          ]}
+        />
         <Button variant="primary" icon={Plus} onClick={() => { setEditPlan(null); setBasePlan(null); setShowModal(true); }}>
           {t.new_plan}
         </Button>
       </div>
-
-      {/* Filters */}
-      <SegmentedControl
-        value={filterEstado}
-        onChange={setFilterEstado}
-        options={[
-          { value: 'all',        label: t.all },
-          { value: 'borrador',   label: t.plan_status_draft },
-          { value: 'activo',     label: t.plan_status_active },
-          { value: 'completado', label: t.plan_status_completed },
-        ]}
-      />
 
       <p className="text-xs text-sage-500">{filtered.length} plan{filtered.length !== 1 ? 'es' : ''}</p>
 
@@ -615,6 +615,74 @@ export const NutritionPlanEditor = () => {
         />
       )}
       {ConfirmDialog}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Main view — Planes, with the food catalogue and recipes as tabs
+// ─────────────────────────────────────────────────────────────
+const SECTIONS = [
+  { id: 'plans',   label: 'plans_tab_plans' },
+  { id: 'foods',   label: 'plans_tab_foods' },
+  { id: 'recipes', label: 'plans_tab_recipes' },
+];
+
+const RecipesLibrary = () => {
+  const t = useT();
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-sage-500">{t.plans_recipes_hint}</p>
+      <WebRecipeList needsDetail={false} onPick={r => openUrl(r.url).catch(() => {})} />
+    </div>
+  );
+};
+
+export const NutritionPlanEditor = () => {
+  const t = useT();
+  const section = useStore(s => s.plansSection);
+  const setSection = useStore(s => s.setPlansSection);
+
+  return (
+    <div className="space-y-5 animate-fadeIn">
+      <h1 className="font-serif text-title text-sage-900">{t.plans_title}</h1>
+
+      <div
+        className="flex gap-1 border-b border-sage-200"
+        role="tablist"
+        aria-label={t.plans_title}
+        onKeyDown={e => {
+          // Arrow keys move between tabs (WAI-ARIA tabs pattern)
+          if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+          const i = SECTIONS.findIndex(s => s.id === section);
+          const next = SECTIONS[(i + (e.key === 'ArrowRight' ? 1 : SECTIONS.length - 1)) % SECTIONS.length];
+          setSection(next.id);
+          document.getElementById(`plans-tab-${next.id}`)?.focus();
+        }}
+      >
+        {SECTIONS.map(s => (
+          <button
+            key={s.id}
+            id={`plans-tab-${s.id}`}
+            role="tab"
+            aria-selected={section === s.id}
+            aria-controls="plans-tabpanel"
+            tabIndex={section === s.id ? 0 : -1}
+            onClick={() => setSection(s.id)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              section === s.id
+                ? 'border-wellness-400 text-wellness-600'
+                : 'border-transparent text-sage-500 hover:text-sage-700'
+            }`}
+          >
+            {t[s.label]}
+          </button>
+        ))}
+      </div>
+
+      <div className="animate-fadeIn" id="plans-tabpanel" role="tabpanel" aria-labelledby={`plans-tab-${section}`}>
+        {section === 'foods' ? <FoodsView /> : section === 'recipes' ? <RecipesLibrary /> : <PlansList />}
+      </div>
     </div>
   );
 };

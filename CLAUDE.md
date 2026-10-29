@@ -54,10 +54,12 @@ nutripolo-app/
 │   │   ├── Invoices.jsx              # Llistat de factures
 │   │   ├── MeasurementChart.jsx      # Grafic d'evolucio de mesures
 │   │   ├── LoadErrorScreen.jsx       # Pantalla si el fitxer de dades no es pot llegir
-│   │   ├── NutritionPlanEditor.jsx   # Llista de plans + editor antic (per àpats)
+│   │   ├── NutritionPlanEditor.jsx   # Vista Planes (pestanyes Planes / Alimentos / Recetas) + editor antic (per àpats)
+│   │   ├── plan/FoodsView.jsx        # Pestanya Alimentos: catàleg d'aliments bàsics (Mercadona + nutrició)
 │   │   ├── plan/PlanificacionEditor.jsx # Editor a pantalla completa de la planificació setmanal
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
-│   │   ├── plan/WebRecipePicker.jsx  # Selector de receptes de nutripoloraquel.com
+│   │   ├── plan/WebRecipePicker.jsx  # Llista de receptes de nutripoloraquel.com (WebRecipeList: selector i pestanya Recetas)
+│   │   ├── plan/FoodCatalogPicker.jsx # Selector del catàleg d'aliments amb foto
 │   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
 │   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
@@ -79,6 +81,8 @@ nutripolo-app/
 │   │   ├── emailService.js           # Enviament d'emails via SMTP
 │   │   ├── googleCalendarService.js  # Sync bidireccional amb Google Calendar
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
+│   │   ├── foodCatalog.js            # Càrrega i filtres del catàleg d'aliments (pur, amb tests)
+│   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
 │   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
@@ -108,6 +112,7 @@ nutripolo-app/
 │   └── tauri.conf.json               # Configuracio Tauri + CSP + bundle
 │
 ├── public/                           # Assets estatics
+│   ├── alimentos/                    # Fotos del catàleg d'aliments (480 px, fons blanc)
 │   ├── icon.svg                      # Icona SVG
 │   └── icon-nutripolo.svg            # Icona NutriPolo
 │
@@ -236,6 +241,7 @@ fn quit_app()                                         // el JS el crida despres 
 - Format nou: `nutritionPlans` amb `formato: 'planificacion'` (model a `planificacion.js`); els plans sense `formato` són els antics per àpats i conserven el seu editor i PDF
 - Seccions: `desayunos` / `mediaManana` / `merienda` (opcions), `cantidades`, `menu.dias[]` (7 dies × `comida`/`cena` × `a`/`b`, amb `receta` enllaçada al PDF) i `productos` (ids)
 - Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
+- Secció Productos: un aliment de la planificació que es diu igual que un de la biblioteca d'aliments (`foodMatcher`: primer els genèrics, després el bàsic de Mercadona sense parèntesi) agafa la foto amb un clic; el botó "Biblioteca de alimentos" (`FoodCatalogPicker`) tria de tota la biblioteca. La foto es copia a `planLibrary.productos` (`foodPhotoDataUrl`)
 - Una planificació nova copia el contingut de l'última del client; els títols de "Mis recetas" i de la web autocompleten ingredients (`buildDishIndex`)
 - "Mis recetas": `planLibrary.recetas` (`{ id, titulo, alimentos, receta, nota, updatedAt }`, clau = `dishKey(titulo)`). En desar una planificació s'hi desen sols els plats i opcions amb títol i aliments nous o canviats des que es va obrir l'editor (`collectOwnRecipes` + `mergeOwnRecipes`), excepte receptes de la web sense retocar (així una recepta esborrada no torna); la migració v13 la sembra amb les planificacions existents. Es tria i s'esborra des de la pestanya del selector de receptes
 - PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt
@@ -243,6 +249,16 @@ fn quit_app()                                         // el JS el crida despres 
 - El menú va en una pàgina horitzontal si el text hi cap a mida llegible; si no, es parteix en comidas i cenas
 - Receptes de la web (`webRecipes.js`): llista per l'API REST de WordPress (tipus `receta`) i ingredients/temps/etiquetes llegits de l'HTML de cada recepta (camps ACF que l'API no exposa). Memòria cau a `planLibrary.recetasWeb` (`{ items, syncedAt }`); es resincronitza en obrir l'editor si té més de 6 h i només es baixen les receptes amb `modified` nou. El servidor atén les peticions en sèrie (~6 s cadascuna): les pàgines es baixen d'una en una, la llista es mostra de seguida amb `ingredientes: null` per a les pendents, i una recepta pendent es baixa a l'acte si es tria (`loadWebRecipeNow`). Triar-ne una omple títol, enllaç (`receta`) i només els ingredients clau (`summarizeIngredients`: sense quantitats, rebost, espècies ni opcionals, i les verdures de sofrit en una línia), o la versió retocada si n'hi ha una a "Mis recetas"; també surten a l'autocompletat de títols (`buildDishIndex`, per darrere de "Mis recetas")
 - Les imatges de la web porten `referrerPolicy="no-referrer"`: el servidor talla la connexió si rep un Referer d'un altre lloc
+
+### Catàleg d'aliments (pestanya Alimentos de Planes)
+- Planes té tres pestanyes (`plansSection` al store, no es desa): Planes, Alimentos i Recetas (receptari de la web; en prémer una recepta s'obre al navegador). La paleta (Ctrl+K) porta directament a cada pestanya
+- El genera `node scripts/catalog/import-mercadona.mjs` a `public/catalog/` (`foods.json` + `images/<id>.jpg`, fora de git); s'empaqueta amb l'app i es llegeix amb `fetch('/catalog/foods.json')` (`foodCatalog.js`). No passa pel store ni per les còpies de seguretat
+- Llista curta a `scripts/catalog/basics.json`: ~290 bàsics, cadascun amb un producte de Mercadona (`id`), el nom genèric (`basico`) i, si cal, l'aliment genèric de BEDCA (`bedca`, `aprox`)
+- Nutrició per 100 g: Open Food Facts per EAN; si no hi és o no quadra (control Atwater), BEDCA. `nutricion.fuente` / `nutricion.control` (`ok`, `revisar`, `incompleto`, `sin_datos`)
+- Fotos: les originals de la botiga (600×600 sobre blanc), sense retocar
+- Una sola biblioteca (`buildFoodLibrary` / `loadFoodLibrary`, hook `useFoodLibrary`): els bàsics de Mercadona i els aliments genèrics de `genericFoods.js`, que van primer dins de cada categoria (les mateixes que Mercadona) i prenen la nutrició del producte equivalent (`mercadona` = sourceId, `nutricion.equivalente`). Si Mercadona no s'ha generat, només hi ha els genèrics
+- Canvis propis: des del detall d'un aliment es pot canviar la foto i escriure els valors per 100 g. Es guarden a `planLibrary.alimentos` (`{ [foodId]: { imagen?, por100g?, updatedAt } }`, `setFoodEdit` / `clearFoodEdit`), entren a les còpies de seguretat i s'apliquen amb `applyFoodEdits` (`useFoodLibrary`); el catàleg no es toca i es pot tornar a la foto o als valors originals. Els productes de la planificació també poden canviar de foto (`updatePlanProduct`)
+- Genèrics: fotos reals de Pixabay a `public/alimentos/<id>.jpg` (sí que van a git), totes retallades sobre blanc amb la mateixa mida i ombra (`scripts/food-catalog-photos.py`, cal Pillow). Res d'imatges generades amb IA
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)
