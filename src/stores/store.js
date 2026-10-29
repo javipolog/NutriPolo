@@ -3,6 +3,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
+import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes } from '../services/planificacion.js';
 
 // ============================================
 // TAURI STORAGE — Write queue amb debounce
@@ -255,12 +256,12 @@ const DEFAULT_SERVICES = [
   { id: 'svc5', nombre: 'Plan online',         descripcion: 'Seguimiento nutricional online mensual',  precio: 35,  numSesiones: 1,  duracion: 30, activo: true },
 ];
 
-export const EMPTY_PLAN_LIBRARY = { productos: [] };
+export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [] };
 
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 12;
+const STORE_VERSION = 13;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -288,6 +289,16 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 13 && Array.isArray(s.nutritionPlans)) {
+    // v12 → v13: "Mis recetas". Es sembra amb els plats de les planificacions
+    // existents (de la més antiga a la més nova, perquè mani l'última versió).
+    const web = s.planLibrary?.recetasWeb?.items || [];
+    const recetas = s.nutritionPlans
+      .filter(p => p.formato === PLAN_FORMAT)
+      .sort((a, b) => (a.fechaInicio || '').localeCompare(b.fechaInicio || '') || (Number(a.numero) || 0) - (Number(b.numero) || 0))
+      .reduce((list, p) => mergeOwnRecipes(list, collectOwnRecipes(p, web)), s.planLibrary?.recetas || []);
+    s.planLibrary = { productos: [], ...(s.planLibrary || {}), recetas };
+  }
   if (version < 12 && s.config) {
     // v11 → v12: Onest a tota l'app (UI i PDFs). Les famílies no es poden
     // triar enlloc, així que es reescriuen.
@@ -1397,6 +1408,15 @@ const useStore = create(
       deletePlanProduct: (id) => set(s => ({
         planLibrary: { ...s.planLibrary, productos: s.planLibrary.productos.filter(p => p.id !== id) },
       })),
+      // "Mis recetas": plats i opcions propis, desats en desar una planificació
+      rememberRecipes: (entries) => {
+        const prev = get().planLibrary.recetas || [];
+        const recetas = mergeOwnRecipes(prev, entries);
+        if (recetas !== prev) set(s => ({ planLibrary: { ...s.planLibrary, recetas } }));
+      },
+      deleteOwnRecipe: (id) => set(s => ({
+        planLibrary: { ...s.planLibrary, recetas: (s.planLibrary.recetas || []).filter(r => r.id !== id) },
+      })),
       // Memòria cau del receptari de la web (services/webRecipes.js)
       setWebRecipes: ({ items, syncedAt }) => set(s => ({
         planLibrary: { ...s.planLibrary, recetasWeb: { items, syncedAt } },
@@ -1894,6 +1914,7 @@ const useStore = create(
               planLibrary: {
                 ...s.planLibrary,
                 productos: [...s.planLibrary.productos, ...(d.planLibrary?.productos || []).filter(p => !s.planLibrary.productos.find(x => x.id === p.id))],
+                recetas: [...(s.planLibrary.recetas || []), ...(d.planLibrary?.recetas || []).filter(r => !(s.planLibrary.recetas || []).find(x => x.id === r.id))],
               },
             }));
           }

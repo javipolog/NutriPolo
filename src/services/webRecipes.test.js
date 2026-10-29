@@ -177,8 +177,16 @@ describe('syncWebRecipes', () => {
 });
 
 describe('dishFromWebRecipe', () => {
-  it('builds a menu dish linked to the recipe', () => {
-    expect(dishFromWebRecipe({ titulo: 'Tacos', ingredientes: ['Maíz', 'Pollo'], url: 'https://nutripoloraquel.com/receta/tacos/' }))
-      .toEqual({ titulo: 'Tacos', alimentos: 'Maíz\nPollo', receta: 'https://nutripoloraquel.com/receta/tacos/' });
+  const tacos = { titulo: 'Tacos', ingredientes: ['2 tortillas de maíz', '100 g de pollo', 'Sal al gusto'], url: 'https://nutripoloraquel.com/receta/tacos/' };
+
+  it('builds a menu dish linked to the recipe with only the key ingredients', () => {
+    expect(dishFromWebRecipe(tacos))
+      .toEqual({ titulo: 'Tacos', alimentos: 'Tortillas de maíz\nPollo', receta: 'https://nutripoloraquel.com/receta/tacos/' });
+  });
+
+  it('prefers the version kept in "Mis recetas" (by link or title)', () => {
+    expect(dishFromWebRecipe(tacos, [{ titulo: 'Otro nombre', alimentos: 'Tortillas\nPollo\nAguacate', receta: tacos.url }]).alimentos)
+      .toBe('Tortillas\nPollo\nAguacate');
+    expect(dishFromWebRecipe(tacos, [{ titulo: 'tacos', alimentos: 'Maíz', receta: '' }]).alimentos).toBe('Maíz');
   });
 });

@@ -211,34 +211,119 @@ export function safeUrl(raw) {
   }
 }
 
-const dishKey = (title) => String(title || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+const fold = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+/** Clau d'un plat per títol (sense majúscules, accents ni espais de més). */
+export const dishKey = (title) => fold(String(title || '').trim()).replace(/\s+/g, ' ');
+
+// ── Resum d'ingredients d'una recepta ────────────────────────
+// Al menú només hi va el que és clau i sense quantitats (com es feia a
+// Canva: "Sepia / Patata / Cebolla, tomate"); la recepta completa és a l'enllaç.
+const NUM = '(?:\\d+\\s*\\/\\s*\\d+|\\d+(?:[.,]\\d+)?\\s*[½¼¾⅓⅔]?|[½¼¾⅓⅔]|(?:unas?|unos?|medi[oa]s?)\\b)(?:\\s*(?:-|a|y)\\s*(?:\\d+(?:[.,]\\d+)?|[½¼¾]))?';
+const UNIT = '(?:k?g|gr|gramos?|kilos?|m?l|cl|litros?|cucharad(?:it)?as?|cdas?|cdtas?|tazas?|vas(?:it)?os?|pizcas?|dientes?|hojas?|latas?|botes?|tarros?|puñados?|lonchas?|rodajas?|ramitas?|ramas?|chorr(?:it)?os?|sobres?|filetes?|rebanadas?|unidad(?:es)?|piezas?|trozos?|paquetes?|bolsas?|nidos?|lomos?|medidas?(?: de yogur)?)\\b\\.?(?:\\s+(?:soperas?|de postre|pequeñas?|grandes?|colmadas?|rasas?))?(?:\\s+aprox\\.?)?';
+const QTY_RE = new RegExp(`^(?:(?:${NUM})\\s*(?:${UNIT})?|(?:${UNIT}))\\s*(?:del?\\s+)?`, 'i');
+const PREP_RE = /\s+(?:para|por persona|al gusto|a gusto|cortad[oa]s?|troceado?s?|pelad[oa]s?|lavad[oa]s?|laminad[oa]s?|en (?:dados|rodajas|tiras|láminas|trozos|juliana))\b.*$/i;
+const SIZE_RE = /\s+(?:grandes?|median[oa]s?|pequeñ[oa]s?|calientes?|frí[oa]s?|templad[oa]s?|madur[oa]s?)(?=\s|$)/gi;
+// Bàsics de rebost: no aporten res al menú
+const PANTRY_RE = /^(?:sal|pimienta|a?ceite|aove|agua|caldo|vino|vinagre|harina(?! de)|maicena|levadura|bicarbonato|azucar|edulcorante|ajos?|especias|hierbas|pimenton|comino|oregano|tomillo|laurel|romero|perejil|cilantro|albahaca|eneldo|curcuma|canela|nuez moscada|azafran|curry|cayena|guindilla|(?:cebolla|jengibre) en polvo|esencia|extracto)\b/;
+const SOFRITO_RE = /^(?:cebolla|cebolleta|puerro|zanahoria|pimiento|tomate|calabacin|berenjena|champinon|seta|apio)/;
+
+/** "800 g de ternera para guisar, cortada en dados" → "ternera". */
+function ingredientName(line) {
+  let s = String(line || '').replace(/\([^)]*\)/g, ' ').split(',')[0];
+  s = s.split(/\s+o\s+(?=[\d½¼¾])/)[0];
+  s = s.trim().replace(QTY_RE, '').replace(PREP_RE, '').replace(SIZE_RE, '');
+  return s.replace(/\s+/g, ' ').replace(/[\s–—-]+$/, '').trim();
+}
+
+const capitalize = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /**
- * Plats i opcions ja fets servir, per títol, per autocompletar-ne els
- * ingredients. Mana la planificació més recent; després, les receptes de la web.
- * @returns {{ titles: string[], find(title): { alimentos, receta? } | null }}
+ * Ingredients clau d'una recepta per al menú: sense quantitats, sense
+ * bàsics de rebost ni opcionals, i les verdures de sofrit en una sola línia.
  */
-export function buildDishIndex(plans, excludeId, webRecipes = []) {
+export function summarizeIngredients(lines, max = 6) {
+  const all = (lines || []).filter(l => !/:\s*$/.test(String(l))).map(l => ({ raw: fold(l), name: ingredientName(l) })).filter(x => x.name);
+  const seen = new Set();
+  const out = [];
+  let sofrito = null;
+  for (const { raw, name } of all) {
+    const k = fold(name);
+    if (seen.has(k) || /opcional|al gusto|a gusto/.test(raw) || PANTRY_RE.test(k)) continue;
+    seen.add(k);
+    if (SOFRITO_RE.test(k)) {
+      if (!sofrito) { sofrito = []; out.push(sofrito); }
+      sofrito.push(name);
+    } else {
+      out.push(name);
+    }
+  }
+  const result = out.map(x => (Array.isArray(x) ? x.map((n, i) => (i ? n.charAt(0).toLowerCase() + n.slice(1) : n)).join(', ') : x)).map(capitalize);
+  return result.length ? result.slice(0, max) : all.slice(0, 3).map(x => capitalize(x.name));
+}
+
+/** Ingredients resumits d'una recepta de la web, un per línia. */
+export const webRecipeFoods = (r) => summarizeIngredients(r.ingredientes || []).join('\n');
+
+const sameFoods = (a, b) => linesOf(a).join('\n') === linesOf(b).join('\n');
+
+/**
+ * Plats i opcions d'una planificació per desar a "Mis recetas": els que
+ * tenen títol i aliments. Una recepta de la web sense retocar (resum o llista
+ * completa) no s'hi desa, perquè ja surt a la pestanya de la web.
+ * @returns {{ titulo, alimentos, receta?, nota? }[]}
+ */
+export function collectOwnRecipes(plan, webRecipes = []) {
+  const byTitle = new Map(webRecipes.map(r => [dishKey(r.titulo), r]));
+  const byUrl = new Map(webRecipes.filter(r => r.url).map(r => [r.url, r]));
+  const out = [];
+  const add = (d, extra) => {
+    const titulo = String(d?.titulo || '').trim();
+    if (!titulo || !linesOf(d.alimentos).length) return;
+    const web = byTitle.get(dishKey(titulo)) || byUrl.get(String(d.receta || '').trim());
+    if (web && (sameFoods(d.alimentos, webRecipeFoods(web)) || sameFoods(d.alimentos, (web.ingredientes || []).join('\n')))) return;
+    out.push({ titulo, alimentos: d.alimentos, ...extra });
+  };
+  for (const d of plan?.menu?.dias || []) {
+    for (const s of MENU_SLOTS) for (const v of MENU_VARIANTS) {
+      const dish = d[s]?.[v];
+      add(dish, { receta: String(dish?.receta || '').trim() });
+    }
+  }
+  for (const k of OPTION_SECTIONS) for (const o of plan?.[k]?.opciones || []) add(o, { nota: o.nota || '' });
+  return out;
+}
+
+/**
+ * Afegeix o actualitza receptes a "Mis recetas" (per títol, l'última mana).
+ * Retorna la mateixa llista si no canvia res.
+ */
+export function mergeOwnRecipes(list = [], entries = [], now = new Date().toISOString()) {
+  let out = list;
+  for (const e of entries) {
+    const i = out.findIndex(r => dishKey(r.titulo) === dishKey(e.titulo));
+    if (i < 0) {
+      out = [...out, { id: uid(), receta: '', nota: '', ...e, updatedAt: now }];
+    } else if (Object.keys(e).some(k => out[i][k] !== e[k])) {
+      out = out.map((r, j) => (j === i ? { ...r, ...e, updatedAt: now } : r));
+    }
+  }
+  return out;
+}
+
+/**
+ * Plats i opcions coneguts, per títol, per autocompletar-ne els ingredients.
+ * Manen "Mis recetas" (`planLibrary.recetas`); després, les receptes de la web.
+ * @returns {{ titles: string[], find(title): { alimentos, receta?, nota?, web? } | null }}
+ */
+export function buildDishIndex(ownRecipes = [], webRecipes = []) {
   const map = new Map();
   const add = (titulo, entry) => {
     const k = dishKey(titulo);
     if (k && linesOf(entry.alimentos).length && !map.has(k)) map.set(k, { titulo: titulo.trim(), ...entry });
   };
-  const sorted = (plans || [])
-    .filter(p => p.formato === PLAN_FORMAT && p.id !== excludeId)
-    .sort((a, b) => (b.fechaInicio || '').localeCompare(a.fechaInicio || '') || (Number(b.numero) || 0) - (Number(a.numero) || 0));
-  for (const p of sorted) {
-    for (const d of p.menu?.dias || []) {
-      for (const s of MENU_SLOTS) for (const v of MENU_VARIANTS) {
-        const dish = d[s]?.[v];
-        if (dish?.titulo) add(dish.titulo, { alimentos: dish.alimentos || '', receta: dish.receta || '' });
-      }
-    }
-    for (const k of OPTION_SECTIONS) {
-      for (const o of p[k]?.opciones || []) if (o.titulo) add(o.titulo, { alimentos: o.alimentos || '', nota: o.nota || '' });
-    }
-  }
-  for (const r of webRecipes) add(r.titulo, { alimentos: (r.ingredientes || []).join('\n'), receta: r.url || '', web: true });
+  for (const r of ownRecipes) add(r.titulo, { alimentos: r.alimentos || '', receta: r.receta || '', nota: r.nota || '' });
+  for (const r of webRecipes) add(r.titulo, { alimentos: webRecipeFoods(r), receta: r.url || '', web: true });
   return {
     titles: [...map.values()].map(e => e.titulo).sort((a, b) => a.localeCompare(b)),
     find: (title) => map.get(dishKey(title)) || null,
