@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PLAN_FORMAT, WEEK_DAYS, linesOf, nextPlanNumber, latestPlanificacion, createPlanificacion,
   copyContent, normalizeWeek, visibleSections, planificacionStats, isDishEmpty, safeUrl, buildDishIndex,
+  summarizeIngredients, collectOwnRecipes, mergeOwnRecipes,
 } from './planificacion';
 import { samplePlanificacion } from './planificacion.fixture';
 
@@ -106,33 +107,87 @@ describe('safeUrl', () => {
   });
 });
 
+describe('summarizeIngredients', () => {
+  // Recepta real de nutripoloraquel.com
+  const estofado = [
+    '800 g de ternera para guisar, cortada en dados', '2 zanahorias, en rodajas', '1 cebolla grande, picada',
+    '2 dientes de ajo, picados', '2 cucharadas de tomate concentrado o 150 g de tomate triturado', '250 ml de caldo de carne',
+    '100 ml de vino tinto (opcional)', '2 cucharadas de aceite de oliva virgen extra', '1 cucharada de harina (opcional, para espesar)',
+    '1 hoja de laurel', '1 cucharadita de pimentón dulce', '½ cucharadita de tomillo seco', 'Sal y pimienta negra al gusto',
+    '600g patatas', '100ml leche semidesnatada caliente',
+  ];
+
+  it('keeps only the key ingredients, without quantities, and groups the sofrito', () => {
+    expect(summarizeIngredients(estofado)).toEqual(['Ternera', 'Zanahorias, cebolla, tomate concentrado', 'Patatas', 'Leche semidesnatada']);
+  });
+
+  it('strips units, approximations and serving notes', () => {
+    expect(summarizeIngredients(['15 unidades aprox. de gambas pequeñas peladas', '1/4 bolsa de espinacas', '1 lomo de salmón', '1/2 berenjena por persona']))
+      .toEqual(['Gambas', 'Espinacas', 'Salmón', 'Berenjena']);
+    expect(summarizeIngredients(['100 gr carne picada de ternera', '100g harina de avena', '1 cucharada cebolla en polvo']))
+      .toEqual(['Carne picada de ternera', 'Harina de avena']);
+  });
+
+  it('caps the length and falls back to the first lines when everything is pantry', () => {
+    expect(summarizeIngredients(['Pollo', 'Arroz', 'Pepino', 'Mango', 'Aguacate', 'Queso feta', 'Canónigos'])).toHaveLength(6);
+    expect(summarizeIngredients(['Sal', '1 cucharada de aceite'])).toEqual(['Sal', 'Aceite']);
+    expect(summarizeIngredients([])).toEqual([]);
+  });
+});
+
 describe('buildDishIndex', () => {
-  const older = { ...samplePlanificacion(), id: 'old', fechaInicio: '2026-01-01' };
-  const newer = { ...samplePlanificacion(), id: 'new', fechaInicio: '2026-06-01' };
-  newer.menu.dias[0].comida.a = { titulo: 'Rostidera de sepia + ensalada', alimentos: 'Sepia\nPatata nueva', receta: '' };
+  const own = [
+    { id: 'r1', titulo: 'Rostidera de sepia + ensalada', alimentos: 'Sepia\nPatata nueva', receta: '', nota: '' },
+    { id: 'r2', titulo: 'Pieza de fruta', alimentos: 'Plátano, manzana…', receta: '', nota: 'De temporada' },
+    { id: 'r3', titulo: 'Vacía', alimentos: '', receta: '', nota: '' },
+  ];
 
-  it('finds dishes and options by title, ignoring case and accents, newest first', () => {
-    const idx = buildDishIndex([older, newer]);
+  it('finds own recipes by title, ignoring case and accents', () => {
+    const idx = buildDishIndex(own);
     expect(idx.find('rostidera de SEPIA + ensalada').alimentos).toBe('Sepia\nPatata nueva');
-    expect(idx.find('Lentejas con jamon y verduras').alimentos).toContain('Lentejas');
-    expect(idx.find('Pieza de fruta').alimentos).toContain('plátano');
+    expect(idx.find('pieza de fruta')).toMatchObject({ nota: 'De temporada' });
     expect(idx.find('Nada')).toBeNull();
+    expect(idx.titles).not.toContain('Vacía');
   });
 
-  it('skips the plan being edited, legacy plans and dishes without ingredients', () => {
-    const idx = buildDishIndex([newer, { id: 'legacy', comidas: [] }], 'new');
-    expect(idx.titles).toEqual([]);
-    expect(buildDishIndex([older]).titles).not.toContain('LIBRE CON MODERACIÓN (elegir 1 comida)');
-  });
-
-  it('adds website recipes after the plans, which keep priority', () => {
+  it('adds website recipes, summarised, after the own ones, which keep priority', () => {
     const web = [
-      { titulo: 'Tortitas de avena', ingredientes: ['1 huevo', '200 g avena'], url: 'https://nutripoloraquel.com/receta/tortitas-de-avena/' },
+      { titulo: 'Tortitas de avena', ingredientes: ['1 huevo', '200 g avena', '1 pizca de sal'], url: 'https://nutripoloraquel.com/receta/tortitas-de-avena/' },
       { titulo: 'Rostidera de sepia + ensalada', ingredientes: ['Sepia de la web'], url: 'https://nutripoloraquel.com/receta/sepia/' },
     ];
-    const idx = buildDishIndex([newer], undefined, web);
-    expect(idx.find('tortitas de avena')).toMatchObject({ alimentos: '1 huevo\n200 g avena', receta: web[0].url, web: true });
+    const idx = buildDishIndex(own, web);
+    expect(idx.find('tortitas de avena')).toMatchObject({ alimentos: 'Huevo\nAvena', receta: web[0].url, web: true });
     expect(idx.find('Rostidera de sepia + ensalada').alimentos).toBe('Sepia\nPatata nueva');
     expect(idx.titles).toContain('Tortitas de avena');
+  });
+});
+
+describe('own recipes', () => {
+  const web = [{ titulo: 'Estofado de ternera', ingredientes: ['800 g de ternera', '600g patatas'], url: 'https://nutripoloraquel.com/receta/estofado-de-ternera/' }];
+
+  it('collects dishes and options with a title and foods, skipping untouched website recipes', () => {
+    const p = samplePlanificacion();
+    p.menu.dias[0].comida.a = { titulo: 'Estofado de ternera', alimentos: 'Ternera\nPatatas', receta: web[0].url };
+    p.menu.dias[0].comida.b = { titulo: 'Estofado', alimentos: '800 g de ternera\n600g patatas', receta: web[0].url };
+    p.menu.dias[1].comida.a = { titulo: 'Estofado de ternera ', alimentos: 'Ternera\nPatatas\nGuisantes', receta: web[0].url };
+    const got = collectOwnRecipes(p, web);
+    const titles = got.map(r => r.titulo);
+    expect(titles).toContain('Ensalada de jamón');
+    expect(titles).toContain('Pieza de fruta');
+    expect(titles).not.toContain('Estofado');
+    expect(titles).not.toContain('LIBRE CON MODERACIÓN (elegir 1 comida)');
+    // El resum de la web sense tocar no es desa; el retocat sí
+    expect(got.filter(r => r.titulo === 'Estofado de ternera')).toEqual([
+      { titulo: 'Estofado de ternera', alimentos: 'Ternera\nPatatas\nGuisantes', receta: web[0].url },
+    ]);
+    expect(got.find(r => r.titulo === 'Pieza de fruta')).toMatchObject({ nota: '' });
+  });
+
+  it('upserts by title and keeps the same list when nothing changes', () => {
+    const list = mergeOwnRecipes([], [{ titulo: 'Bowl', alimentos: 'Pollo', receta: '' }], 't1');
+    expect(list).toEqual([{ id: expect.any(String), titulo: 'Bowl', alimentos: 'Pollo', receta: '', nota: '', updatedAt: 't1' }]);
+    expect(mergeOwnRecipes(list, [{ titulo: 'Bowl', alimentos: 'Pollo', receta: '' }], 't2')).toBe(list);
+    const next = mergeOwnRecipes(list, [{ titulo: 'bowl', alimentos: 'Pollo\nBoniato' }], 't3');
+    expect(next).toEqual([{ ...list[0], titulo: 'bowl', alimentos: 'Pollo\nBoniato', updatedAt: 't3' }]);
   });
 });

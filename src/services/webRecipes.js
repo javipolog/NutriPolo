@@ -7,6 +7,7 @@
  * canviat (`modified`). Les funcions de parseig són pures i tenen tests.
  */
 import { invoke } from '@tauri-apps/api/tauri';
+import { dishKey, webRecipeFoods } from './planificacion';
 
 export const RECIPES_SITE = 'https://nutripoloraquel.com';
 export const RECIPES_PAGE_URL = `${RECIPES_SITE}/recetario/`;
@@ -107,12 +108,12 @@ export function parseRecipePage(html) {
 
 const searchKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 
-/** Filtra per títol, ingredients o etiquetes (sense accents ni majúscules). */
+/** Filtra per títol, ingredients o etiquetes (sense accents ni majúscules). Serveix també per a "Mis recetas" (`alimentos`). */
 export function filterWebRecipes(items, query) {
   const words = searchKey(query).split(/\s+/).filter(Boolean);
   if (!words.length) return items;
   return items.filter(r => {
-    const hay = searchKey([r.titulo, ...(r.ingredientes || []), ...(r.etiquetas || [])].join(' '));
+    const hay = searchKey([r.titulo, r.alimentos, ...(r.ingredientes || []), ...(r.etiquetas || [])].join(' '));
     return words.every(w => hay.includes(w));
   });
 }
@@ -199,5 +200,12 @@ export async function syncWebRecipes(cache, {
   return { items, syncedAt: now().toISOString(), failed };
 }
 
-/** Plat del menú a partir d'una recepta de la web. */
-export const dishFromWebRecipe = (r) => ({ titulo: r.titulo, alimentos: (r.ingredientes || []).join('\n'), receta: r.url });
+/**
+ * Plat del menú a partir d'una recepta de la web: els ingredients clau
+ * (`summarizeIngredients`) o, si ja se n'havia retocat una versió a
+ * "Mis recetas" (mateix enllaç o títol), aquesta.
+ */
+export function dishFromWebRecipe(r, ownRecipes = []) {
+  const own = ownRecipes.find(x => (x.receta && x.receta === r.url) || dishKey(x.titulo) === dishKey(r.titulo));
+  return { titulo: r.titulo, alimentos: own?.alimentos || webRecipeFoods(r), receta: r.url };
+}

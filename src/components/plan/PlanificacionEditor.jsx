@@ -9,7 +9,7 @@ import { Button, SegmentedControl, Combobox, useToast, useConfirm, useDialogA11y
 import useStore, { todayISO, generateId, errMsg } from '../../stores/store';
 import { useT } from '../../i18n';
 import {
-  createPlanificacion, latestPlanificacion, normalizePlanificacion, copyContent, buildDishIndex,
+  createPlanificacion, latestPlanificacion, normalizePlanificacion, copyContent, buildDishIndex, collectOwnRecipes,
   emptyOption, emptyDish, isDishEmpty, linesOf, safeUrl, planificacionStats,
   DEFAULT_CANTIDADES, DEFAULT_CANTIDADES_NOTA, WEEK_DAYS, MENU_SLOTS, MENU_VARIANTS, PLAN_FORMAT,
 } from '../../services/planificacion';
@@ -17,10 +17,10 @@ import { imageFileToDataUrl, planPdfFileName } from '../../services/planPdf';
 import { PdfPreview } from './PdfPreview';
 import { WebRecipePicker } from './WebRecipePicker';
 import { useWebRecipes } from '../../hooks/useWebRecipes';
-import { dishFromWebRecipe } from '../../services/webRecipes';
 
 const FIELD = 'w-full text-sm text-sage-800 bg-white border border-sage-300 rounded-button px-3 py-2 placeholder-sage-400 focus:outline-none focus:border-wellness-400 focus:ring-2 focus:ring-wellness-400/10 transition-colors';
 const LABEL = 'block text-xs font-medium text-sage-600 mb-1';
+const NO_RECIPES = [];
 
 const SECTIONS = [
   { id: 'general',     icon: Settings2 },
@@ -160,11 +160,10 @@ const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
       <WebRecipePicker
         open={picking}
         onClose={() => setPicking(false)}
-        onPick={r => {
-          const { titulo, alimentos } = dishFromWebRecipe(r);
-          setOpts([...opts, { ...emptyOption(), titulo, alimentos }]);
+        onPick={d => {
+          setOpts([...opts, { ...emptyOption(), titulo: d.titulo, alimentos: d.alimentos, nota: d.nota || '' }]);
           setPicking(false);
-          toast.info(t.pf_web_filled.replace('{name}', titulo));
+          toast.info((d.source === 'own' ? t.pf_own_filled : t.pf_web_filled).replace('{name}', d.titulo));
         }}
       />
 
@@ -279,12 +278,12 @@ const MenuEditor = ({ value, onChange, dishIndex }) => {
     toast.info((hit.web ? t.pf_web_filled : t.pf_autofilled).replace('{name}', hit.titulo));
   };
 
-  const pickWebRecipe = async (r) => {
+  const pickRecipe = async (d) => {
     setPicking(false);
-    if (!isDishEmpty(dish) && dish.titulo !== r.titulo
+    if (!isDishEmpty(dish) && dish.titulo !== d.titulo
       && !(await confirm(t.pf_web_replace_confirm.replace('{name}', dish.titulo || linesOf(dish.alimentos)[0])))) return;
-    setSelected(dishFromWebRecipe(r));
-    toast.info(t.pf_web_filled.replace('{name}', r.titulo));
+    setSelected({ titulo: d.titulo, alimentos: d.alimentos, receta: d.receta || '' });
+    toast.info((d.source === 'own' ? t.pf_own_filled : t.pf_web_filled).replace('{name}', d.titulo));
   };
 
   const slotLabel = (s) => (s === 'comida' ? t.pf_lunch : t.pf_dinner);
@@ -395,7 +394,7 @@ const MenuEditor = ({ value, onChange, dishIndex }) => {
         <label className={LABEL} htmlFor="pf-menu-notas">{t.pf_menu_notes}</label>
         <textarea id="pf-menu-notas" value={value.notas || ''} onChange={e => onChange({ ...value, notas: e.target.value })} rows={rowsFor(value.notas)} className={`${FIELD} resize-y`} />
       </div>
-      <WebRecipePicker open={picking} onClose={() => setPicking(false)} onPick={pickWebRecipe} />
+      <WebRecipePicker open={picking} onClose={() => setPicking(false)} onPick={pickRecipe} />
       {ConfirmDialog}
     </div>
   );
@@ -563,6 +562,8 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   const plans = useStore(s => s.nutritionPlans);
   const config = useStore(s => s.config);
   const products = useStore(s => s.planLibrary.productos);
+  const ownRecipes = useStore(s => s.planLibrary.recetas) || NO_RECIPES;
+  const rememberRecipes = useStore(s => s.rememberRecipes);
   const addNutritionPlan = useStore(s => s.addNutritionPlan);
   const updateNutritionPlan = useStore(s => s.updateNutritionPlan);
 
@@ -580,6 +581,8 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
     return clienteId ? fresh(clienteId) : { form: null, origin: null };
   });
   const [savedId, setSavedId] = useState(plan?.id || null);
+  // Contingut en obrir (o en l'últim desat): el que no canvia no torna a "Mis recetas"
+  const baselineRef = useRef(form);
   const [dirty, setDirty] = useState(!plan);
   const [section, setSection] = useState(plan ? 'menu' : 'general');
   const [showPreview, setShowPreview] = useState(true);
@@ -588,7 +591,7 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
 
   const client = clients.find(c => c.id === form?.clienteId);
   const { items: webRecipes } = useWebRecipes();
-  const dishIndex = useMemo(() => buildDishIndex(plans, savedId, webRecipes), [plans, savedId, webRecipes]);
+  const dishIndex = useMemo(() => buildDishIndex(ownRecipes, webRecipes), [ownRecipes, webRecipes]);
   const otherPlans = useMemo(() => plans
     .filter(p => p.formato === PLAN_FORMAT && p.id !== savedId)
     .sort((a, b) => (b.fechaInicio || '').localeCompare(a.fechaInicio || ''))
@@ -611,6 +614,11 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
       setSavedId(addNutritionPlan(data).id);
       toast.success(t.pf_created);
     }
+    // Els plats escrits o retocats a mà queden a "Mis recetas"; els que no
+    // han canviat no, perquè una recepta esborrada de la llista no hi torni
+    const before = new Set(collectOwnRecipes(baselineRef.current, webRecipes).map(r => JSON.stringify(r)));
+    rememberRecipes(collectOwnRecipes(data, webRecipes).filter(r => !before.has(JSON.stringify(r))));
+    baselineRef.current = data;
     setDirty(false);
   };
 
