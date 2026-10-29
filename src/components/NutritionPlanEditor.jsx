@@ -1,13 +1,16 @@
 import React, { useState, useMemo } from 'react';
 import {
   ClipboardList, Plus, Edit2, Trash2, X, ChevronDown, ChevronRight,
-  Leaf, Download, Mail, FolderDown
+  Leaf, Download, Mail, FolderDown, CopyPlus
 } from 'lucide-react';
 import { Button, Modal, Input, Textarea, EmptyState, SegmentedControl, useToast, useConfirm } from './UI';
 import { invoke } from '@tauri-apps/api/tauri';
 import useStore, { formatDate, todayISO, generateId, errMsg } from '../stores/store';
 import { useT, plural } from '../i18n';
 import { SendEmailModal } from './SendEmailModal';
+import { PlanificacionEditor } from './plan/PlanificacionEditor';
+import { PLAN_FORMAT, planificacionStats } from '../services/planificacion';
+import { generatePlanPdf, planPdfFileName } from '../services/planPdf';
 
 // ─────────────────────────────────────────────────────────────
 // Macro bar: visual distribution of P / C / G
@@ -144,9 +147,9 @@ const MealSlot = ({ meal, index, onChange, onDelete }) => {
 };
 
 // ─────────────────────────────────────────────────────────────
-// Plan Editor Modal
+// Plan Editor Modal (plans per àpats, format antic)
 // ─────────────────────────────────────────────────────────────
-export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
+const LegacyPlanEditorModal = ({ plan, defaultClientId, onClose }) => {
   const clients = useStore(s => s.clients);
   const addNutritionPlan = useStore(s => s.addNutritionPlan);
   const updateNutritionPlan = useStore(s => s.updateNutritionPlan);
@@ -378,6 +381,14 @@ export const PlanEditorModal = ({ plan, defaultClientId, onClose }) => {
   );
 };
 
+// Les planificacions (format nou) s'editen a pantalla completa; els plans
+// antics per àpats conserven el seu formulari.
+export const PlanEditorModal = ({ plan, defaultClientId, basePlan, onClose }) => (
+  plan && plan.formato !== PLAN_FORMAT
+    ? <LegacyPlanEditorModal plan={plan} defaultClientId={defaultClientId} onClose={onClose} />
+    : <PlanificacionEditor plan={plan} defaultClientId={defaultClientId} basePlan={basePlan} onClose={onClose} />
+);
+
 // ─────────────────────────────────────────────────────────────
 // Status badge colors
 // ─────────────────────────────────────────────────────────────
@@ -386,6 +397,13 @@ const PLAN_STATUS = {
   activo:     'bg-success-light text-success',
   completado: 'bg-sage-100 text-sage-500',
   archivado:  'bg-sage-100 text-sage-400',
+};
+
+const PLAN_STATUS_LABEL = {
+  borrador:   'plan_status_draft',
+  activo:     'plan_status_active',
+  completado: 'plan_status_completed',
+  archivado:  'plan_status_archived',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -399,8 +417,10 @@ export const NutritionPlanEditor = () => {
   const toast = useToast();
   const { confirm, ConfirmDialog } = useConfirm();
   const config = useStore(s => s.config);
+  const planLibrary = useStore(s => s.planLibrary);
   const [showModal, setShowModal] = useState(false);
   const [editPlan, setEditPlan] = useState(null);
+  const [basePlan, setBasePlan] = useState(null);
   const [emailPlan, setEmailPlan] = useState(null);
   const [filterEstado, setFilterEstado] = useState('all');
 
@@ -421,7 +441,7 @@ export const NutritionPlanEditor = () => {
     <div className="space-y-5 animate-fadeIn">
       <div className="flex items-center justify-between">
         <h1 className="font-serif text-title text-sage-900">{t.plans_title}</h1>
-        <Button variant="primary" icon={Plus} onClick={() => { setEditPlan(null); setShowModal(true); }}>
+        <Button variant="primary" icon={Plus} onClick={() => { setEditPlan(null); setBasePlan(null); setShowModal(true); }}>
           {t.new_plan}
         </Button>
       </div>
@@ -450,6 +470,8 @@ export const NutritionPlanEditor = () => {
         <div className="space-y-3">
           {filtered.map(plan => {
             const client = clients.find(c => c.id === plan.clienteId);
+            const isPlanificacion = plan.formato === PLAN_FORMAT;
+            const stats = isPlanificacion ? planificacionStats(plan) : null;
 
             return (
               <div key={plan.id} className="bg-white border border-sage-200 rounded-soft shadow-card p-4 flex items-start gap-4 hover:shadow-card-hover transition-shadow">
@@ -463,27 +485,27 @@ export const NutritionPlanEditor = () => {
                   <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-sage-400">
                     {plan.fechaInicio && <span>{formatDate(plan.fechaInicio)}{plan.fechaFin ? ` → ${formatDate(plan.fechaFin)}` : ''}</span>}
                     {plan.kcalObjetivo && <span>{plan.kcalObjetivo} kcal/día</span>}
-                    {plan.comidas?.length > 0 && <span>{plan.comidas.length} comidas</span>}
+                    {!isPlanificacion && plan.comidas?.length > 0 && <span>{plan.comidas.length} comidas</span>}
+                    {stats && <span>{plural(t, 'pf_options', stats.opciones)} · {plural(t, 'pf_dishes', stats.platos)}</span>}
                   </div>
-                  {plan.macros && (plan.macros.proteinas || plan.macros.carbohidratos || plan.macros.grasas) && (
+                  {!!(plan.macros?.proteinas || plan.macros?.carbohidratos || plan.macros?.grasas) && (
                     <MacroBar {...plan.macros} />
                   )}
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
                   <span className={`text-xs px-2 py-0.5 rounded-badge font-medium mr-1 ${PLAN_STATUS[plan.estado] || 'bg-sage-100 text-sage-500'}`}>
-                    {plan.estado}
+                    {PLAN_STATUS_LABEL[plan.estado] ? t[PLAN_STATUS_LABEL[plan.estado]] : plan.estado}
                   </span>
                   <button
                     onClick={async () => {
                       try {
-                        const { generateNutritionPlanPDF } = await import('../services/pdfPlanGenerator');
                         const { save } = await import('@tauri-apps/api/dialog');
                         const { writeBinaryFile } = await import('@tauri-apps/api/fs');
-                        const bytes = await generateNutritionPlanPDF(plan, client, config);
+                        const bytes = await generatePlanPdf(plan, client, config, planLibrary);
                         // Same flow as invoices: an <a download> blob link is unreliable in Tauri.
                         const filePath = await save({
-                          defaultPath: `${(plan.nombre || 'plan').replace(/[\\/:*?"<>|]/g, '_')}.pdf`,
+                          defaultPath: planPdfFileName(plan, client),
                           filters: [{ name: 'PDF', extensions: ['pdf'] }],
                         });
                         if (!filePath) return;
@@ -501,13 +523,12 @@ export const NutritionPlanEditor = () => {
                   <button
                     onClick={async () => {
                       try {
-                        const { generateNutritionPlanPDF } = await import('../services/pdfPlanGenerator');
                         const { saveBytesToDocuments } = await import('../services/documentService');
-                        const bytes = await generateNutritionPlanPDF(plan, client, config);
+                        const bytes = await generatePlanPdf(plan, client, config, planLibrary);
                         let binary = '';
                         for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
                         const b64 = btoa(binary);
-                        const fileName = `${plan.nombre || 'plan'}.pdf`;
+                        const fileName = planPdfFileName(plan, client);
                         const { storedFileName } = await saveBytesToDocuments(plan.clienteId, fileName, b64);
                         const addDoc = useStore.getState().addClientDocument;
                         addDoc({
@@ -533,8 +554,7 @@ export const NutritionPlanEditor = () => {
                     onClick={async () => {
                       // The email must carry the plan itself: generate the PDF first.
                       try {
-                        const { generateNutritionPlanPDF } = await import('../services/pdfPlanGenerator');
-                        const pdfBytes = await generateNutritionPlanPDF(plan, client, config);
+                        const pdfBytes = await generatePlanPdf(plan, client, config, planLibrary);
                         setEmailPlan({ plan, pdfBytes });
                       } catch (e) { toast.error(t.pdf_error.replace('{error}', errMsg(e))); }
                     }}
@@ -544,8 +564,18 @@ export const NutritionPlanEditor = () => {
                   >
                     <Mail size={14} />
                   </button>
+                  {isPlanificacion && (
+                    <button
+                      onClick={() => { setEditPlan(null); setBasePlan(plan); setShowModal(true); }}
+                      title={t.pf_new_from_this}
+                      aria-label={`${t.pf_new_from_this}: ${plan.nombre || ''}`}
+                      className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
+                    >
+                      <CopyPlus size={14} />
+                    </button>
+                  )}
                   <button
-                    onClick={() => { setEditPlan(plan); setShowModal(true); }}
+                    onClick={() => { setEditPlan(plan); setBasePlan(null); setShowModal(true); }}
                     title={t.edit}
                     aria-label={`${t.edit}: ${plan.nombre || ''}`}
                     className="p-1.5 rounded-button text-sage-400 hover:text-sage-700 hover:bg-sage-100 transition-colors"
@@ -570,7 +600,8 @@ export const NutritionPlanEditor = () => {
       {showModal && (
         <PlanEditorModal
           plan={editPlan}
-          onClose={() => { setShowModal(false); setEditPlan(null); }}
+          basePlan={basePlan}
+          onClose={() => { setShowModal(false); setEditPlan(null); setBasePlan(null); }}
         />
       )}
 

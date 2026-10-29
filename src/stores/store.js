@@ -255,10 +255,12 @@ const DEFAULT_SERVICES = [
   { id: 'svc5', nombre: 'Plan online',         descripcion: 'Seguimiento nutricional online mensual',  precio: 35,  numSesiones: 1,  duracion: 30, activo: true },
 ];
 
+export const EMPTY_PLAN_LIBRARY = { productos: [] };
+
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 11;
+const STORE_VERSION = 12;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -273,7 +275,6 @@ export const DEFAULT_INVOICE_DESIGN = {
     muted:       '#65635B',  // labels
     cardBg:      '#FAFAF8',  // filas alternas tabla
   },
-  fontFamily: 'worksans',    // 'worksans' | 'roboto' | 'helvetica'
   logo: null,                // { data: 'data:image/...;base64,...', type: 'png'|'jpg', width, height } | null
   showTagline: true,
   taglineText: 'Nutrición Clínica',
@@ -287,6 +288,16 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 12 && s.config) {
+    // v11 → v12: Onest a tota l'app (UI i PDFs). Les famílies no es poden
+    // triar enlloc, així que es reescriuen.
+    const { fontFamily, ...invoiceDesign } = s.config.invoiceDesign || {};
+    s.config = {
+      ...s.config,
+      appFont: 'Onest', appFontHeading: 'Onest', appFontMono: 'Onest',
+      ...(s.config.invoiceDesign ? { invoiceDesign } : {}),
+    };
+  }
   if (version < 11) {
     // v10 → v11: appointment reminders. The old WhatsApp stamp becomes a
     // reminder record (config.reminders defaults arrive via the config merge).
@@ -809,9 +820,9 @@ const useStore = create(
         locations: DEFAULT_LOCATIONS,
         consultationTypes: ['Primera visita', 'Seguimiento', 'Revisión', 'Urgencia'],
         defaultConsultationDuration: 45,
-        appFont: 'Inter',
-        appFontHeading: 'Playfair Display',
-        appFontMono: 'JetBrains Mono',
+        appFont: 'Onest',
+        appFontHeading: 'Onest',
+        appFontMono: 'Onest',
         appTheme: 'auto',
         appLang: 'es',
         invoiceDesign: DEFAULT_INVOICE_DESIGN,
@@ -1372,6 +1383,25 @@ const useStore = create(
         );
       },
 
+      // ---- PLAN LIBRARY (productes reutilitzables a les planificacions) ----
+      planLibrary: EMPTY_PLAN_LIBRARY,
+
+      addPlanProduct: (product) => {
+        const newP = { ...product, id: generateId(), createdAt: new Date().toISOString() };
+        set(s => ({ planLibrary: { ...s.planLibrary, productos: [...s.planLibrary.productos, newP] } }));
+        return newP;
+      },
+      updatePlanProduct: (id, data) => set(s => ({
+        planLibrary: { ...s.planLibrary, productos: s.planLibrary.productos.map(p => p.id === id ? { ...p, ...data } : p) },
+      })),
+      deletePlanProduct: (id) => set(s => ({
+        planLibrary: { ...s.planLibrary, productos: s.planLibrary.productos.filter(p => p.id !== id) },
+      })),
+      // Memòria cau del receptari de la web (services/webRecipes.js)
+      setWebRecipes: ({ items, syncedAt }) => set(s => ({
+        planLibrary: { ...s.planLibrary, recetasWeb: { items, syncedAt } },
+      })),
+
       // ---- CLIENT DOCUMENTS ----
       clientDocuments: [],
 
@@ -1630,11 +1660,11 @@ const useStore = create(
       runAutoBackup: async () => {
         const today = todayISO();
         if (get().lastBackupDate === today) return;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates } = get();
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
         const backup = {
           version: STORE_VERSION,
           date: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
+          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
         };
         try {
           const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
@@ -1670,17 +1700,18 @@ const useStore = create(
           invoices:       d.invoices       || [],
           clientDocuments:d.clientDocuments || [],
           emailTemplates: d.emailTemplates || null,
+          planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
           config: mergeRestoredConfig(get().config, d.config),
         });
       },
 
       exportDataToZip: async (onProgress) => {
         const JSZip = (await import('jszip')).default;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates } = get();
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
         const payload = {
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
+          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
         };
 
         const zip = new JSZip();
@@ -1745,6 +1776,7 @@ const useStore = create(
             invoices:       d.invoices       || [],
             clientDocuments:d.clientDocuments || [],
             emailTemplates: d.emailTemplates || null,
+            planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
             config: mergeRestoredConfig(get().config, d.config),
           });
           return { documentsRestored: 0 };
@@ -1795,6 +1827,7 @@ const useStore = create(
           invoices:       d.invoices       || [],
           clientDocuments:d.clientDocuments || [],
           emailTemplates: d.emailTemplates || null,
+          planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
           config: mergeRestoredConfig(get().config, d.config),
         });
 
@@ -1803,11 +1836,11 @@ const useStore = create(
 
       // Legacy — kept for backwards compatibility
       exportDataToJSON: async () => {
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates } = get();
+        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
         const data = JSON.stringify({
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates },
+          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
         }, null, 2);
         try {
           const { save } = await import('@tauri-apps/api/dialog');
@@ -1847,6 +1880,7 @@ const useStore = create(
               invoices:       d.invoices       || [],
               clientDocuments:d.clientDocuments || [],
               emailTemplates: d.emailTemplates || null,
+              planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
               config: mergeRestoredConfig(get().config, d.config),
             });
           } else {
@@ -1857,6 +1891,10 @@ const useStore = create(
               nutritionPlans: [...s.nutritionPlans, ...(d.nutritionPlans || []).filter(p => !s.nutritionPlans.find(x => x.id === p.id))],
               invoices:       [...s.invoices,       ...(d.invoices       || []).filter(i => !s.invoices.find(x => x.id === i.id))],
               clientDocuments:[...s.clientDocuments, ...(d.clientDocuments|| []).filter(d2=> !s.clientDocuments.find(x => x.id === d2.id))],
+              planLibrary: {
+                ...s.planLibrary,
+                productos: [...s.planLibrary.productos, ...(d.planLibrary?.productos || []).filter(p => !s.planLibrary.productos.find(x => x.id === p.id))],
+              },
             }));
           }
         } catch (e) { throw e; }
@@ -1907,6 +1945,7 @@ const useStore = create(
           invoices: s.invoices,
           clientDocuments: s.clientDocuments,
           emailTemplates: s.emailTemplates,
+          planLibrary: s.planLibrary,
           lastBackupDate: s.lastBackupDate,
           sidebarCollapsed: s.sidebarCollapsed,
           appTheme: s.appTheme,
