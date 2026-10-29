@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Plus, Trash2, Edit2, Receipt, Search, FileDown } from 'lucide-react';
 import { Button, EmptyState, StatusBadge, useToast, useConfirm } from './UI';
-import useStore, { formatCurrency, formatDate } from '../stores/store';
+import useStore, { formatCurrency, formatDate, canDeleteInvoice } from '../stores/store';
 import { useT, plural } from '../i18n';
 import { InvoiceModal } from './InvoiceModal';
 import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
@@ -39,7 +39,7 @@ export const Invoices = () => {
         if (!inv.numero?.toLowerCase().includes(q) && !clientName.includes(q) && !inv.concepto?.toLowerCase().includes(q)) return false;
       }
       return true;
-    }).sort((a, b) => (b.numero || '').localeCompare(a.numero || ''));
+    }).sort((a, b) => (b.numero || '').localeCompare(a.numero || '', undefined, { numeric: true }));
   }, [invoices, clients, search, filterYear, filterEstado]);
 
   // Cancelled (anulada) invoices count neither as billed nor as pending.
@@ -47,10 +47,13 @@ export const Invoices = () => {
   const totalPagado = filtered.filter(i => i.estado === 'pagada').reduce((s, i) => s + (i.total || i.importe || 0), 0);
 
   const handleDelete = async (inv) => {
+    if (!canDeleteInvoice(invoices, inv)) {
+      toast.info(t.invoice_delete_not_last);
+      return;
+    }
     const ok = await confirm(t.invoice_confirm_delete.replace('{number}', inv.numero));
     if (!ok) return;
-    deleteInvoice(inv.id);
-    toast.success(t.invoice_deleted);
+    if (deleteInvoice(inv.id)) toast.success(t.invoice_deleted);
   };
 
   const handleDownloadPDF = async (inv) => {
@@ -198,7 +201,7 @@ export const Invoices = () => {
                         </button>
                         <button
                           onClick={() => handleDelete(inv)}
-                          title={t.delete}
+                          title={canDeleteInvoice(invoices, inv) ? t.delete : t.invoice_delete_not_last}
                           aria-label={`${t.delete}: ${inv.numero}`}
                           className="p-1.5 rounded-button text-sage-400 hover:text-danger hover:bg-danger-light transition-colors"
                         >

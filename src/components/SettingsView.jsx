@@ -322,7 +322,6 @@ const SmtpSection = () => {
         password:  smtpPassword,
         fromName:  config.nombre || '',
         fromEmail: smtp.user || '',
-        useTls:    smtp.secure !== false,
       });
       if (result.success) toast.success(t.smtp_test_ok);
       else toast.error(result.error || t.smtp_test_fail);
@@ -370,7 +369,7 @@ const SmtpSection = () => {
         </div>
         <div>
           <label htmlFor="smtp-port" className="block text-xs font-medium text-sage-600 mb-1">{t.smtp_port}</label>
-          <Input id="smtp-port" type="number" value={smtp.port || 587} onChange={e => set('port', parseInt(e.target.value))} />
+          <Input id="smtp-port" type="number" value={smtp.port || 587} onChange={e => set('port', parseInt(e.target.value, 10) || null)} />
         </div>
       </div>
       <div>
@@ -1791,6 +1790,9 @@ export const SettingsView = () => {
   const set = (k, v) => updateConfig({ [k]: v });
 
   const handleExportZip = async () => {
+    // The ZIP is a plain file: with at-rest encryption on, say so before it leaves the vault.
+    const encrypted = await invoke('encryption_is_enabled').catch(() => false);
+    if (encrypted && !(await confirm({ title: t.backup_export_plain_title, message: t.backup_export_plain_msg }))) return;
     try {
       const result = await exportDataToZip(({ current, total }) => setExportProgress({ current, total }));
       setExportProgress(null);

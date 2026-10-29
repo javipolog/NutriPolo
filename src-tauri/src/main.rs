@@ -181,6 +181,26 @@ fn clear_viewer_temp_dir(app_handle: &tauri::AppHandle) {
     let _ = fs::remove_dir_all(viewer_temp_dir(app_handle));
 }
 
+/// Decrypted copies older than this are removed the next time a PDF is
+/// opened: the app can run for weeks in the tray without locking.
+const VIEWER_COPY_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+fn prune_viewer_temp_dir(app_handle: &tauri::AppHandle) {
+    let Ok(entries) = fs::read_dir(viewer_temp_dir(app_handle)) else { return };
+    for entry in entries.flatten() {
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_none_or(|age| age > VIEWER_COPY_MAX_AGE);
+        // A copy still open in the viewer may be locked: it goes on a later pass.
+        if old {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
 fn launch_with_default_app(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     let result = std::process::Command::new("explorer").arg(path).spawn();
@@ -219,6 +239,7 @@ fn open_file(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
             let key_bytes = encryption::current_key()?;
             let ct = fs::read(&real).map_err(|e| e.to_string())?;
             let plain = encryption::decrypt(&ct, &key_bytes)?;
+            prune_viewer_temp_dir(&app_handle);
             let tmp_dir = viewer_temp_dir(&app_handle);
             fs::create_dir_all(&tmp_dir).map_err(|e| e.to_string())?;
             let name = p.file_name().ok_or_else(|| "invalid_path".to_string())?;
@@ -259,7 +280,6 @@ pub struct SmtpConfig {
     pub password: String,
     pub from_name: String,
     pub from_email: String,
-    pub use_tls: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -271,6 +291,33 @@ pub struct SendEmailResult {
 
 fn err_result(code: &str) -> SendEmailResult {
     SendEmailResult { success: false, message_id: None, error: Some(code.to_string()) }
+}
+
+/// Port 465 speaks TLS from the first byte (SMTPS); any other port starts in
+/// plain text and upgrades with STARTTLS (587, 25). Unencrypted SMTP is never used.
+fn smtp_implicit_tls(port: u16) -> bool {
+    port == 465
+}
+
+fn smtp_transport(cfg: &SmtpConfig) -> Result<SmtpTransport, lettre::transport::smtp::Error> {
+    let builder = if smtp_implicit_tls(cfg.port) {
+        SmtpTransport::relay(&cfg.host)?
+    } else {
+        SmtpTransport::starttls_relay(&cfg.host)?
+    };
+    Ok(builder
+        .port(cfg.port)
+        .credentials(Credentials::new(cfg.username.clone(), cfg.password.clone()))
+        .timeout(Some(std::time::Duration::from_secs(30)))
+        .build())
+}
+
+/// `Name <address>` built from its parts: a name with a comma, quotes or
+/// parentheses would not survive being parsed back from a formatted string.
+fn mailbox(name: Option<&str>, email: &str) -> Result<Mailbox, lettre::address::AddressError> {
+    let address = email.trim().parse::<lettre::Address>()?;
+    let name = name.map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+    Ok(Mailbox::new(name, address))
 }
 
 #[tauri::command(async)]
@@ -299,19 +346,11 @@ fn send_email_smtp(
         }
     }
 
-    let from: Mailbox = match format!("{} <{}>", smtp_config.from_name, smtp_config.from_email)
-        .parse()
-    {
+    let from = match mailbox(Some(&smtp_config.from_name), &smtp_config.from_email) {
         Ok(m) => m,
         Err(e) => return err_result(&sanitize_err(e, "invalid_from_address")),
     };
-
-    let to_str = if let Some(ref name) = to_name {
-        format!("{} <{}>", name, to_email)
-    } else {
-        to_email.clone()
-    };
-    let to: Mailbox = match to_str.parse() {
+    let to = match mailbox(to_name.as_deref(), &to_email) {
         Ok(m) => m,
         Err(e) => return err_result(&sanitize_err(e, "invalid_to_address")),
     };
@@ -345,14 +384,7 @@ fn send_email_smtp(
         Err(e) => return err_result(&sanitize_err(e, "message_build_failed")),
     };
 
-    let creds = Credentials::new(smtp_config.username.clone(), smtp_config.password.clone());
-    let transport_result = if smtp_config.use_tls {
-        SmtpTransport::starttls_relay(&smtp_config.host).map(|b| b.port(smtp_config.port).credentials(creds).build())
-    } else {
-        SmtpTransport::relay(&smtp_config.host).map(|b| b.port(smtp_config.port).credentials(creds).build())
-    };
-
-    let transport = match transport_result {
+    let transport = match smtp_transport(&smtp_config) {
         Ok(t) => t,
         Err(e) => return err_result(&sanitize_err(e, "smtp_connection_failed")),
     };
@@ -379,14 +411,7 @@ fn test_smtp_connection(smtp_config: SmtpConfig) -> SendEmailResult {
         }
     }
 
-    let creds = Credentials::new(smtp_config.username.clone(), smtp_config.password.clone());
-    let transport_result = if smtp_config.use_tls {
-        SmtpTransport::starttls_relay(&smtp_config.host).map(|b| b.port(smtp_config.port).credentials(creds).build())
-    } else {
-        SmtpTransport::relay(&smtp_config.host).map(|b| b.port(smtp_config.port).credentials(creds).build())
-    };
-
-    match transport_result {
+    match smtp_transport(&smtp_config) {
         Ok(transport) => match transport.test_connection() {
             Ok(true) => SendEmailResult { success: true, message_id: None, error: None },
             _ => err_result("smtp_test_failed"),
@@ -1010,6 +1035,27 @@ async fn recipes_fetch(path: String) -> Result<String, String> {
 }
 
 #[cfg(test)]
+mod smtp_tests {
+    use super::{mailbox, smtp_implicit_tls};
+
+    #[test]
+    fn tls_mode_follows_the_port() {
+        assert!(smtp_implicit_tls(465));
+        assert!(!smtp_implicit_tls(587));
+        assert!(!smtp_implicit_tls(25));
+    }
+
+    #[test]
+    fn names_with_punctuation_are_valid_mailboxes() {
+        let m = mailbox(Some("Pérez, Ana (hija)"), "ana@example.com").unwrap();
+        assert_eq!(m.name.as_deref(), Some("Pérez, Ana (hija)"));
+        assert_eq!(m.email.to_string(), "ana@example.com");
+        assert!(mailbox(Some("  "), "ana@example.com").unwrap().name.is_none());
+        assert!(mailbox(None, "not an address").is_err());
+    }
+}
+
+#[cfg(test)]
 mod recipes_tests {
     use super::recipes_path_allowed;
 
@@ -1043,8 +1089,9 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
-/// Ask the frontend to flush pending writes and call `quit_app`; exit anyway
-/// if it does not answer in time.
+/// Ask the frontend to flush pending writes and call `quit_app` (tray "Quit",
+/// or closing the window without close-to-tray); exit anyway if it does not
+/// answer in time.
 fn request_quit(app: &tauri::AppHandle) {
     let _ = app.emit_all("tray-quit", ());
     let handle = app.clone();
@@ -1116,9 +1163,15 @@ fn main() {
         })
         .on_window_event(|event| {
             if let WindowEvent::CloseRequested { api, .. } = event.event() {
+                api.prevent_close();
+                let app = event.window().app_handle();
                 if CLOSE_TO_TRAY.load(Ordering::Relaxed) {
                     let _ = event.window().hide();
-                    api.prevent_close();
+                    // Nobody is looking at them any more: drop decrypted PDF copies.
+                    clear_viewer_temp_dir(&app);
+                } else {
+                    // Quit like the tray menu, so pending writes are saved first.
+                    request_quit(&app);
                 }
             }
         })

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast, useConfirm } from './UI';
-import useStore, { todayISO, canPushToCalendar } from '../stores/store';
+import useStore, { todayISO, canPushToCalendar, changedFields } from '../stores/store';
 import { useT, useLocale } from '../i18n';
 import { AlertTriangle, CheckCircle2, Mail, MessageCircle, Trash2 } from 'lucide-react';
 import { googleCalendar, shortGcalError } from '../services/googleCalendarService';
@@ -125,9 +125,14 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     if (Object.keys(e).length) { setErrors(e); return; }
 
     if (isEdit) {
-      updateConsultation(consultation.id, form);
+      // Only what was edited here: the form is a copy taken on open, and the
+      // sync or a reminder may have changed other fields since.
+      const changes = changedFields(consultation, form);
+      if (Object.keys(changes).length) {
+        updateConsultation(consultation.id, changes);
+        pushToGoogle(consultation.id);
+      }
       toast.success(t.consultation_updated);
-      pushToGoogle(consultation.id);
       onClose();
     } else {
       const newC = addConsultation(form);

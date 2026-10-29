@@ -87,6 +87,8 @@ const UpdateChecker = () => {
     try {
       const { installUpdate } = await import('@tauri-apps/api/updater');
       const { relaunch } = await import('@tauri-apps/api/process');
+      // The installer closes the app: save pending changes first.
+      await flushAllPending();
       await installUpdate();
       await relaunch();
     } catch (e) {

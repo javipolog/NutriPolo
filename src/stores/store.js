@@ -240,6 +240,30 @@ export function computeInvoiceTotals(items = [], ivaPct = 0, irpfPct = 0) {
 }
 
 // ============================================
+// INVOICE NUMBERING
+// ============================================
+const INVOICE_SERIES_RE = /^(NP-\d{4}-)(\d+)$/;
+
+/** Sequence number of `numero` within the series `prefix` (NP-YYYY-), or 0. */
+function invoiceSeq(numero, prefix) {
+  const m = INVOICE_SERIES_RE.exec(numero || '');
+  return m && m[1] === prefix ? parseInt(m[2], 10) : 0;
+}
+
+/**
+ * Invoice numbers must stay correlative, without gaps: only the last invoice
+ * of its series can be deleted (its number is then reused). Any other one is
+ * cancelled (`anulada`) instead. Numbers outside the NP-YYYY-NNN series are
+ * free to delete.
+ */
+export function canDeleteInvoice(invoices, invoice) {
+  const m = INVOICE_SERIES_RE.exec(invoice?.numero || '');
+  if (!m) return true;
+  const seq = parseInt(m[2], 10);
+  return !(invoices || []).some(i => i.id !== invoice.id && invoiceSeq(i.numero, m[1]) > seq);
+}
+
+// ============================================
 // DEFAULT DATA
 // ============================================
 const DEFAULT_LOCATIONS = [
@@ -261,7 +285,7 @@ export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [] };
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 13;
+const STORE_VERSION = 14;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -289,6 +313,11 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 14 && Array.isArray(s.clients)) {
+    // v13 → v14: l'última visita es calcula (lastVisitByClient); el camp desat
+    // podia anar enrere en editar una consulta antiga.
+    s.clients = s.clients.map(({ fechaUltimaConsulta, ...c }) => c);
+  }
   if (version < 13 && Array.isArray(s.nutritionPlans)) {
     // v12 → v13: "Mis recetas". Es sembra amb els plats de les planificacions
     // existents (de la més antiga a la més nova, perquè mani l'última versió).
@@ -763,11 +792,43 @@ const SYNC_FIELDS = [
   'detachedFromGoogle', 'remoteDeleted', 'restoreRemote',
 ];
 
+// Written only by setConsultationReminder / setConsultationReviewRequest. A
+// form saved with an old copy must not wipe a reminder sent meanwhile, or it
+// would be sent again.
+const BOOKKEEPING_FIELDS = ['reminders', 'reviewRequest'];
+
 function withoutSyncFields(data) {
   if (!data) return data;
   const out = { ...data };
   for (const f of SYNC_FIELDS) delete out[f];
+  for (const f of BOOKKEEPING_FIELDS) delete out[f];
   return out;
+}
+
+/**
+ * Fields of `edited` that differ from `original` (a form vs the record it
+ * was opened with). Empty values ('', null, undefined) count as equal.
+ */
+export function changedFields(original, edited) {
+  const norm = (v) => (v == null || v === '' ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  const out = {};
+  for (const [k, v] of Object.entries(edited || {})) {
+    if (k !== 'id' && norm(v) !== norm(original?.[k])) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Last visit per client (Map clienteId → YYYY-MM-DD): the newest completed
+ * consultation or measurement. Derived on demand so editing an old record
+ * can never move it back in time.
+ */
+export function lastVisitByClient({ consultations, measurements }) {
+  const last = new Map();
+  const bump = (id, fecha) => { if (id && fecha && !(last.get(id) >= fecha)) last.set(id, fecha); };
+  for (const c of consultations || []) if (c.estado === 'completada') bump(c.clienteId, c.fecha);
+  for (const m of measurements || []) bump(m.clienteId, m.fecha);
+  return last;
 }
 
 /**
@@ -861,6 +922,49 @@ function restoreClientDeletion(s, entry) {
     consultations: [...s.consultations.filter(c => !restoredIds.has(c.id)), ...(cascade.consultations || [])],
     measurements: [...s.measurements, ...(cascade.measurements || [])],
     nutritionPlans: [...s.nutritionPlans, ...(cascade.nutritionPlans || [])],
+  };
+}
+
+/**
+ * Data of a parsed backup brought up to the current schema, like a normal
+ * load. Accepts exports/auto-backups (`{ version, data }`), the raw store
+ * file (`{ version, state }`) and very old bare objects (taken as current).
+ */
+export function backupData(parsed) {
+  const raw = parsed?.data || parsed?.state || parsed || {};
+  const version = Number.isInteger(parsed?.version) ? parsed.version : STORE_VERSION;
+  return version < STORE_VERSION ? migrateStore(raw, version) : raw;
+}
+
+/** Collections included in backups and exports (config is added stripped). */
+function backupCollections(s) {
+  const { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
+    emailTemplates, planLibrary, patientSuggestions } = s;
+  return { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
+    emailTemplates, planLibrary, patientSuggestions };
+}
+
+/**
+ * State patch that replaces the data with a backup's (`d` from backupData).
+ * The undo history belongs to the replaced data, so it is cleared.
+ */
+function restoredState(d, current) {
+  return {
+    clients:        d.clients        || [],
+    measurements:   d.measurements   || [],
+    consultations:  d.consultations  || [],
+    nutritionPlans: d.nutritionPlans || [],
+    services:       d.services       || DEFAULT_SERVICES,
+    invoices:       d.invoices       || [],
+    clientDocuments:d.clientDocuments || [],
+    emailTemplates: d.emailTemplates || null,
+    planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
+    // Older backups did not include the inbox; the sync rebuilds missing suggestions.
+    patientSuggestions: Array.isArray(d.patientSuggestions) ? d.patientSuggestions : current.patientSuggestions,
+    config: mergeRestoredConfig(current.config, d.config),
+    selectedClientId: null,
+    _history: [],
+    _future: [],
   };
 }
 
@@ -994,7 +1098,6 @@ const useStore = create(
           patologias: client.patologias || [],
           objetivos: client.objetivos || [],
           restriccionesDieteticas: client.restriccionesDieteticas || [],
-          fechaUltimaConsulta: null,
         };
         set(s => ({
           clients: [...s.clients, newClient],
@@ -1032,13 +1135,6 @@ const useStore = create(
           imc,
         };
         set(s => ({ measurements: [...s.measurements, newM] }));
-        if (newM.clienteId) {
-          set(s => ({
-            clients: s.clients.map(c =>
-              c.id === newM.clienteId ? { ...c, fechaUltimaConsulta: newM.fecha } : c
-            ),
-          }));
-        }
         return newM;
       },
       updateMeasurement: (id, data) => set(s => ({
@@ -1071,13 +1167,6 @@ const useStore = create(
           ...(isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() }),
         };
         set(s => ({ consultations: [...s.consultations, newC] }));
-        if (newC.estado === 'completada' && newC.clienteId) {
-          set(s => ({
-            clients: s.clients.map(c =>
-              c.id === newC.clienteId ? { ...c, fechaUltimaConsulta: newC.fecha } : c
-            ),
-          }));
-        }
         return newC;
       },
       updateConsultation: (id, input, { sync = false } = {}) => {
@@ -1115,15 +1204,6 @@ const useStore = create(
               sg.id === existing.suggestedFromId && (sg.status === 'pending' || sg.status === 'pending-confirm')
                 ? { ...sg, status: 'linked', linkedClienteId: data.clienteId }
                 : sg
-            ),
-          }));
-        }
-
-        const updated = get().consultations.find(c => c.id === id);
-        if (updated?.estado === 'completada' && updated?.clienteId) {
-          set(s => ({
-            clients: s.clients.map(c =>
-              c.id === updated.clienteId ? { ...c, fechaUltimaConsulta: updated.fecha } : c
             ),
           }));
         }
@@ -1448,10 +1528,11 @@ const useStore = create(
         const cutoff = new Date();
         cutoff.setDate(cutoff.getDate() - days);
         const cutoffStr = localISODate(cutoff);
-        return get().clients.filter(c =>
-          c.estado === 'activo' &&
-          (!c.fechaUltimaConsulta || c.fechaUltimaConsulta < cutoffStr)
-        );
+        const lastVisit = lastVisitByClient(get());
+        return get().clients.filter(c => {
+          const last = lastVisit.get(c.id);
+          return c.estado === 'activo' && (!last || last < cutoffStr);
+        });
       },
 
       // ---- NUTRITION PLANS ----
@@ -1565,30 +1646,26 @@ const useStore = create(
       // ---- INVOICES ----
       invoices: [],
 
-      // Derives the next invoice number from the current invoices list for the
-      // active year. Self-healing: tolerates deletions, imports, and year
-      // rollovers without needing a persisted counter to stay in sync.
-      generateInvoiceNumber: () => {
-        const year = new Date().getFullYear();
+      // Next number of the series of the invoice date's year (NP-YYYY-NNN),
+      // derived from the invoices list. Self-healing: tolerates imports and
+      // year rollovers without a persisted counter to keep in sync.
+      generateInvoiceNumber: (fecha) => {
+        const year = /^\d{4}/.test(fecha || '') ? fecha.slice(0, 4) : String(new Date().getFullYear());
         const prefix = `NP-${year}-`;
-        const invoices = get().invoices || [];
-        const maxSeq = invoices.reduce((max, inv) => {
-          if (!inv?.numero || !inv.numero.startsWith(prefix)) return max;
-          const match = inv.numero.match(/-(\d+)$/);
-          if (!match) return max;
-          const n = parseInt(match[1], 10);
-          return Number.isFinite(n) && n > max ? n : max;
+        const maxSeq = (get().invoices || []).reduce((max, inv) => {
+          const n = invoiceSeq(inv?.numero, prefix);
+          return n > max ? n : max;
         }, 0);
         return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
       },
 
       addInvoice: (invoice) => {
-        let numero = invoice.numero || get().generateInvoiceNumber();
+        let numero = invoice.numero || get().generateInvoiceNumber(invoice.fecha);
         // Defensive: if the caller supplied a number that collides with an
         // existing invoice (e.g. manual edit), regenerate to avoid duplicates.
         if (get().invoices.some(i => i.numero === numero)) {
           console.warn(`[addInvoice] Duplicate invoice number "${numero}" detected, regenerating`);
-          numero = get().generateInvoiceNumber();
+          numero = get().generateInvoiceNumber(invoice.fecha);
         }
         const items = invoice.items || [];
         const ivaPct = invoice.ivaPct ?? 0;
@@ -1638,12 +1715,16 @@ const useStore = create(
         };
         set(s => ({ invoices: s.invoices.map(i => i.id === id ? updated : i) }));
       },
+      // Only the last invoice of a series can be deleted (see canDeleteInvoice).
+      // Returns whether it was deleted.
       deleteInvoice: (id) => {
         const item = get().invoices.find(i => i.id === id);
+        if (!item || !canDeleteInvoice(get().invoices, item)) return false;
         set(s => ({
           invoices: s.invoices.filter(i => i.id !== id),
           _history: [{ type: 'delete_invoice', item }, ...s._history].slice(0, 20),
         }));
+        return true;
       },
 
       getMonthRevenue: (year, month) => {
@@ -1780,11 +1861,10 @@ const useStore = create(
       runAutoBackup: async () => {
         const today = todayISO();
         if (get().lastBackupDate === today) return;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
         const backup = {
           version: STORE_VERSION,
           date: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
+          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
         };
         try {
           const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
@@ -1809,29 +1889,17 @@ const useStore = create(
 
       restoreFromAutoBackup: async (date) => {
         const raw = await invoke('load_data', { key: `backup-${date}` });
-        const parsed = JSON.parse(raw);
-        const d = parsed.data || parsed;
-        set({
-          clients:        d.clients        || [],
-          measurements:   d.measurements   || [],
-          consultations:  d.consultations  || [],
-          nutritionPlans: d.nutritionPlans || [],
-          services:       d.services       || DEFAULT_SERVICES,
-          invoices:       d.invoices       || [],
-          clientDocuments:d.clientDocuments || [],
-          emailTemplates: d.emailTemplates || null,
-          planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-          config: mergeRestoredConfig(get().config, d.config),
-        });
+        const d = backupData(JSON.parse(raw));
+        set(s => restoredState(d, s));
       },
 
       exportDataToZip: async (onProgress) => {
         const JSZip = (await import('jszip')).default;
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
+        const { clientDocuments } = get();
         const payload = {
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
+          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
         };
 
         const zip = new JSZip();
@@ -1885,20 +1953,8 @@ const useStore = create(
         if (path.endsWith('.json')) {
           const { readTextFile } = await import('@tauri-apps/api/fs');
           const raw = await readTextFile(path);
-          const parsed = JSON.parse(raw);
-          const d = parsed.data || parsed;
-          set({
-            clients:        d.clients        || [],
-            measurements:   d.measurements   || [],
-            consultations:  d.consultations  || [],
-            nutritionPlans: d.nutritionPlans || [],
-            services:       d.services       || DEFAULT_SERVICES,
-            invoices:       d.invoices       || [],
-            clientDocuments:d.clientDocuments || [],
-            emailTemplates: d.emailTemplates || null,
-            planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-            config: mergeRestoredConfig(get().config, d.config),
-          });
+          const d = backupData(JSON.parse(raw));
+          set(s => restoredState(d, s));
           return { documentsRestored: 0 };
         }
 
@@ -1913,8 +1969,7 @@ const useStore = create(
         const dataFile = zip.file('data.json');
         if (!dataFile) throw new Error('Invalid backup: data.json not found');
         const dataRaw = await dataFile.async('string');
-        const parsed = JSON.parse(dataRaw);
-        const d = parsed.data || parsed;
+        const d = backupData(JSON.parse(dataRaw));
 
         // Restore document files through the backend so they are encrypted
         // when at-rest encryption is on. Only `documents/<clientId>/<file>`
@@ -1938,29 +1993,17 @@ const useStore = create(
         }
 
         // Apply data to store
-        set({
-          clients:        d.clients        || [],
-          measurements:   d.measurements   || [],
-          consultations:  d.consultations  || [],
-          nutritionPlans: d.nutritionPlans || [],
-          services:       d.services       || DEFAULT_SERVICES,
-          invoices:       d.invoices       || [],
-          clientDocuments:d.clientDocuments || [],
-          emailTemplates: d.emailTemplates || null,
-          planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-          config: mergeRestoredConfig(get().config, d.config),
-        });
+        set(s => restoredState(d, s));
 
         return { documentsRestored };
       },
 
       // Legacy — kept for backwards compatibility
       exportDataToJSON: async () => {
-        const { config, clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary } = get();
         const data = JSON.stringify({
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(config), clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments, emailTemplates, planLibrary },
+          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
         }, null, 2);
         try {
           const { save } = await import('@tauri-apps/api/dialog');
@@ -1988,21 +2031,9 @@ const useStore = create(
           const path = await open({ filters: [{ name: 'JSON', extensions: ['json'] }] });
           if (!path) return;
           const raw = await readTextFile(path);
-          const parsed = JSON.parse(raw);
-          const d = parsed.data || parsed;
+          const d = backupData(JSON.parse(raw));
           if (mode === 'replace') {
-            set({
-              clients:        d.clients        || [],
-              measurements:   d.measurements   || [],
-              consultations:  d.consultations  || [],
-              nutritionPlans: d.nutritionPlans || [],
-              services:       d.services       || DEFAULT_SERVICES,
-              invoices:       d.invoices       || [],
-              clientDocuments:d.clientDocuments || [],
-              emailTemplates: d.emailTemplates || null,
-              planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
-              config: mergeRestoredConfig(get().config, d.config),
-            });
+            set(s => restoredState(d, s));
           } else {
             set(s => ({
               clients:        [...s.clients,        ...(d.clients        || []).filter(c => !s.clients.find(x => x.id === c.id))],
