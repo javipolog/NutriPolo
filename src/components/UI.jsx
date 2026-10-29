@@ -421,6 +421,52 @@ export const Select = ({ label, options, error, className = '', id, ...props }) 
 };
 
 // ============================================
+// TAG INPUT
+// ============================================
+// Enter or comma adds the typed tag; Enter on an empty input is left to the
+// container (it moves to the next field in keyboard forms), and Backspace on
+// an empty input removes the last tag. `inputProps` go to the <input>
+// (ids, aria, data-* attributes for keyboard navigation).
+export const TagInput = ({ value = [], onChange, placeholder, inputProps = {}, className = '' }) => {
+  const t = useT();
+  const [input, setInput] = useState('');
+  const add = () => {
+    const v = input.trim();
+    if (v && !value.includes(v)) onChange([...value, v]);
+    setInput('');
+  };
+  const remove = (tag) => onChange(value.filter(x => x !== tag));
+  const onKeyDown = (e) => {
+    if (e.key === ',' || (e.key === 'Enter' && input.trim())) {
+      e.preventDefault();
+      add();
+    } else if (e.key === 'Backspace' && !input && value.length) {
+      e.preventDefault();
+      remove(value[value.length - 1]);
+    }
+  };
+  return (
+    <div className={`border border-sage-300 rounded-button px-2 py-1.5 bg-white min-h-9 flex flex-wrap items-center gap-1 focus-within:border-wellness-400 ${className}`}>
+      {value.map(tag => (
+        <span key={tag} className="flex items-center gap-1 text-xs bg-sage-100 text-sage-700 px-2 py-0.5 rounded-badge">
+          {tag}
+          <button type="button" tabIndex={-1} onClick={() => remove(tag)} aria-label={`${t.delete} ${tag}`} className="text-sage-500 hover:text-danger ml-0.5">&times;</button>
+        </span>
+      ))}
+      <input
+        {...inputProps}
+        value={input}
+        onChange={e => setInput(e.target.value)}
+        onKeyDown={onKeyDown}
+        onBlur={add}
+        placeholder={value.length ? '' : placeholder}
+        className="flex-1 min-w-[6rem] text-sm outline-none bg-transparent text-sage-800 placeholder-sage-500"
+      />
+    </div>
+  );
+};
+
+// ============================================
 // CARD
 // ============================================
 export const Card = ({ children, className = '', hover = false, variant = 'default', onClick }) => {

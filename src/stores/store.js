@@ -1153,7 +1153,16 @@ const useStore = create(
         return newM;
       },
       updateMeasurement: (id, data) => set(s => ({
-        measurements: s.measurements.map(m => m.id === id ? { ...m, ...data } : m),
+        measurements: s.measurements.map(m => {
+          if (m.id !== id) return m;
+          const next = { ...m, ...data };
+          // A new weight changes the BMI (computed with the client's current height)
+          if ('peso' in data) {
+            const client = s.clients.find(c => c.id === m.clienteId);
+            next.imc = (next.peso && client?.altura) ? calcIMC(next.peso, client.altura) : null;
+          }
+          return next;
+        }),
       })),
       deleteMeasurement: (id) => set(s => ({
         measurements: s.measurements.filter(m => m.id !== id),

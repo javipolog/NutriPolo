@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText, Calendar, ClipboardList, Receipt } from 'lucide-react';
+import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText, Calendar, ClipboardList, Receipt, ClipboardEdit } from 'lucide-react';
 import { Button, StatusBadge, useToast } from './UI';
 import useStore, { formatDate, formatCurrency, calcIMC } from '../stores/store';
 import { useT, useLocale } from '../i18n';
@@ -10,6 +10,8 @@ import { ConsultationModal } from './ConsultationModal';
 import { InvoiceModal } from './InvoiceModal';
 import { PlanEditorModal } from './NutritionPlanEditor';
 import { MeasurementChart } from './MeasurementChart';
+import { InterviewTab } from './client/InterviewTab';
+import { entrevistaTotals } from '../services/entrevista';
 import { ClientDocuments } from './ClientDocuments';
 import { SendEmailModal } from './SendEmailModal';
 import { openWhatsAppChat } from '../services/reminderService';
@@ -77,6 +79,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const deltaOf = key => (measurements.length > 1 && firstMeasurement[key] != null && lastMeasurement[key] != null)
     ? Number(lastMeasurement[key]) - Number(firstMeasurement[key])
     : null;
+  const interview = entrevistaTotals(client);
   const hasHealthData = ['alergias', 'intolerancias', 'patologias', 'restriccionesDieteticas'].some(k => (client[k] || []).length > 0)
     || client.medicacion || client.ejercicio;
 
@@ -87,6 +90,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
 
   const TABS = [
     { id: 'profile',       label: t.tab_profile },
+    { id: 'interview',     label: t.tab_interview },
     { id: 'measurements',  label: t.tab_measurements },
     { id: 'consultations', label: t.tab_consultations },
     { id: 'plans',         label: t.tab_plans },
@@ -216,6 +220,24 @@ export const ClientDetailView = ({ clientId, onBack }) => {
               {client.ejercicio && <InfoRow label={t.client_exercise} value={client.ejercicio} />}
               {(client.restriccionesDieteticas || []).length > 0 && <InfoRow label={t.client_diet_restrictions} value={client.restriccionesDieteticas.map(r => optionLabel(DIET_RESTRICTIONS, t, r)).join(', ')} />}
             </div>
+            <div className="col-span-full bg-white border border-sage-200 rounded-soft p-4 flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-sage-700">{t.tab_interview}</h3>
+                <p className="text-xs text-sage-500 mt-0.5 tabular-nums">
+                  {interview.done === 0
+                    ? t.ent_not_started
+                    : t.ent_progress.replace('{done}', interview.done).replace('{total}', interview.total)}
+                </p>
+                {client.entrevista?.motivo && (
+                  <p className="text-sm text-sage-800 mt-1 line-clamp-2">
+                    <span className="text-sage-500">{t.ent_q_motivo_short}: </span>{client.entrevista.motivo}
+                  </p>
+                )}
+              </div>
+              <Button size="sm" variant="secondary" icon={ClipboardEdit} onClick={() => setTab('interview')}>
+                {interview.done === 0 ? t.ent_start : t.ent_open}
+              </Button>
+            </div>
             {client.notas && (
               <div className="col-span-full bg-warning-light border border-warning/20 rounded-soft p-4">
                 <p className="text-xs font-semibold text-warning-dark mb-1">{t.client_private_notes}</p>
@@ -225,8 +247,10 @@ export const ClientDetailView = ({ clientId, onBack }) => {
           </div>
         )}
 
+        {tab === 'interview' && <InterviewTab client={client} />}
+
         {tab === 'measurements' && (
-          <MeasurementChart clientId={clientId} measurements={measurements} clientHeight={client.altura} />
+          <MeasurementChart client={client} measurements={measurements} />
         )}
 
         {tab === 'consultations' && (

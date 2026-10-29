@@ -123,6 +123,24 @@ describe('last visit', () => {
   });
 });
 
+describe('measurements', () => {
+  it('recomputes the BMI when the weight is edited', () => {
+    const { addClient, addMeasurement, updateMeasurement } = useStore.getState();
+    const client = addClient({ nombre: 'Ana', altura: 160 });
+    const m = addMeasurement({ clienteId: client.id, masaOsea: 2.5 });
+    expect(m.imc).toBeNull();
+
+    updateMeasurement(m.id, { peso: 64 });
+    const get = () => useStore.getState().measurements.find(x => x.id === m.id);
+    expect(get().imc).toBe(25);
+    updateMeasurement(m.id, { agua: 50 });
+    expect(get().imc).toBe(25);
+    updateMeasurement(m.id, { peso: null });
+    expect(get().imc).toBeNull();
+    expect(get().masaOsea).toBe(2.5);
+  });
+});
+
 describe('invoice numbering', () => {
   const add = (fecha) => useStore.getState().addInvoice({ fecha, clienteId: 'k1', items: [] });
 
