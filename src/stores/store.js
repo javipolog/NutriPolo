@@ -256,7 +256,8 @@ const DEFAULT_SERVICES = [
   { id: 'svc5', nombre: 'Plan online',         descripcion: 'Seguimiento nutricional online mensual',  precio: 35,  numSesiones: 1,  duracion: 30, activo: true },
 ];
 
-export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [] };
+// alimentos: canvis propis a la biblioteca d'aliments, { [foodId]: { imagen?, por100g?, updatedAt } }
+export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [], alimentos: {} };
 
 // ============================================
 // SCHEMA MIGRATION
@@ -1517,6 +1518,19 @@ const useStore = create(
       deleteOwnRecipe: (id) => set(s => ({
         planLibrary: { ...s.planLibrary, recetas: (s.planLibrary.recetas || []).filter(r => r.id !== id) },
       })),
+      // Foto o valors nutricionals propis d'un aliment de la biblioteca (el catàleg no es toca)
+      setFoodEdit: (id, data) => set(s => {
+        const alimentos = s.planLibrary.alimentos || {};
+        return { planLibrary: { ...s.planLibrary, alimentos: { ...alimentos, [id]: { ...alimentos[id], ...data, updatedAt: new Date().toISOString() } } } };
+      }),
+      // Torna a l'original una part ('imagen' | 'por100g'); sense res editat, l'aliment surt del mapa
+      clearFoodEdit: (id, field) => set(s => {
+        const { [id]: edit, ...rest } = s.planLibrary.alimentos || {};
+        if (!edit) return {};
+        const { [field]: _removed, updatedAt, ...kept } = edit;
+        const alimentos = Object.keys(kept).length ? { ...rest, [id]: { ...kept, updatedAt: new Date().toISOString() } } : rest;
+        return { planLibrary: { ...s.planLibrary, alimentos } };
+      }),
       // Memòria cau del receptari de la web (services/webRecipes.js)
       setWebRecipes: ({ items, syncedAt }) => set(s => ({
         planLibrary: { ...s.planLibrary, recetasWeb: { items, syncedAt } },
@@ -1673,9 +1687,11 @@ const useStore = create(
       clientFilters: { estado: 'all', objetivo: 'all' },
       consultationFilters: { dateRange: 'week', locationId: 'all', tipo: 'all', estado: 'all' },
       planFilters: { estado: 'all', clienteId: 'all' },
+      plansSection: 'plans', // Planes tab: 'plans' | 'foods' | 'recipes'
       invoiceFilters: { estado: 'all', year: 'all' },
 
       setCurrentView: (view) => set({ currentView: view }),
+      setPlansSection: (section) => set({ plansSection: section }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
       setAppTheme: (theme) => set({ appTheme: theme }),
       setClientSearch: (v) => set({ clientSearch: v }),
@@ -2015,6 +2031,7 @@ const useStore = create(
                 ...s.planLibrary,
                 productos: [...s.planLibrary.productos, ...(d.planLibrary?.productos || []).filter(p => !s.planLibrary.productos.find(x => x.id === p.id))],
                 recetas: [...(s.planLibrary.recetas || []), ...(d.planLibrary?.recetas || []).filter(r => !(s.planLibrary.recetas || []).find(x => x.id === r.id))],
+                alimentos: { ...(d.planLibrary?.alimentos || {}), ...(s.planLibrary.alimentos || {}) },
               },
             }));
           }

@@ -45,3 +45,13 @@ export async function imageFileToDataUrl(file, maxSide = 480) {
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   return canvas.toDataURL('image/jpeg', 0.86);
 }
+
+/**
+ * Foto de la biblioteca d'aliments (servida per l'app) → el mateix JPEG petit
+ * que una foto pujada a mà, per copiar-la a la biblioteca de productes.
+ */
+export async function foodPhotoDataUrl(path) {
+  const resp = await fetch(path);
+  if (!resp.ok) throw new Error(`food photo ${resp.status}`);
+  return imageFileToDataUrl(await resp.blob());
+}

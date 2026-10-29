@@ -13,9 +13,12 @@ import {
   emptyOption, emptyDish, isDishEmpty, linesOf, safeUrl, planificacionStats, planFoods, dishKey,
   DEFAULT_CANTIDADES, DEFAULT_CANTIDADES_NOTA, WEEK_DAYS, MENU_SLOTS, MENU_VARIANTS, PLAN_FORMAT,
 } from '../../services/planificacion';
-import { imageFileToDataUrl, planPdfFileName } from '../../services/planPdf';
+import { imageFileToDataUrl, foodPhotoDataUrl, planPdfFileName } from '../../services/planPdf';
+import { foodMatcher, foodImageUrl, productName } from '../../services/foodCatalog';
+import { useFoodLibrary } from '../../hooks/useFoodLibrary';
 import { PdfPreview } from './PdfPreview';
 import { WebRecipePicker } from './WebRecipePicker';
+import { FoodCatalogPicker } from './FoodCatalogPicker';
 import { useWebRecipes } from '../../hooks/useWebRecipes';
 
 const FIELD = 'w-full text-sm text-sage-800 bg-white border border-sage-300 rounded-button px-3 py-2 placeholder-sage-400 focus:outline-none focus:border-wellness-400 focus:ring-2 focus:ring-wellness-400/10 transition-colors';
@@ -414,12 +417,65 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
   const fileRef = useRef(null);
   const foodFileRef = useRef(null);
   const [photoFor, setPhotoFor] = useState(null);
+  const replaceRef = useRef(null);
+  const [replaceFor, setReplaceFor] = useState(null);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  // Cada aliment amb la foto de la biblioteca que es diu igual (si n'hi ha)
+  // Cada aliment amb la foto de la biblioteca de productes que es diu igual
+  // o, si no en té, la de la biblioteca d'aliments (genèric o Mercadona)
+  const { alimentos } = useFoodLibrary();
+  const matchFood = useMemo(() => foodMatcher(alimentos), [alimentos]);
   const productByKey = useMemo(() => new Map(products.map(pr => [dishKey(pr.nombre), pr])), [products]);
-  const foodRows = foods.map(f => ({ ...f, product: productByKey.get(f.key) || null }));
+  const foodRows = foods.map(f => {
+    const product = productByKey.get(f.key) || null;
+    const catalog = product ? null : matchFood(f.nombre);
+    return { ...f, product, catalog: catalog && foodImageUrl(catalog) ? catalog : null };
+  });
   const unmarked = foodRows.filter(f => f.product && !selected.includes(f.product.id)).map(f => f.product.id);
+  const fromCatalog = foodRows.filter(f => f.catalog);
   const toggle = (id) => onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id]);
+
+  // Copia la foto d'un aliment de la biblioteca d'aliments a la de productes
+  const addFromCatalog = async (food, nombre) => {
+    try {
+      return addPlanProduct({ nombre, imagen: await foodPhotoDataUrl(foodImageUrl(food)) }).id;
+    } catch {
+      toast.error(t.pf_image_error.replace('{name}', nombre));
+      return null;
+    }
+  };
+
+  const withBusy = async (fn) => {
+    setBusy(true);
+    try { await fn(); } finally { setBusy(false); }
+  };
+
+  const applyCatalogPhoto = (f) => withBusy(async () => {
+    const id = await addFromCatalog(f.catalog, f.nombre);
+    if (id) onChange([...selected, id]);
+  });
+
+  const markAll = () => withBusy(async () => {
+    const ids = [...unmarked];
+    for (const f of fromCatalog) {
+      const id = await addFromCatalog(f.catalog, f.nombre);
+      if (id) ids.push(id);
+    }
+    onChange([...selected, ...ids]);
+  });
+
+  // Des del selector del catàleg: si ja és a la biblioteca només es marca
+  const pickFromCatalog = async (food) => {
+    const nombre = productName(food);
+    const existing = productByKey.get(dishKey(nombre));
+    if (existing) {
+      if (!selected.includes(existing.id)) onChange([...selected, existing.id]);
+      return;
+    }
+    const id = await addFromCatalog(food, nombre);
+    if (id) onChange([...selected, id]);
+  };
 
   const onFiles = async (files) => {
     const added = [];
@@ -432,6 +488,17 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
       }
     }
     if (added.length) onChange([...selected, ...added]);
+  };
+
+  // Canvia la foto d'un producte de la biblioteca (a totes les planificacions)
+  const onReplaceFile = async (file) => {
+    if (!file || !replaceFor) return;
+    try {
+      updatePlanProduct(replaceFor.id, { imagen: await imageFileToDataUrl(file) });
+    } catch {
+      toast.error(t.pf_image_error.replace('{name}', file.name));
+    }
+    setReplaceFor(null);
   };
 
   // La foto d'un aliment crea el producte amb el seu nom i el marca
@@ -457,8 +524,8 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
           <h4 className="text-sm font-semibold text-sage-800">{t.pf_plan_foods}</h4>
-          {unmarked.length > 0 && (
-            <Button variant="ghost" size="sm" className="ml-auto" onClick={() => onChange([...selected, ...unmarked])}>{t.pf_plan_foods_mark_all}</Button>
+          {unmarked.length + fromCatalog.length > 0 && (
+            <Button variant="ghost" size="sm" className="ml-auto" onClick={markAll} disabled={busy}>{t.pf_plan_foods_mark_all}</Button>
           )}
         </div>
         {foodRows.length === 0 ? (
@@ -475,6 +542,22 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
             />
             <div className="flex flex-wrap gap-2">
               {foodRows.map(f => {
+                if (f.catalog) {
+                  return (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => applyCatalogPhoto(f)}
+                      disabled={busy}
+                      aria-label={t.pf_food_use_catalog.replace('{name}', f.nombre)}
+                      title={t.pf_food_use_catalog.replace('{name}', f.nombre)}
+                      className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-full border border-dashed border-sage-300 bg-white text-xs text-sage-600 hover:border-wellness-400 hover:text-sage-800 transition-colors disabled:cursor-wait"
+                    >
+                      <img src={foodImageUrl(f.catalog)} alt="" className="w-6 h-6 rounded-full object-contain bg-white opacity-70" />
+                      {f.nombre}
+                    </button>
+                  );
+                }
                 if (!f.product) {
                   return (
                     <button
@@ -521,7 +604,17 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
           className="hidden"
           onChange={e => { onFiles([...e.target.files]); e.target.value = ''; }}
         />
-        <Button variant="secondary" size="sm" icon={ImagePlus} onClick={() => fileRef.current?.click()}>{t.pf_add_products}</Button>
+        <input
+          ref={replaceRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={e => { onReplaceFile(e.target.files[0]); e.target.value = ''; }}
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" size="sm" icon={Apple} onClick={() => setCatalogOpen(true)}>{t.pf_food_catalog}</Button>
+          <Button variant="secondary" size="sm" icon={ImagePlus} onClick={() => fileRef.current?.click()}>{t.pf_add_products}</Button>
+        </div>
       </div>
       {products.length === 0 ? (
         <p className="text-sm text-sage-500 py-8 text-center border border-dashed border-sage-300 rounded-soft">{t.pf_no_products}</p>
@@ -540,7 +633,12 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
                     className="w-4 h-4 accent-wellness-400"
                   />
                 </label>
-                <div className="absolute top-1 right-1">
+                <div className="absolute top-1 right-1 flex">
+                  <IconBtn
+                    icon={ImagePlus}
+                    label={t.pf_product_change_photo.replace('{name}', pr.nombre)}
+                    onClick={() => { setReplaceFor(pr); replaceRef.current?.click(); }}
+                  />
                   <IconBtn icon={Trash2} label={`${t.pf_remove}: ${pr.nombre}`} danger onClick={() => remove(pr)} />
                 </div>
                 <img src={pr.imagen} alt="" className="h-28 w-full object-contain mt-5" />
@@ -555,6 +653,13 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
           })}
         </div>
       )}
+      <FoodCatalogPicker
+        open={catalogOpen}
+        onClose={() => setCatalogOpen(false)}
+        products={products}
+        selected={selected}
+        onPick={pickFromCatalog}
+      />
       {ConfirmDialog}
     </div>
   );
