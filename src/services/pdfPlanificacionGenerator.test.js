@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
-import { generatePlanificacionPDF, splitQuantity } from './pdfPlanificacionGenerator';
+import { generatePlanificacionPDF, splitQuantity, glueUnits } from './pdfPlanificacionGenerator';
 import { samplePlanificacion } from './planificacion.fixture';
 
 const loadFont = async (file) => new Uint8Array(readFileSync(join(process.cwd(), 'public', 'fonts', file)));
@@ -75,6 +75,13 @@ describe('generatePlanificacionPDF', () => {
     expect(await menuPages(plan)).toBe(1);
   });
 
+  it('splits each meal into two halves of the week when even a meal per page is too long', async () => {
+    const plan = samplePlanificacion();
+    const long = dish('Plato con muchos ingredientes', Array.from({ length: 11 }, (_, i) => `Ingrediente número ${i + 1}`));
+    plan.menu.dias = plan.menu.dias.map(d => ({ ...d, comida: { a: long, b: long }, cena: { a: long, b: long } }));
+    expect(await menuPages(plan)).toBe(4);
+  });
+
   it('keeps a light menu on a single page', async () => {
     const plan = samplePlanificacion();
     plan.menu.dias = plan.menu.dias.map(d => ({
@@ -129,5 +136,16 @@ describe('splitQuantity', () => {
     for (const s of ['Café con leche (sin azúcar)', 'Pollo, pechuga (plancha)', '1 onza de chocolate negro (72-85 %)', 'Frutos secos (15 g, ej.: nueces)', 'Canela']) {
       expect(splitQuantity(s)).toEqual({ name: s, qty: '' });
     }
+  });
+});
+
+describe('glueUnits', () => {
+  it('keeps a number and its unit on the same line', () => {
+    expect(glueUnits('Taquitos de jamón (40 g)'.split(' '))).toEqual(['Taquitos', 'de', 'jamón', '(40 g)']);
+    expect(glueUnits('150 ml de leche, 72-85 %'.split(' '))).toEqual(['150 ml', 'de', 'leche,', '72-85 %']);
+  });
+
+  it('leaves words that only look like units alone', () => {
+    expect(glueUnits('2 lonchas de pavo'.split(' '))).toEqual(['2', 'lonchas', 'de', 'pavo']);
   });
 });

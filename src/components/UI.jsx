@@ -18,9 +18,10 @@ export const useToast = () => {
 export const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([]);
 
-  const addToast = useCallback((message, type = 'info', duration = 4000) => {
+  // `action` ({ label, onClick }) adds a button that closes the toast.
+  const addToast = useCallback((message, type = 'info', duration = 4000, action = null) => {
     const id = Date.now() + Math.random();
-    setToasts(prev => [...prev, { id, message, type }]);
+    setToasts(prev => [...prev, { id, message, type, action }]);
     if (duration > 0) {
       setTimeout(() => {
         setToasts(prev => prev.filter(t => t.id !== id));
@@ -34,10 +35,10 @@ export const ToastProvider = ({ children }) => {
   }, []);
 
   const toast = {
-    success: (msg, duration) => addToast(msg, 'success', duration),
-    error:   (msg, duration) => addToast(msg, 'error',   duration),
-    warning: (msg, duration) => addToast(msg, 'warning', duration),
-    info:    (msg, duration) => addToast(msg, 'info',    duration),
+    success: (msg, duration, action) => addToast(msg, 'success', duration, action),
+    error:   (msg, duration, action) => addToast(msg, 'error',   duration, action),
+    warning: (msg, duration, action) => addToast(msg, 'warning', duration, action),
+    info:    (msg, duration, action) => addToast(msg, 'info',    duration, action),
   };
 
   return (
@@ -59,7 +60,7 @@ const ToastContainer = ({ toasts, onRemove }) => {
   );
 };
 
-export const Toast = ({ message, type = 'info', onClose }) => {
+export const Toast = ({ message, type = 'info', action, onClose }) => {
   const t = useT();
   // Barra lateral de color + icona semàntica, fons blanc
   const config = {
@@ -78,6 +79,14 @@ export const Toast = ({ message, type = 'info', onClose }) => {
       <div className="flex items-center gap-3 px-3 py-3 flex-1">
         <Icon size={16} className={`${text} shrink-0`} />
         <span className="flex-1 text-sm font-medium text-sage-800">{message}</span>
+        {action && (
+          <button
+            onClick={() => { action.onClick(); onClose?.(); }}
+            className="px-2 py-1 text-xs font-semibold text-wellness-700 hover:bg-wellness-50 rounded-button transition-colors shrink-0"
+          >
+            {action.label}
+          </button>
+        )}
         {onClose && (
           <button onClick={onClose} aria-label={t.close} className="p-1 hover:bg-sage-100 rounded transition-colors">
             <X size={13} className="text-sage-500" />

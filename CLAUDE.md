@@ -64,7 +64,7 @@ nutripolo-app/
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
 │   │   ├── plan/WebRecipePicker.jsx  # Llista de receptes de nutripoloraquel.com (WebRecipeList: selector i pestanya Recetas)
 │   │   ├── plan/FoodCatalogPicker.jsx # Selector del catàleg d'aliments amb foto
-│   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
+│   │   ├── PatientSuggestionsInbox.jsx # Pacients de Google Calendar per revisar (vincular / crear fitxa)
 │   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
 │   │   ├── ServicesView.jsx          # Gestio de serveis/tarifes
@@ -88,7 +88,7 @@ nutripolo-app/
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
 │   │   ├── foodCatalog.js            # Càrrega i filtres del catàleg d'aliments (pur, amb tests)
 │   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
-│   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
+│   │   ├── fuzzyMatcher.js           # Quin pacient es cada cita importada (pur, amb tests)
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
@@ -196,7 +196,7 @@ fn gcal_exchange_token(client_id, client_secret, code, redirect_uri) -> Result<T
 fn gcal_refresh_token(client_id, client_secret, refresh_token) -> Result<TokenResponse, String>
 fn gcal_revoke_token(token) -> Result<(), String>
 fn gcal_list_calendars(token) -> Result<String, String>
-fn gcal_list_events(token, calendar_id, time_min, time_max, time_zone) -> Result<String, String>  // inclou cancel·lats (showDeleted)
+fn gcal_list_events(token, calendar_id, time_min, time_max, time_zone) -> Result<String, String>  // inclou cancel·lats (showDeleted) i `attendees` (correus, sense el propietari ni sales) + `organizer` / `organizer_self`
 fn gcal_get_event(token, calendar_id, event_id) -> Result<String, String>
 fn gcal_create_event(token, calendar_id, event_json) -> Result<String, String>      // id determinista; 409 → PATCH
 fn gcal_update_event(token, calendar_id, event_id, event_json) -> Result<String, String>  // PATCH
@@ -236,6 +236,10 @@ fn quit_app()                                         // el JS el crida despres 
 - Esdeveniments creats amb id determinista (`googleEventIdFor`) → mai duplicats
 - Esborrar: `googleCalendar.deleteConsultation` (tombstone a `gcalPendingDeletes` si no hi ha xarxa o el calendari es de nomes lectura); esborrat a Google → s'esborra si la cita es buida, si no queda `cancelada` + `remoteDeleted`
 - Errors del backend: `"<op> failed (<status>) [<reason>]: <msg>"`; es reintenten xarxa, 5xx, 429 i 403 de rate limit
+- Pacient de cada cita importada (tots els calendaris de consultes, propi i de clíniques): `_resolvePatient` / `_rematch` amb `matchPatient` (`fuzzyMatcher.js`), clients indexats un cop per sync (`clientIndex`). Ordre: correu dels convidats o correu/telèfon de la descripció (telèfons sense espais ni +34) → nom exacte únic → difús. S'assigna sol (`matchStatus: 'exact'`, `matchedBy: 'system'`, `matchedVia`, `matchedAt`, `matchScore`) només per contacte o nom exacte únic i si l'organitzador és el mateix calendari (`organizer_self` o `organizer` = id del calendari): una invitació d'algú altre (Google les afegeix soles) només es proposa (`pending-confirm`); un nom repetit o un contacte compartit → suggeriment `pending`; difús ≥ 0,92 → `pending-confirm` sense `clienteId`; res → suggeriment sense candidats (crear fitxa, prerrellenada amb `displayName`, `contactEmail`, `contactPhone`)
+- Un suggeriment per pacient i calendari (`normalizedName`), amb `consultationIds`; els noms descartats no tornen. Soroll (`NOISE_TITLES`: bloqueig, dinar, personal…, sense títol, "Consulta" sola, tot el dia sense coincidència segura) no genera res
+- No es torna a avaluar mai: cita amb `clienteId`, decisió de l'usuari (`matchedBy: 'user'`, `manual`, `exact`, `dismissed`) ni esdeveniment creat per l'app (`nutripolo_id`). Les importades sense pacient ni suggeriment viu s'omplen al sync següent; si Google canvia el títol, es refà. `eventToConsultation` no porta `clienteId`, així un canvi remot mai esborra un vincle
+- Assignar no escriu mai a Google; una cita vinculada pel sync conserva el títol de Google en fer push. Desfer: `unlinkAutoMatch` (cita o fitxa), sense `localUpdatedAt`. `syncAll` torna `suggested` (suggeriments nous) → avís amb "Revisar" (`notifySuggestions`)
 
 ### Recordatoris de cites
 - Configuracio a `config.reminders` (valors per defecte a `DEFAULT_REMINDER_CONFIG`)
@@ -252,9 +256,9 @@ fn quit_app()                                         // el JS el crida despres 
 - Secció Productos: un aliment de la planificació que es diu igual que un de la biblioteca d'aliments (`foodMatcher`: primer els genèrics, després el bàsic de Mercadona sense parèntesi) agafa la foto amb un clic; el botó "Biblioteca de alimentos" (`FoodCatalogPicker`) tria de tota la biblioteca. La foto es copia a `planLibrary.productos` (`foodPhotoDataUrl`)
 - Una planificació nova copia el contingut de l'última del client; els títols de "Mis recetas" i de la web autocompleten ingredients (`buildDishIndex`)
 - "Mis recetas": `planLibrary.recetas` (`{ id, titulo, alimentos, receta, nota, updatedAt }`, clau = `dishKey(titulo)`). En desar una planificació s'hi desen sols els plats i opcions amb títol i aliments nous o canviats des que es va obrir l'editor (`collectOwnRecipes` + `mergeOwnRecipes`), excepte receptes de la web sense retocar (així una recepta esborrada no torna); la migració v13 la sembra amb les planificacions existents. Es tria i s'esborra des de la pestanya del selector de receptes
-- PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt
+- PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt. Mides de text només de l'escala `T` del generador (una mida per rol)
 - Ingredients "Nom (170 g)" → quantitat alineada a la dreta (`splitQuantity`); a la guia, "Pa: 60 g" → taula aliment | ració
-- El menú va en vertical com la resta (un dia per fila, columnes Comida A/B · Cena A/B) en una sola pàgina si el text hi cap a mida llegible; si no, es parteix en comidas i cenas
+- El menú va en vertical com la resta (un dia per fila, columnes Comida A/B · Cena A/B) en una sola pàgina si el text hi cap a mida llegible; si no, es parteix en comidas i cenas i, en últim cas, una columna (A o B) per pàgina. Les columnes buides no s'imprimeixen
 - Receptes de la web (`webRecipes.js`): llista per l'API REST de WordPress (tipus `receta`) i ingredients/temps/etiquetes llegits de l'HTML de cada recepta (camps ACF que l'API no exposa). Memòria cau a `planLibrary.recetasWeb` (`{ items, syncedAt }`); es resincronitza en obrir l'editor si té més de 6 h i només es baixen les receptes amb `modified` nou. El servidor atén les peticions en sèrie (~6 s cadascuna): les pàgines es baixen d'una en una, la llista es mostra de seguida amb `ingredientes: null` per a les pendents, i una recepta pendent es baixa a l'acte si es tria (`loadWebRecipeNow`). Triar-ne una omple títol, enllaç (`receta`) i només els ingredients clau (`summarizeIngredients`: sense quantitats, rebost, espècies ni opcionals, i les verdures de sofrit en una línia), o la versió retocada si n'hi ha una a "Mis recetas"; també surten a l'autocompletat de títols (`buildDishIndex`, per darrere de "Mis recetas")
 - Les imatges de la web porten `referrerPolicy="no-referrer"`: el servidor talla la connexió si rep un Referer d'un altre lloc
 

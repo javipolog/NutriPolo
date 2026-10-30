@@ -69,6 +69,17 @@ pub struct CalendarEvent {
     pub updated: Option<String>, // ISO 8601 timestamp
     pub nutripolo_id: Option<String>, // stored in extendedProperties.private
     pub timezone: Option<String>, // IANA timezone (e.g. "Europe/Madrid")
+    /// Guest emails (read only: never sent back, so PATCH keeps the guests).
+    /// Leaves out the calendar owner and rooms; used to match the patient.
+    #[serde(default)]
+    pub attendees: Vec<String>,
+    /// Organizer email (read only). An invitation from someone else can land
+    /// in the calendar on its own, so the JS never trusts it to pick a patient.
+    #[serde(default)]
+    pub organizer: Option<String>,
+    /// The organizer is the account itself (read only).
+    #[serde(default)]
+    pub organizer_self: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -259,6 +270,19 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         .as_str()
         .map(|s| s.to_string());
 
+    let attendees = event["attendees"]
+        .as_array()
+        .map(|list| {
+            list.iter()
+                .filter(|a| !a["self"].as_bool().unwrap_or(false) && !a["resource"].as_bool().unwrap_or(false))
+                .filter_map(|a| a["email"].as_str().map(|e| e.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let organizer = event["organizer"]["email"].as_str().map(|s| s.to_string());
+    let organizer_self = event["organizer"]["self"].as_bool().unwrap_or(false);
+
     CalendarEvent {
         id,
         summary,
@@ -270,6 +294,9 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         updated,
         nutripolo_id,
         timezone,
+        attendees,
+        organizer,
+        organizer_self,
     }
 }
 
@@ -794,6 +821,9 @@ mod tests {
             updated: None,
             nutripolo_id: Some("abc".to_string()),
             timezone: Some("Europe/Madrid".to_string()),
+            attendees: vec!["guest@example.com".to_string()],
+            organizer: Some("guest@example.com".to_string()),
+            organizer_self: false,
         }
     }
 
@@ -807,6 +837,9 @@ mod tests {
         assert_eq!(body["extendedProperties"]["private"]["nutripoloId"], "abc");
         // The id is only added on create, not part of the patch body.
         assert!(body.get("id").is_none());
+        // Guests and organizer are never written: PATCH keeps the ones in Google.
+        assert!(body.get("attendees").is_none());
+        assert!(body.get("organizer").is_none());
     }
 
     #[test]
@@ -832,5 +865,27 @@ mod tests {
         assert_eq!(ev.status.as_deref(), Some("cancelled"));
         let minimal = map_google_event(&serde_json::json!({ "id": "e2", "status": "cancelled" }));
         assert_eq!(minimal.start_datetime, "");
+        assert!(minimal.attendees.is_empty());
+    }
+
+    #[test]
+    fn maps_guest_emails_without_owner_or_rooms() {
+        let ev = map_google_event(&serde_json::json!({
+            "id": "e3",
+            "attendees": [
+                { "email": "owner@example.com", "self": true, "organizer": true },
+                { "email": "room@resource.calendar.google.com", "resource": true },
+                { "email": "guest@example.com", "responseStatus": "needsAction" },
+                { "displayName": "No email" }
+            ]
+        }));
+        assert_eq!(ev.attendees, vec!["guest@example.com".to_string()]);
+        assert!(!ev.organizer_self);
+
+        let own = map_google_event(&serde_json::json!({
+            "id": "e4", "organizer": { "email": "owner@example.com", "self": true }
+        }));
+        assert_eq!(own.organizer.as_deref(), Some("owner@example.com"));
+        assert!(own.organizer_self);
     }
 }
