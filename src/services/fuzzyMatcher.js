@@ -286,7 +286,10 @@ const candidate = (index, id, rawName) => {
 /**
  * Decide which client a Google event belongs to.
  *
- * @param {object} event   { summary, description, attendees?: string[], allDay? }
+ * @param {object} event   { summary, description, attendees?: string[], allDay?, trusted? }
+ *   `trusted: false` → the event was organized by someone else (an invitation
+ *   anyone can send): its title, guests and description are not proof of who
+ *   the patient is, so a sure match is only proposed ('confirm').
  * @param {object} index   buildClientIndex(clients)
  * @param {object} [opts]  { autoThreshold, suggestThreshold, ignoreEmails?: Set }
  * @returns {{
@@ -294,13 +297,19 @@ const candidate = (index, id, rawName) => {
  *   clienteId?, via?: 'email'|'phone'|'name', score?, candidates: Array,
  *   rawName, normalizedName, contact: { email, phone }
  * }}
- *   assign  → link now (contact or unique exact name)
- *   confirm → one strong fuzzy candidate, shown for a 1-click confirmation
+ *   assign  → link now (contact or unique exact name, trusted event)
+ *   confirm → one strong candidate, shown for a 1-click confirmation
  *   review  → several candidates (same name, shared phone, fuzzy)
  *   new     → no candidate: offer to create a client
  *   noise   → not an appointment (or no name to look up): nothing to suggest
  */
-export function matchPatient(event, index, { autoThreshold = 0.92, suggestThreshold = 0.75, ignoreEmails } = {}) {
+export function matchPatient(event, index, opts) {
+  const m = decidePatient(event, index, opts);
+  if (m.result !== 'assign' || event?.trusted !== false) return m;
+  return { ...m, result: 'confirm', via: undefined, candidates: [candidate(index, m.clienteId, m.rawName)] };
+}
+
+function decidePatient(event, index, { autoThreshold = 0.92, suggestThreshold = 0.75, ignoreEmails } = {}) {
   const rawName = extractPatientName(event?.summary || '');
   const normalizedName = nameKey(rawName);
   const fromText = extractContacts(event?.description);

@@ -887,6 +887,9 @@ export const googleCalendar = {
     const m = matchPatient({
       summary: ev.summary, description: ev.description, attendees: ev.attendees,
       allDay: !!ev.start_datetime && !ev.start_datetime.includes('T'),
+      // Google adds invitations from anyone to the calendar: only events the
+      // calendar itself organizes may link a patient on their own.
+      trusted: !!ev.organizer_self || (!!ev.organizer && normalizeEmail(ev.organizer) === normalizeEmail(ctx.calId)),
     }, ctx.index, ctx.opts);
     if (m.result === 'noise') return null;
 

@@ -261,7 +261,7 @@ describe('push', () => {
 
 describe('pull', () => {
   it('imports remote events and applies remote edits', async () => {
-    cal(CAL).set('g1', { id: 'g1', summary: 'Consulta - Ana López', start_datetime: '2026-10-22T08:00:00Z', end_datetime: '2026-10-22T09:00:00Z', updated: stamp() });
+    cal(CAL).set('g1', { id: 'g1', summary: 'Consulta - Ana López', start_datetime: '2026-10-22T08:00:00Z', end_datetime: '2026-10-22T09:00:00Z', updated: stamp(), organizer_self: true });
     tick();
     await googleCalendar.syncAll();
     const c = useStore.getState().consultations.find(x => x.googleEventId === 'g1');
@@ -452,9 +452,11 @@ describe('patient matching', () => {
     useStore.setState({ clients: PATIENTS.map(c => ({ ...c })), patientSuggestions: [] });
   });
 
+  // Organized by the calendar itself unless a test says otherwise.
   function remote(id, summary, extra = {}, calId = CAL) {
     cal(calId).set(id, {
-      id, summary, start_datetime: '2026-10-22T10:00:00+02:00', end_datetime: '2026-10-22T10:45:00+02:00', updated: stamp(), ...extra,
+      id, summary, start_datetime: '2026-10-22T10:00:00+02:00', end_datetime: '2026-10-22T10:45:00+02:00', updated: stamp(),
+      organizer: calId, organizer_self: calId === CAL, ...extra,
     });
   }
   const byEvent = (id) => useStore.getState().consultations.find(c => c.googleEventId === id);
@@ -474,6 +476,16 @@ describe('patient matching', () => {
     expect(byEvent('e-mail').matchedAt).toBeTruthy();
     expect(open()).toHaveLength(0);
     expect(stats.suggested).toBe(0);
+  });
+
+  it('only proposes the patient of an invitation sent by someone else', async () => {
+    const outsider = { organizer: 'someone@example.net', organizer_self: false };
+    remote('i1', 'Cita', { ...outsider, attendees: ['lucia.ferrer@example.com'] });
+    remote('i2', 'Consulta - Marcos Prieto', { ...outsider, start_datetime: '2026-10-23T10:00:00+02:00', end_datetime: '2026-10-23T10:45:00+02:00' });
+    await sync();
+    expect(byEvent('i1')).toMatchObject({ clienteId: null, matchStatus: 'auto-pending-review', suggestedClienteId: 'lucia' });
+    expect(byEvent('i2')).toMatchObject({ clienteId: null, matchStatus: 'auto-pending-review', suggestedClienteId: 'marcos' });
+    expect(open().map(sg => sg.status)).toEqual(['pending-confirm', 'pending-confirm']);
   });
 
   it('assigns a unique exact name', async () => {

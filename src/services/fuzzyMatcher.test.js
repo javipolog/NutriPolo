@@ -118,6 +118,14 @@ describe('matchPatient', () => {
     expect(match({ summary: 'Marcos Prieto', allDay: true }).result).toBe('assign');
   });
 
+  it('only proposes a sure match when someone else organized the event', () => {
+    expect(match({ summary: 'Cita', attendees: ['lucia.ferrer@example.com'], trusted: false }))
+      .toMatchObject({ result: 'confirm', clienteId: 'c1', candidates: [{ clienteId: 'c1' }] });
+    expect(match({ summary: 'Marcos Prieto', trusted: false })).toMatchObject({ result: 'confirm', clienteId: 'c2' });
+    // Nothing else changes: still asks for duplicated names
+    expect(match({ summary: 'Sara Gil', trusted: false }).result).toBe('review');
+  });
+
   it('ignores the calendar owner address', () => {
     const m = match({ summary: 'Nuria Campos', attendees: ['lucia.ferrer@example.com'] },
       { ignoreEmails: new Set(['lucia.ferrer@example.com']) });

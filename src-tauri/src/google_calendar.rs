@@ -73,6 +73,13 @@ pub struct CalendarEvent {
     /// Leaves out the calendar owner and rooms; used to match the patient.
     #[serde(default)]
     pub attendees: Vec<String>,
+    /// Organizer email (read only). An invitation from someone else can land
+    /// in the calendar on its own, so the JS never trusts it to pick a patient.
+    #[serde(default)]
+    pub organizer: Option<String>,
+    /// The organizer is the account itself (read only).
+    #[serde(default)]
+    pub organizer_self: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -273,6 +280,9 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         })
         .unwrap_or_default();
 
+    let organizer = event["organizer"]["email"].as_str().map(|s| s.to_string());
+    let organizer_self = event["organizer"]["self"].as_bool().unwrap_or(false);
+
     CalendarEvent {
         id,
         summary,
@@ -285,6 +295,8 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         nutripolo_id,
         timezone,
         attendees,
+        organizer,
+        organizer_self,
     }
 }
 
@@ -810,6 +822,8 @@ mod tests {
             nutripolo_id: Some("abc".to_string()),
             timezone: Some("Europe/Madrid".to_string()),
             attendees: vec!["guest@example.com".to_string()],
+            organizer: Some("guest@example.com".to_string()),
+            organizer_self: false,
         }
     }
 
@@ -823,8 +837,9 @@ mod tests {
         assert_eq!(body["extendedProperties"]["private"]["nutripoloId"], "abc");
         // The id is only added on create, not part of the patch body.
         assert!(body.get("id").is_none());
-        // Guests are never written: PATCH keeps the ones in Google.
+        // Guests and organizer are never written: PATCH keeps the ones in Google.
         assert!(body.get("attendees").is_none());
+        assert!(body.get("organizer").is_none());
     }
 
     #[test]
@@ -865,5 +880,12 @@ mod tests {
             ]
         }));
         assert_eq!(ev.attendees, vec!["guest@example.com".to_string()]);
+        assert!(!ev.organizer_self);
+
+        let own = map_google_event(&serde_json::json!({
+            "id": "e4", "organizer": { "email": "owner@example.com", "self": true }
+        }));
+        assert_eq!(own.organizer.as_deref(), Some("owner@example.com"));
+        assert!(own.organizer_self);
     }
 }
