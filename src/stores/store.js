@@ -895,7 +895,8 @@ function buildClientDeletion(s, id) {
   const consultations = s.consultations.flatMap(c => {
     if (c.clienteId === id) {
       if (!c.googleEventId) return [];
-      return [{ ...c, clienteId: null, matchStatus: 'unknown', suggestedClienteId: undefined, matchScore: undefined }];
+      // matchedBy 'user': the sync must not propose the deleted patient again.
+      return [{ ...c, clienteId: null, matchStatus: 'unknown', matchedBy: 'user', suggestedClienteId: undefined, matchScore: undefined }];
     }
     if (c.suggestedClienteId === id) {
       return [{ ...c, suggestedClienteId: undefined, matchScore: undefined, matchStatus: 'suggested' }];
@@ -1201,8 +1202,9 @@ const useStore = create(
         const data = isSyncOp ? input : withoutSyncFields(input);
         const extra = isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() };
 
-        // Hook: if a user manually changes clienteId on a pending-review consultation,
-        // flip matchStatus to 'manual' and write audit fields.
+        // Hook: if a user manually changes clienteId on a consultation matched by
+        // the sync (pending review, or linked automatically), flip matchStatus to
+        // 'manual' and write audit fields.
         const existing = get().consultations.find(c => c.id === id);
         const isManualClientLink =
           !isSyncOp &&
@@ -1210,7 +1212,6 @@ const useStore = create(
           data.clienteId &&
           data.clienteId !== existing?.clienteId &&
           existing?.matchStatus &&
-          existing.matchStatus !== 'exact' &&
           existing.matchStatus !== 'manual';
         const matchExtra = isManualClientLink ? {
           matchStatus: 'manual',
@@ -1424,14 +1425,56 @@ const useStore = create(
         return pending.length;
       },
 
-      // Attach a consultation ID to a suggestion's consultationIds array
+      // Attach a consultation ID to a suggestion's consultationIds array (once).
       attachConsultationToSuggestion: (suggestionId, consultationId) => set(s => ({
-        patientSuggestions: s.patientSuggestions.map(sg =>
-          sg.id === suggestionId
-            ? { ...sg, consultationIds: [...(sg.consultationIds || []), consultationId] }
-            : sg
-        ),
+        patientSuggestions: s.patientSuggestions.map(sg => {
+          if (sg.id !== suggestionId) return sg;
+          const consultationIds = Array.from(new Set([...(sg.consultationIds || []), consultationId]));
+          return { ...sg, consultationIds, occurrences: Math.max(consultationIds.length, 1) };
+        }),
       })),
+
+      // The consultation no longer belongs to this suggestion (its title changed
+      // in Google). An open suggestion left without consultations is dropped.
+      detachConsultationFromSuggestion: (suggestionId, consultationId) => set(s => {
+        const sg = s.patientSuggestions.find(x => x.id === suggestionId);
+        if (!sg) return {};
+        const consultationIds = (sg.consultationIds || []).filter(id => id !== consultationId);
+        const stillUsed = consultationIds.length > 0
+          || s.consultations.some(c => c.id !== consultationId && c.suggestedFromId === suggestionId);
+        const open = sg.status === 'pending' || sg.status === 'pending-confirm';
+        return {
+          patientSuggestions: open && !stillUsed
+            ? s.patientSuggestions.filter(x => x.id !== suggestionId)
+            : s.patientSuggestions.map(x => x.id === suggestionId
+              ? { ...x, consultationIds, occurrences: Math.max(consultationIds.length, 1) }
+              : x),
+        };
+      }),
+
+      // Undo an automatic link made by the sync (wrong patient). The
+      // consultation is left without a client, marked as the user's decision
+      // so the sync never links it again, and nothing is sent to Google.
+      unlinkAutoMatch: (consultationId) => {
+        const c = get().consultations.find(x => x.id === consultationId);
+        if (!c || !c.clienteId || c.matchedBy !== 'system') return false;
+        const now = new Date().toISOString();
+        set(s => ({
+          consultations: s.consultations.map(x => x.id === consultationId
+            ? {
+                ...x,
+                clienteId: null,
+                matchStatus: 'unknown',
+                matchedBy: 'user',
+                matchedByAt: now,
+                rejectedClienteId: c.clienteId,
+                matchedVia: undefined,
+                matchScore: undefined,
+              }
+            : x),
+        }));
+        return true;
+      },
 
       // ---- SYNC AUDIT (Phase 3 — mass-delete log, stats) ----
       syncAudit: { lastFullSyncAt: null, lastSyncStats: {}, massDeleteEvents: [] },

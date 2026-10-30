@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText, Calendar, ClipboardList, Receipt, ClipboardEdit } from 'lucide-react';
-import { Button, StatusBadge, useToast } from './UI';
+import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText, Calendar, ClipboardList, Receipt, ClipboardEdit, Unlink } from 'lucide-react';
+import { Button, StatusBadge, useToast, useConfirm } from './UI';
 import useStore, { formatDate, formatCurrency, calcIMC } from '../stores/store';
 import { useT, useLocale } from '../i18n';
 import { GOALS, DIET_RESTRICTIONS, ACTIVITY_LEVELS, optionLabel } from '../clientOptions';
@@ -58,8 +58,11 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const config = useStore(s => s.config);
   const setCurrentView = useStore(s => s.setCurrentView);
 
+  const unlinkAutoMatch = useStore(s => s.unlinkAutoMatch);
+
   const t = useT();
   const toast = useToast();
+  const { confirm, ConfirmDialog } = useConfirm();
   const [tab, setTab] = useState('profile');
   const [showEdit, setShowEdit] = useState(false);
   const [emailDoc, setEmailDoc] = useState(null);
@@ -99,6 +102,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
 
   return (
     <div className="space-y-5 animate-fadeIn">
+      {ConfirmDialog}
       {/* Breadcrumb */}
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-sage-500 hover:text-sage-800 transition-colors">
@@ -268,6 +272,19 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                     <p className="text-sm font-medium text-sage-800">{c.tipo}</p>
                     {c.notasCliente && <p className="text-xs text-sage-500 mt-1">{c.notasCliente}</p>}
                   </div>
+                  {c.matchedBy === 'system' && c.matchStatus === 'exact' && (
+                    <button
+                      onClick={async () => {
+                        const ok = await confirm({ title: t.consultation_unlink_auto, message: t.consultation_unlink_confirm });
+                        if (ok && unlinkAutoMatch(c.id)) toast.info(t.consultation_unlinked_ok);
+                      }}
+                      title={t.client_consultation_auto_title.replace('{via}', t[`match_via_${c.matchedVia || 'name'}`])}
+                      className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-badge bg-info-light text-info hover:bg-info/20 transition-colors shrink-0"
+                    >
+                      <Unlink size={11} />
+                      {t.client_consultation_auto}
+                    </button>
+                  )}
                   {c.estado === 'programada' && (
                     <button
                       onClick={() => sendWhatsApp(c, client)}

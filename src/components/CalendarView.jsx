@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Plus, MapPin, RefreshCw, Check, Trash2, Aler
 import { Button, Badge, SegmentedControl, useToast, useConfirm, clickableProps } from './UI';
 import useStore, { formatDate, todayISO, filterVisibleConsultations, filterVisiblePersonalEvents } from '../stores/store';
 import { googleCalendar, formatSyncStats, formatSyncErrors } from '../services/googleCalendarService';
+import { notifySuggestions } from '../hooks/useBackgroundJobs';
 import { useT, useLocale, plural } from '../i18n';
 import { ConsultationModal } from './ConsultationModal';
 import { useNow } from '../hooks/useNow';
@@ -635,6 +636,7 @@ export const CalendarView = () => {
       const stats = await googleCalendar.syncAll();
       toast.success(formatSyncStats(stats, t));
       if (stats.errors > 0) toast.error(formatSyncErrors(stats, t));
+      if (stats.suggested > 0) notifySuggestions(toast, t, stats.suggested);
       if (stats.conflicts > 0) {
         toast.info(`${stats.conflicts} ${stats.conflicts > 1 ? t.sync_conflict_resolved_plural : t.sync_conflict_resolved}`);
       }

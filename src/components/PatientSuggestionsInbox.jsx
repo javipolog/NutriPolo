@@ -7,6 +7,9 @@ import useStore from '../stores/store';
 import { Button, useToast, useConfirm } from './UI';
 import { useT, plural } from '../i18n';
 
+// Name as written in the event (older suggestions only have the normalized one).
+const suggestionName = (sg) => sg.displayName || sg.normalizedName || '';
+
 // ── Score bar ─────────────────────────────────────────────────────────────────
 
 function scoreBarColor(score) {
@@ -68,7 +71,7 @@ const AutoMatchCard = ({ suggestion, clients, onConfirm, onOverride, onDismiss }
               "{suggestion.rawSummary}"
             </p>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-semibold text-sage-900">{suggestion.normalizedName}</span>
+              <span className="text-sm font-semibold text-sage-900">{suggestionName(suggestion)}</span>
               <ArrowRight size={12} className="text-sage-400 shrink-0" />
               <span className="text-sm font-semibold text-info">{proposedClient.nombre}</span>
               {suggestion.topScore != null && (
@@ -153,11 +156,13 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
   const t = useT();
   const [expanded, setExpanded] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  // Prefilled with what the event said: its name, and the guest email or the
+  // phone written in its description.
   const [newClientName, setNewClientName]   = useState(
-    (suggestion.normalizedName || '').replace(/\b\w/g, c => c.toUpperCase())
+    suggestion.displayName || (suggestion.normalizedName || '').replace(/(^|\s)\S/g, c => c.toUpperCase())
   );
-  const [newClientPhone, setNewClientPhone] = useState('');
-  const [newClientEmail, setNewClientEmail] = useState('');
+  const [newClientPhone, setNewClientPhone] = useState(suggestion.contactPhone || '');
+  const [newClientEmail, setNewClientEmail] = useState(suggestion.contactEmail || '');
 
   const candidateClients = useMemo(() =>
     (suggestion.candidates || [])
@@ -177,7 +182,7 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
               "{suggestion.rawSummary}"
             </p>
             <div className="flex items-center gap-2">
-              <p className="text-sm font-semibold text-sage-900">{suggestion.normalizedName}</p>
+              <p className="text-sm font-semibold text-sage-900">{suggestionName(suggestion)}</p>
               {suggestion.occurrences > 1 && (
                 <span className="flex-shrink-0 px-1.5 py-0.5 bg-wellness-100 text-wellness-700 text-xs rounded-full font-medium">
                   ×{suggestion.occurrences}
@@ -211,8 +216,12 @@ const SuggestionCard = ({ suggestion, clients, onLink, onCreate, onDismiss }) =>
                   key={clienteId}
                   className="flex items-center gap-3 bg-sage-50 border border-sage-100 rounded px-3 py-2"
                 >
-                  <span className="text-sm text-sage-800 font-medium shrink-0 w-28 truncate" title={client.nombre}>
-                    {client.nombre}
+                  <span className="shrink-0 w-28 min-w-0" title={client.nombre}>
+                    <span className="block text-sm text-sage-800 font-medium truncate">{client.nombre}</span>
+                    {/* Tells apart clients with the same name */}
+                    {(client.telefono || client.email) && (
+                      <span className="block text-xs text-sage-500 truncate">{client.telefono || client.email}</span>
+                    )}
                   </span>
                   <ScoreBar score={score} />
                   <button
@@ -388,7 +397,7 @@ export const PatientSuggestionsInbox = () => {
     const names = pendingConfirm
       .map(sg => {
         const proposed = clients.find(c => c.id === sg.suggestedClienteId);
-        return proposed ? `${sg.normalizedName} → ${proposed.nombre}` : null;
+        return proposed ? `${suggestionName(sg)} → ${proposed.nombre}` : null;
       })
       .filter(Boolean)
       .join('\n');

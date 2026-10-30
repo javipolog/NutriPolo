@@ -4,7 +4,7 @@ import { googleCalendar } from '../services/googleCalendarService';
 import { getReminderCandidates, getReminderConfig, isAutoSendable, isQuietTime } from '../services/reminderService';
 import { getReviewCandidates, getReviewConfig, isReviewAutoSendable, reviewState } from '../services/reviewRequestService';
 import { deliverEmailReminder, deliverReviewEmail } from './useReminderActions';
-import { useT } from '../i18n';
+import { plural, useT } from '../i18n';
 
 const TICK_MS = 5 * 60 * 1000;
 
@@ -12,6 +12,14 @@ const TICK_MS = 5 * 60 * 1000;
 const inFlight = new Set();
 // The "reconnect Google" toast is shown once, not on every tick.
 let reauthNotified = false;
+
+/** Discreet notice after a sync left new patients in the inbox, with a shortcut to it. */
+export function notifySuggestions(toast, t, n) {
+  toast.info(plural(t, 'gcal_new_suggestions', n), 8000, {
+    label: t.gcal_review_action,
+    onClick: () => useStore.getState().setCurrentView('inbox'),
+  });
+}
 
 /**
  * Send the email reminders whose window is open. Runs only with automatic
@@ -120,6 +128,7 @@ export function useBackgroundJobs({ toast }) {
           if (!cancelled && stats.conflicts > 0) {
             toastRef.current.info(tRef.current.gcal_bg_conflicts.replace('{n}', stats.conflicts));
           }
+          if (!cancelled && stats.suggested > 0) notifySuggestions(toastRef.current, tRef.current, stats.suggested);
         } catch (e) {
           if (cancelled) return;
           if (useStore.getState().config.googleCalendar?.needsReauth) {
