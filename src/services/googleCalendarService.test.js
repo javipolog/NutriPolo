@@ -140,11 +140,12 @@ describe('parseGoogleDateTime', () => {
 
   it('uses the local hour when importing an event', () => {
     const c = googleCalendar.eventToConsultation(
-      { id: 'e1', summary: 'Consulta - Ana López', start_datetime: '2026-10-20T08:00:00Z', end_datetime: '2026-10-20T08:45:00Z' },
-      [{ id: 'ana', nombre: 'Ana López' }], CAL,
+      { id: 'e1', summary: 'Consulta - Ana López', start_datetime: '2026-10-20T08:00:00Z', end_datetime: '2026-10-20T08:45:00Z' }, CAL,
     );
-    expect(c).toMatchObject({ fecha: '2026-10-20', hora: '10:00', duracion: 45, clienteId: 'ana' });
-    expect(googleCalendar.eventToConsultation({ id: 'e2', status: 'cancelled', start_datetime: '' }, [], CAL)).toBeNull();
+    expect(c).toMatchObject({ fecha: '2026-10-20', hora: '10:00', duracion: 45 });
+    // The patient is decided by the sync, never by the conversion.
+    expect('clienteId' in c).toBe(false);
+    expect(googleCalendar.eventToConsultation({ id: 'e2', status: 'cancelled', start_datetime: '' }, CAL)).toBeNull();
   });
 });
 
@@ -433,5 +434,224 @@ describe('session', () => {
     const stats = await googleCalendar.syncAll();
     expect(stats.errors).toBe(1);
     expect(stats.errorDetails[0]).toMatchObject({ calendar: 'NutriPolo' });
+  });
+});
+
+// ── Patient matching on import ───────────────────────────────────────────
+// Invented people only: no real patient data in tests.
+
+describe('patient matching', () => {
+  const PATIENTS = [
+    { id: 'lucia', nombre: 'Lucía Ferrer Soto', email: 'lucia.ferrer@example.com', telefono: '+34 600 11 22 33' },
+    { id: 'marcos', nombre: 'Marcos Prieto', telefono: '611223344' },
+    { id: 'sara1', nombre: 'Sara Gil' },
+    { id: 'sara2', nombre: 'Sara Gil' },
+  ];
+
+  beforeEach(() => {
+    useStore.setState({ clients: PATIENTS.map(c => ({ ...c })), patientSuggestions: [] });
+  });
+
+  function remote(id, summary, extra = {}, calId = CAL) {
+    cal(calId).set(id, {
+      id, summary, start_datetime: '2026-10-22T10:00:00+02:00', end_datetime: '2026-10-22T10:45:00+02:00', updated: stamp(), ...extra,
+    });
+  }
+  const byEvent = (id) => useStore.getState().consultations.find(c => c.googleEventId === id);
+  const open = () => useStore.getState().patientSuggestions.filter(sg => sg.status === 'pending' || sg.status === 'pending-confirm');
+  async function sync() {
+    tick();
+    return googleCalendar.syncAll();
+  }
+  const googleWrites = () => google.calls.filter(c => ['gcal_create_event', 'gcal_update_event', 'gcal_delete_event'].includes(c));
+
+  it('assigns by guest email and by a phone in the description', async () => {
+    remote('e-mail', 'Cita', { attendees: ['Lucia.Ferrer@example.com'] });
+    remote('e-tel', 'Primera visita', { description: 'Tel. 611 22 33 44' });
+    const stats = await sync();
+    expect(byEvent('e-mail')).toMatchObject({ clienteId: 'lucia', matchStatus: 'exact', matchedBy: 'system', matchedVia: 'email', matchScore: 1 });
+    expect(byEvent('e-tel')).toMatchObject({ clienteId: 'marcos', matchedVia: 'phone' });
+    expect(byEvent('e-mail').matchedAt).toBeTruthy();
+    expect(open()).toHaveLength(0);
+    expect(stats.suggested).toBe(0);
+  });
+
+  it('assigns a unique exact name', async () => {
+    remote('e1', 'Consulta - Marcos Prieto');
+    await sync();
+    expect(byEvent('e1')).toMatchObject({ clienteId: 'marcos', matchedVia: 'name', tipo: 'Google Calendar' });
+  });
+
+  it('does not assign a name shared by two clients: asks instead', async () => {
+    remote('e1', 'Sara Gil');
+    const stats = await sync();
+    expect(byEvent('e1')).toMatchObject({ clienteId: null, matchStatus: 'suggested' });
+    expect(open()).toHaveLength(1);
+    expect(open()[0].candidates.map(c => c.clienteId).sort()).toEqual(['sara1', 'sara2']);
+    expect(stats.suggested).toBe(1);
+  });
+
+  it('proposes a fuzzy match without linking it', async () => {
+    remote('e1', 'Marco Prieto');
+    await sync();
+    const c = byEvent('e1');
+    expect(c).toMatchObject({ clienteId: null, matchStatus: 'auto-pending-review', suggestedClienteId: 'marcos' });
+    expect(open()[0]).toMatchObject({ status: 'pending-confirm', suggestedClienteId: 'marcos', consultationIds: [c.id] });
+
+    useStore.getState().confirmAutoMatch(open()[0].id);
+    expect(byEvent('e1')).toMatchObject({ clienteId: 'marcos', matchStatus: 'manual', matchedBy: 'user' });
+  });
+
+  it('offers to create the client, prefilled, and links every appointment of it', async () => {
+    remote('e1', 'Consulta - Nuria Campos', { attendees: ['nuria.campos@example.com'], description: 'Móvil 633 44 55 66' });
+    remote('e2', 'Nuria Campos (seguimiento)', { start_datetime: '2026-10-29T10:00:00+01:00', end_datetime: '2026-10-29T10:45:00+01:00' });
+    const stats = await sync();
+    expect(open()).toHaveLength(1);
+    const sg = open()[0];
+    expect(sg).toMatchObject({
+      status: 'pending', candidates: [], normalizedName: 'nuria campos', displayName: 'Nuria Campos',
+      contactEmail: 'nuria.campos@example.com', contactPhone: '633445566', occurrences: 2,
+    });
+    expect(sg.consultationIds).toHaveLength(2);
+    expect(byEvent('e1').matchStatus).toBe('unknown');
+    expect(stats.suggested).toBe(1);
+
+    const client = useStore.getState().createClientFromSuggestion(sg.id, { nombre: 'Nuria Campos', email: sg.contactEmail, telefono: sg.contactPhone });
+    expect(byEvent('e1').clienteId).toBe(client.id);
+    expect(byEvent('e2').clienteId).toBe(client.id);
+
+    // Resyncing changes nothing and creates no new suggestion.
+    google.calls = [];
+    expect((await sync()).suggested).toBe(0);
+    expect(byEvent('e2').clienteId).toBe(client.id);
+    expect(googleWrites()).toEqual([]);
+  });
+
+  it('a dismissed name does not come back', async () => {
+    remote('e1', 'Nuria Campos');
+    await sync();
+    useStore.getState().dismissPatientSuggestion(open()[0].id);
+    remote('e2', 'Consulta - Nuria Campos', { start_datetime: '2026-10-30T10:00:00+01:00', end_datetime: '2026-10-30T11:00:00+01:00' });
+    const stats = await sync();
+    expect(open()).toHaveLength(0);
+    expect(stats.suggested).toBe(0);
+    expect(byEvent('e2')).toMatchObject({ clienteId: null, matchStatus: 'dismissed' });
+  });
+
+  it('never overwrites a choice of the user when resyncing', async () => {
+    remote('e1', 'Sara Gil');
+    await sync();
+    useStore.getState().linkPatientSuggestion(open()[0].id, 'sara2');
+    // Retitled in Google to another existing client.
+    remote('e1', 'Marcos Prieto');
+    await sync();
+    expect(byEvent('e1')).toMatchObject({ clienteId: 'sara2', matchedBy: 'user', googleSummary: 'Marcos Prieto' });
+  });
+
+  it('can undo an automatic link, without writing to Google, and it is not redone', async () => {
+    remote('e1', 'Marcos Prieto');
+    await sync();
+    google.calls = [];
+    expect(useStore.getState().unlinkAutoMatch(byEvent('e1').id)).toBe(true);
+    expect(byEvent('e1')).toMatchObject({ clienteId: null, matchedBy: 'user', rejectedClienteId: 'marcos' });
+    await sync();
+    expect(byEvent('e1').clienteId).toBeNull();
+    expect(open()).toHaveLength(0);
+    expect(googleWrites()).toEqual([]);
+  });
+
+  it('never re-evaluates an appointment created in the app', async () => {
+    const c = newConsultation({ clienteId: 'lucia' });
+    await googleCalendar.pushConsultation(c.id);
+    const id = consultation(c.id).googleEventId;
+    remote(id, 'Consulta - Marcos Prieto', { nutripolo_id: c.id });
+    await sync();
+    expect(consultation(c.id).clienteId).toBe('lucia');
+    expect(consultation(c.id).matchStatus).toBeUndefined();
+    expect(open()).toHaveLength(0);
+  });
+
+  it('fills in appointments imported before matching existed, once', async () => {
+    remote('old-known', 'Marcos Prieto');
+    remote('old-unknown', 'Nuria Campos');
+    // As imported by older versions: no client, no match fields, up to date.
+    for (const id of ['old-known', 'old-unknown']) {
+      useStore.getState().addConsultation({
+        ...googleCalendar.eventToConsultation(cal(CAL).get(id), CAL), clienteId: null, remoteUpdated: cal(CAL).get(id).updated,
+      }, { sync: true });
+    }
+    await sync();
+    expect(byEvent('old-known')).toMatchObject({ clienteId: 'marcos', matchedBy: 'system' });
+    expect(open()).toHaveLength(1);
+    expect(open()[0].consultationIds).toEqual([byEvent('old-unknown').id]);
+
+    await sync();
+    await sync();
+    expect(useStore.getState().patientSuggestions).toHaveLength(1);
+    expect(open()[0]).toMatchObject({ occurrences: 1, consultationIds: [byEvent('old-unknown').id] });
+    expect(useStore.getState().consultations).toHaveLength(2);
+  });
+
+  it('follows a title fixed in Google', async () => {
+    remote('e1', 'Marcos Prietto Lago');
+    await sync();
+    expect(open()).toHaveLength(1);
+    remote('e1', 'Marcos Prieto');
+    await sync();
+    expect(byEvent('e1')).toMatchObject({ clienteId: 'marcos', matchStatus: 'exact' });
+    expect(open()).toHaveLength(0);
+    expect(useStore.getState().patientSuggestions).toHaveLength(0);
+  });
+
+  it('ignores events that are not appointments', async () => {
+    remote('n1', 'Bloqueo');
+    remote('n2', 'Comida con Laura');
+    remote('n3', '');
+    remote('n4', 'Consulta');
+    remote('n5', 'Cumpleaños tía', { start_datetime: '2026-10-23', end_datetime: '2026-10-24' });
+    const stats = await sync();
+    expect(useStore.getState().patientSuggestions).toHaveLength(0);
+    expect(stats.suggested).toBe(0);
+    expect(useStore.getState().consultations.every(c => !c.matchStatus)).toBe(true);
+  });
+
+  it('matches the external clinic calendars the same way', async () => {
+    connect({
+      calendars: [
+        { id: CAL, name: 'NutriPolo', syncMode: 'bidirectional', purpose: 'primary' },
+        { id: CLINIC, name: 'Clínica', syncMode: 'readonly', purpose: 'external-clinic' },
+      ],
+    });
+    remote('x1', 'Sara Gil', {}, CLINIC);
+    remote('x2', 'Lucia', { description: 'lucia.ferrer@example.com' }, CLINIC);
+    await sync();
+    expect(byEvent('x1')).toMatchObject({ clienteId: null, matchStatus: 'suggested' });
+    expect(byEvent('x2')).toMatchObject({ clienteId: 'lucia', matchedVia: 'email' });
+    expect(open()[0].sourceCalendarId).toBe(CLINIC);
+  });
+
+  it('keeps the Google title of an automatically linked appointment', async () => {
+    remote('e1', 'Cita online', { attendees: ['lucia.ferrer@example.com'] });
+    await sync();
+    tick();
+    useStore.getState().updateConsultation(byEvent('e1').id, { notasPrivadas: 'nota' });
+    await googleCalendar.pushConsultation(byEvent('e1').id);
+    expect(cal(CAL).get('e1').summary).toBe('Cita online');
+  });
+
+  it('none of the matching writes looks like a local edit', async () => {
+    remote('a', 'Marcos Prieto');
+    remote('b', 'Sara Gil');
+    remote('c', 'Marco Prieto');
+    remote('d', 'Nuria Campos', { attendees: ['nuria.campos@example.com'] });
+    remote('e', 'Cita', { description: '600 11 22 33' });
+    await sync();
+    useStore.getState().confirmAutoMatch(open().find(sg => sg.status === 'pending-confirm').id);
+    useStore.getState().linkPatientSuggestion(open().find(sg => sg.normalizedName === 'sara gil').id, 'sara1');
+    useStore.getState().createClientFromSuggestion(open()[0].id, { nombre: 'Nuria Campos' });
+    google.calls = [];
+    await sync();
+    for (const c of useStore.getState().consultations) expect(c.localUpdatedAt).toBeUndefined();
+    expect(googleWrites()).toEqual([]);
   });
 });

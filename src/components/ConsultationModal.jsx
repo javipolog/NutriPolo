@@ -14,6 +14,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const updateConsultation = useStore(s => s.updateConsultation);
   const addMeasurement = useStore(s => s.addMeasurement);
   const confirmAutoMatch = useStore(s => s.confirmAutoMatch);
+  const unlinkAutoMatch = useStore(s => s.unlinkAutoMatch);
   const patientSuggestions = useStore(s => s.patientSuggestions);
   const config = useStore(s => s.config);
   const t = useT();
@@ -118,6 +119,17 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     }
     toast.success(t.inbox_confirmed_ok);
     onClose();
+  };
+
+  // Linked by the sync (email, phone or unique name) and still untouched.
+  const autoLinkedClient = isEdit && liveConsultation?.matchedBy === 'system' && liveConsultation?.matchStatus === 'exact'
+    ? clients.find(c => c.id === liveConsultation.clienteId) : null;
+
+  // Wrong patient: unlink without writing to Google, then pick the right one here.
+  const handleUnlinkAuto = () => {
+    if (!unlinkAutoMatch(consultation.id)) return;
+    set('clienteId', '');
+    toast.info(t.consultation_unlinked_ok);
   };
 
   const handleSave = () => {
@@ -346,7 +358,18 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
       </div>
 
       {/* Audit footer */}
-      {isEdit && consultation?.matchedAt && (
+      {autoLinkedClient ? (
+        <p className="text-xs text-sage-500 text-center mt-3">
+          {t.consultation_matched_via
+            .replace('{name}', autoLinkedClient.nombre)
+            .replace('{via}', t[`match_via_${liveConsultation.matchedVia || 'name'}`])
+            .replace('{date}', new Date(liveConsultation.matchedAt).toLocaleDateString(locale))}
+          {' · '}
+          <button onClick={handleUnlinkAuto} className="font-medium text-wellness-700 hover:underline">
+            {t.consultation_unlink_auto}
+          </button>
+        </p>
+      ) : isEdit && consultation?.matchedAt && (
         <p className="text-xs text-sage-400 text-center mt-3">
           {consultation.matchedBy === 'user'
             ? t.consultation_matched_user.replace('{confirmed}', new Date(consultation.matchedByAt || consultation.matchedAt).toLocaleDateString(locale)).replace('{detected}', new Date(consultation.matchedAt).toLocaleDateString(locale))

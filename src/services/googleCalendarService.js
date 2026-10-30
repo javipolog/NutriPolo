@@ -19,8 +19,8 @@
  */
 
 import { invoke } from '@tauri-apps/api/tauri';
-import useStore, { canPushToCalendar, localISODate } from '../stores/store';
-import { extractPatientName, findBestMatches } from './fuzzyMatcher.js';
+import useStore, { canPushToCalendar, getLoadFailure, localISODate } from '../stores/store';
+import { buildClientIndex, matchPatient, normalizeEmail } from './fuzzyMatcher.js';
 
 /** Sync window: days before / after today. */
 export const SYNC_PAST_DAYS = 30;
@@ -163,6 +163,28 @@ function hasOwnRecord(state, c) {
   if ((c.notasPrivadas || '').trim()) return true;
   if ((state.measurements || []).some(m => m.consultaId === c.id)) return true;
   return (state.invoices || []).some(inv => (inv.items || []).some(it => it.consultationId === c.id));
+}
+
+/**
+ * The patient of this consultation is settled and the sync never matches it
+ * again: chosen or dismissed by the user, or linked for sure (email, phone,
+ * unique exact name).
+ */
+function isMatchDecided(c) {
+  return c.matchedBy === 'user' || c.matchStatus === 'manual' || c.matchStatus === 'exact' || c.matchStatus === 'dismissed';
+}
+
+// Client lookup maps, rebuilt only when the clients array changes (once per
+// sync at most), never per event.
+const _clientIndexes = new WeakMap();
+function clientIndex(clients) {
+  const list = clients || [];
+  let index = _clientIndexes.get(list);
+  if (!index) {
+    index = buildClientIndex(list);
+    _clientIndexes.set(list, index);
+  }
+  return index;
 }
 
 const tombstonedIds = (calId) => new Set(
@@ -320,30 +342,20 @@ export const googleCalendar = {
    * suitable for merging into the NutriPolo store, or null when the event
    * has no usable start (e.g. a deleted event).
    * Timed events are shown at the local hour; all-day events get 09:00 / 60 min.
+   * Carries no `clienteId`: the patient is decided by _resolvePatient, and a
+   * remote edit must never overwrite a link.
    *
    * @param {object} event            Google Calendar event (as returned by Rust backend)
-   * @param {Array}  clients
    * @param {string} sourceCalendarId  ID of the calendar this event was fetched from
    */
-  eventToConsultation(event, clients, sourceCalendarId) {
+  eventToConsultation(event, sourceCalendarId) {
     const timing = eventTiming(event, '09:00', 60);
     if (!timing) return null;
-
-    // Try to match a client by name from the event summary (accent-insensitive)
-    let clienteId = null;
-    const normalize = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-    const summaryName = (event.summary || '').replace(/^Consulta\s*-\s*/i, '').trim();
-    const normalizedSummary = normalize(summaryName);
-    if (normalizedSummary && clients) {
-      const match = clients.find(cl => normalize(cl.nombre) === normalizedSummary);
-      if (match) clienteId = match.id;
-    }
 
     return {
       fecha: timing.fecha,
       hora: timing.hora,
       duracion: timing.duracion,
-      clienteId,
       googleEventId: event.id,
       googleSummary: event.summary || '',
       estado: event.status === 'cancelled' ? 'cancelada' : 'programada',
@@ -392,7 +404,11 @@ export const googleCalendar = {
    */
   consultationToEvent(consultation, clients) {
     const client = clients?.find(c => c.id === consultation.clienteId);
-    const summary = client ? `Consulta - ${client.nombre}` : (consultation.googleSummary || 'Consulta');
+    // An event linked by the sync keeps the title it had in Google: the
+    // automatic match must never rename it.
+    const keepTitle = consultation.matchedBy === 'system' && consultation.googleSummary;
+    const summary = keepTitle ? consultation.googleSummary
+      : client ? `Consulta - ${client.nombre}` : (consultation.googleSummary || 'Consulta');
 
     const fecha = consultation.fecha; // "YYYY-MM-DD"
     const hora = consultation.hora || '09:00'; // "HH:MM"
@@ -652,7 +668,8 @@ export const googleCalendar = {
    * every calendar failed; otherwise returns the stats, with `errorDetails`
    * listing the calendars that failed.
    *
-   * @returns {{ pushed, pulled, updated, deleted, conflicts, errors, errorDetails }}
+   * @returns {{ pushed, pulled, updated, deleted, conflicts, errors, suggested, errorDetails }}
+   *   `suggested`: new patient suggestions waiting in the inbox.
    */
   async syncAll() {
     if (_syncPromise) return _syncPromise;
@@ -663,9 +680,14 @@ export const googleCalendar = {
   async _syncAllImpl() {
     const gcalConfig = useStore.getState().config.googleCalendar;
     if (!gcalConfig?.connected) throw new Error('Google Calendar not connected');
+    // The data file could not be read: nothing may be written, here or in Google.
+    if (getLoadFailure()) throw new Error('Data file not loaded');
 
     const enabledIds = (gcalConfig.calendars || []).filter(c => c.syncMode !== 'disabled').map(c => c.id);
-    const totals = { pushed: 0, pulled: 0, updated: 0, deleted: 0, conflicts: 0, errors: 0, errorDetails: [] };
+    const totals = { pushed: 0, pulled: 0, updated: 0, deleted: 0, conflicts: 0, errors: 0, suggested: 0, errorDetails: [] };
+    const openSuggestions = () => (useStore.getState().patientSuggestions || [])
+      .filter(sg => sg.status === 'pending' || sg.status === 'pending-confirm').map(sg => sg.id);
+    const openBefore = new Set(openSuggestions());
 
     try {
       let token = await this.ensureToken();
@@ -696,6 +718,9 @@ export const googleCalendar = {
       }
       throw e;
     }
+
+    // Patients this sync could not settle on its own, for a notice that leads to the inbox.
+    totals.suggested = openSuggestions().filter(id => !openBefore.has(id)).length;
 
     const failedCalendars = totals.errorDetails.filter(d => d.failed).length;
     if (enabledIds.length && failedCalendars === enabledIds.length) {
@@ -793,7 +818,9 @@ export const googleCalendar = {
    *   personal         → _syncPersonalCalendar  (personalEvents, NEVER consultations)
    *   holidays         → noop (skipped)
    *   primary          → _syncConsultationsCalendar (bidirectional with three-way merge)
-   *   external-clinic  → _syncExternalClinic (pull-only + fuzzy patient matching)
+   *   external-clinic  → _syncExternalClinic (pull-only)
+   * Both consultation strategies match imported events to patients the same
+   * way (_resolvePatient / _rematch).
    *   other / missing  → _syncConsultationsCalendar (legacy behavior)
    *
    * @param {string} token           Valid Google OAuth access token
@@ -821,101 +848,142 @@ export const googleCalendar = {
   },
 
   /**
-   * Run fuzzy matching for a patient name and create/update the appropriate
-   * patientSuggestion in the store. Shared between the new-event import path
-   * and the orphan-backfill path inside _syncExternalClinic so both behave
-   * identically and the logic lives in one place.
-   *
-   * @param {string}  rawName           Extracted name (from extractPatientName)
-   * @param {string}  normalizedName    Normalized form of rawName
-   * @param {Set}     dismissedNames    Set of normNames the user dismissed for this cal
-   * @param {string}  calId             Source calendar ID
-   * @param {string}  rawSummary        Original event summary (for inbox display)
-   * @param {string|null} fecha         Date of the first occurrence
-   * @param {string|null} hora          Time of the first occurrence
-   * @param {number}  autoThreshold     Score ≥ this → pending-confirm
-   * @param {number}  suggestThreshold  Score ≥ this → pending review
-   * @returns {{ matchStatus, suggestedFromId, suggestedClienteId, matchScore }}
+   * Matching context for one calendar sync: the client index (built once per
+   * clients array, see clientIndex), the names the user dismissed for this
+   * calendar and the thresholds.
    */
-  _buildSuggestionForName(rawName, normalizedName, dismissedNames, calId, rawSummary,
-                          fecha, hora, autoThreshold, suggestThreshold) {
-    if (!normalizedName) {
-      return { matchStatus: 'unknown', suggestedFromId: null, suggestedClienteId: null, matchScore: null };
-    }
-    if (dismissedNames.has(normalizedName)) {
-      return { matchStatus: 'dismissed', suggestedFromId: null, suggestedClienteId: null, matchScore: null };
-    }
-    const store = useStore.getState();
-    const { auto, candidates } = findBestMatches(
-      rawName, store.clients, { autoThreshold, suggestThreshold }
-    );
-    const base = {
-      sourceCalendarId: calId,
-      rawSummary,
-      normalizedName,
-      firstSeenFecha: fecha || null,
-      firstSeenHora:  hora  || null,
-    };
-    if (auto) {
-      const sg = store.addPatientSuggestion({
-        ...base,
-        candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
-        suggestedClienteId: auto.clienteId,
-        topScore: auto.score,
-        status: 'pending-confirm',
-      });
-      return {
-        matchStatus: 'auto-pending-review',
-        suggestedFromId: sg?.id || null,
-        suggestedClienteId: auto.clienteId,
-        matchScore: auto.score,
-      };
-    }
-    if (candidates.length > 0) {
-      const sg = store.addPatientSuggestion({
-        ...base,
-        candidates: candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre })),
-        topScore: candidates[0].score,
-      });
-      return {
-        matchStatus: 'suggested',
-        suggestedFromId: sg?.id || null,
-        suggestedClienteId: null,
-        matchScore: candidates[0].score,
-      };
-    }
-    // No candidates — new unknown patient
-    const sg = store.addPatientSuggestion({ ...base, candidates: [] });
+  _matchContext(calendarConfig) {
+    const state = useStore.getState();
+    const calId = calendarConfig.id;
+    // The calendar's own address (and Raquel's) is never a patient's.
+    const ignoreEmails = new Set([normalizeEmail(calId), normalizeEmail(state.config?.email)].filter(Boolean));
     return {
-      matchStatus: 'unknown',
-      suggestedFromId: sg?.id || null,
-      suggestedClienteId: null,
-      matchScore: null,
+      calId,
+      index: clientIndex(state.clients),
+      dismissed: new Set((state.patientSuggestions || [])
+        .filter(sg => sg.status === 'dismissed' && sg.sourceCalendarId === calId)
+        .map(sg => sg.normalizedName)),
+      opts: {
+        autoThreshold: calendarConfig.fuzzyAutoThreshold ?? 0.92,
+        suggestThreshold: calendarConfig.fuzzySuggestThreshold ?? 0.75,
+        ignoreEmails,
+      },
     };
   },
 
   /**
-   * Sync an external-clinic calendar (e.g. Sinergia receptionist agenda).
-   * Pull-only: never pushes back to Google.
+   * Decide the patient of an imported event (matchPatient) and record the
+   * suggestion it needs. Returns the match fields for the consultation and
+   * the suggestion to attach it to, or null when there is nothing to record
+   * (noise: blocks, lunch, untitled…).
    *
-   * For each new event:
-   *   1. Extract a clean patient name via extractPatientName().
-   *   2. Try exact name match against known clients.
-   *   3. If no exact match, run fuzzy matching via _buildSuggestionForName:
-   *      - score ≥ fuzzyAutoThreshold (0.92) → pending-confirm suggestion
-   *      - score ≥ fuzzySuggestThreshold (0.75) → pending suggestion
-   *      - score < 0.75 → unknown-patient suggestion (no candidates)
-   *   4. Dismissed suggestions skip re-creation for that normalizedName + calendar.
-   *   5. Imports the consultation with optional suggestedFromId so linkPatientSuggestion
-   *      can back-fill clienteId on every affected consultation in one shot.
-   *   6. On re-sync: orphaned existing consultations (matchStatus='unknown', no live
-   *      suggestion) are back-filled with a new suggestion automatically.
-   * Events deleted in Google are removed / cancelled via _applyRemoteRemoval.
+   *   assign  → clienteId + matchStatus 'exact' (by email, phone or unique name)
+   *   confirm → 'auto-pending-review' + pending-confirm suggestion, no clienteId
+   *   review  → 'suggested' + pending suggestion with the candidates
+   *   new     → 'unknown' + pending suggestion without candidates ("create client")
+   * A name the user dismissed for this calendar → 'dismissed', no suggestion.
+   */
+  _resolvePatient(ev, ctx, timing) {
+    const m = matchPatient({
+      summary: ev.summary, description: ev.description, attendees: ev.attendees,
+      allDay: !!ev.start_datetime && !ev.start_datetime.includes('T'),
+    }, ctx.index, ctx.opts);
+    if (m.result === 'noise') return null;
+
+    const sys = { matchedBy: 'system', matchedAt: nowISO() };
+    if (m.result === 'assign') {
+      return { fields: { clienteId: m.clienteId, matchStatus: 'exact', matchedVia: m.via, matchScore: 1, ...sys } };
+    }
+    if (ctx.dismissed.has(m.normalizedName)) return { fields: { matchStatus: 'dismissed', ...sys } };
+
+    const candidates = m.candidates.map(c => ({ clienteId: c.clienteId, score: c.score, nombre: c.nombre }));
+    const sg = useStore.getState().addPatientSuggestion({
+      sourceCalendarId: ctx.calId,
+      rawSummary: ev.summary || '',
+      normalizedName: m.normalizedName,
+      displayName: m.rawName,
+      contactEmail: m.contact.email,
+      contactPhone: m.contact.phone,
+      firstSeenFecha: timing?.fecha || null,
+      firstSeenHora: timing?.hora || null,
+      candidates,
+      topScore: candidates[0]?.score ?? null,
+      ...(m.result === 'confirm' ? { status: 'pending-confirm', suggestedClienteId: m.clienteId, topScore: m.score } : {}),
+    });
+    const matchStatus = { confirm: 'auto-pending-review', review: 'suggested', new: 'unknown' }[m.result];
+    return {
+      suggestionId: sg?.id || null,
+      fields: {
+        matchStatus,
+        suggestedFromId: sg?.id || undefined,
+        suggestedClienteId: m.result === 'confirm' ? m.clienteId : undefined,
+        matchScore: m.score ?? undefined,
+        ...sys,
+      },
+    };
+  },
+
+  /**
+   * Re-run the match of an already imported consultation when it is still
+   * open: no client, not decided by the user, not created by NutriPolo, and
+   * either without a live suggestion (imported before this existed, or its
+   * suggestion is gone) or with a new title in Google. Idempotent: a
+   * consultation attached to a live suggestion with the same title is left alone.
+   *
+   * @param {object} local       The consultation before this sync's update
+   * @param {object} ev          The Google event
+   * @returns {boolean}          Whether anything was written
+   */
+  _rematch(local, ev, ctx) {
+    if (local.clienteId || ev.nutripolo_id || isMatchDecided(local)) return false;
+    const state = useStore.getState();
+    const live = local.suggestedFromId && (state.patientSuggestions || []).find(sg =>
+      sg.id === local.suggestedFromId && (sg.status === 'pending' || sg.status === 'pending-confirm'));
+    const retitled = (ev.summary || '') !== (local.googleSummary || '');
+    if (live && !retitled) return false;
+    if (live) state.detachConsultationFromSuggestion(live.id, local.id);
+
+    const match = this._resolvePatient(ev, ctx, local);
+    if (!match) {
+      // Now noise (e.g. renamed to "Bloqueo"): drop what pointed to the old match.
+      if (!local.matchStatus && !local.suggestedFromId) return false;
+      useStore.getState().updateConsultation(local.id, {
+        matchStatus: undefined, suggestedFromId: undefined, suggestedClienteId: undefined, matchScore: undefined,
+      }, SYNC);
+      return true;
+    }
+    useStore.getState().updateConsultation(local.id, {
+      suggestedFromId: undefined, suggestedClienteId: undefined, matchScore: undefined, ...match.fields,
+    }, SYNC);
+    if (match.suggestionId) useStore.getState().attachConsultationToSuggestion(match.suggestionId, local.id);
+    return true;
+  },
+
+  /** Import a new Google event as a consultation, with its patient resolved. */
+  _importEvent(ev, partial, ctx, extra = {}) {
+    // Created by NutriPolo (another device or a lost response): its patient is
+    // already in the title, never guessed again.
+    const match = ev.nutripolo_id ? null : this._resolvePatient(ev, ctx, partial);
+    const newC = useStore.getState().addConsultation({
+      ...partial,
+      clienteId: null,
+      ...extra,
+      remoteUpdated: ev.updated || nowISO(),
+      ...(match?.fields || {}),
+    }, SYNC);
+    if (match?.suggestionId && newC?.id) useStore.getState().attachConsultationToSuggestion(match.suggestionId, newC.id);
+    return newC;
+  },
+
+  /**
+   * Sync an external-clinic calendar (e.g. Sinergia receptionist agenda).
+   * Pull-only: never pushes back to Google. New events and still-open
+   * consultations get their patient from _resolvePatient / _rematch, like the
+   * consultation calendars. Events deleted in Google are removed / cancelled
+   * via _applyRemoteRemoval.
    */
   async _syncExternalClinic(token, calendarConfig) {
     const calId = calendarConfig.id;
-    const autoThreshold    = calendarConfig.fuzzyAutoThreshold    ?? 0.92;
-    const suggestThreshold = calendarConfig.fuzzySuggestThreshold ?? 0.75;
 
     const fetched = await this._fetchCalendar(token, calendarConfig, 'ExternalClinic');
     if (fetched.suspended) return { pushed: 0, pulled: 0, updated: 0, suspended: true };
@@ -928,16 +996,9 @@ export const googleCalendar = {
 
     // Re-read store after async I/O to get the freshest state
     const freshStore = useStore.getState();
-    const { clients } = freshStore;
+    const ctx = this._matchContext(calendarConfig);
     const tombstoned = tombstonedIds(calId);
     const allGoogleIds = new Set(freshStore.consultations.map(c => c.googleEventId).filter(Boolean));
-
-    // Names already dismissed by the user for this calendar → skip re-proposing
-    const dismissedNames = new Set(
-      freshStore.patientSuggestions
-        .filter(sg => sg.status === 'dismissed' && sg.sourceCalendarId === calId)
-        .map(sg => sg.normalizedName)
-    );
 
     // Index existing consultations from this calendar for O(1) lookups
     const existingByGoogleId = {};
@@ -947,151 +1008,35 @@ export const googleCalendar = {
       }
     }
 
-    const _normalize = (s) =>
-      (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-
     for (const ev of remoteEvents) {
       const existing = existingByGoogleId[ev.id];
-      const partial = this.eventToConsultation(ev, clients, calId);
+      const partial = this.eventToConsultation(ev, calId);
       if (!partial) continue;
 
       if (existing) {
-        // Update only if the remote version is newer than our last known snapshot
-        const needsUpdate = ts(ev.updated) > ts(existing.remoteUpdated) || existing.remoteDeleted;
-        if (needsUpdate) {
-          // If the user has already manually approved a match, never override their
-          // decision — only update clinical fields (fecha, hora, estado, summary).
-          const isUserDecision = existing.matchedBy === 'user' || existing.matchStatus === 'manual' || existing.matchStatus === 'exact';
-          const common = {
+        // Update only if the remote version is newer than our last known snapshot.
+        // `partial` has no clienteId, so a link (the user's or the sync's) survives.
+        if (ts(ev.updated) > ts(existing.remoteUpdated) || existing.remoteDeleted) {
+          // Once the patient is settled, the local notes are kept too.
+          const { notasCliente, ...clinical } = partial;
+          useStore.getState().updateConsultation(existing.id, {
+            ...(isMatchDecided(existing) ? clinical : partial),
+            estado: this.mergeRemoteEstado(existing.estado, partial.estado),
             remoteUpdated: ev.updated || null,
             lastSyncedAt: nowISO(),
             remoteDeleted: false,
-          };
-          if (isUserDecision) {
-            // Protect clienteId / matchStatus — only sync mutable clinical fields
-            useStore.getState().updateConsultation(existing.id, {
-              fecha: partial.fecha,
-              hora: partial.hora,
-              duracion: partial.duracion,
-              estado: this.mergeRemoteEstado(existing.estado, partial.estado),
-              googleSummary: partial.googleSummary,
-              ...common,
-            }, SYNC);
-          } else if (existing.matchStatus === 'auto-pending-review' && ev.summary !== existing.googleSummary) {
-            // Summary changed on a still-pending-confirm consultation — re-run fuzzy match
-            const newRawName = extractPatientName(ev.summary || '');
-            const latestStore = useStore.getState();
-            const { auto: newAuto, candidates: newCandidates } = findBestMatches(
-              newRawName, latestStore.clients, { autoThreshold, suggestThreshold }
-            );
-            useStore.getState().updateConsultation(existing.id, {
-              ...partial,
-              estado: this.mergeRemoteEstado(existing.estado, partial.estado),
-              clienteId: null, // still unconfirmed
-              suggestedClienteId: newAuto?.clienteId || null,
-              matchScore: newAuto?.score ?? (newCandidates[0]?.score ?? null),
-              ...common,
-            }, SYNC);
-          } else {
-            useStore.getState().updateConsultation(existing.id, {
-              ...partial,
-              // Preserve user-linked clienteId — eventToConsultation only
-              // exact-matches, so it would nuke the link on any receptionist edit.
-              clienteId: partial.clienteId || existing.clienteId,
-              estado: this.mergeRemoteEstado(existing.estado, partial.estado),
-              ...common,
-            }, SYNC);
-          }
+          }, SYNC);
           stats.updated++;
         }
-
-        // ── Backfill orphan suggestion on re-sync ─────────────────────────────
-        // Covers consultations imported pre-v1.7 (or any row whose suggestion was
-        // never created / was dropped) that still have matchStatus='unknown' and
-        // no live suggestedFromId. Idempotent: once a live suggestion exists the
-        // isOrphan check resolves false and this block is skipped on next sync.
-        // Never touches user-confirmed rows (exact / manual / dismissed).
-        const isUserLinked =
-          existing.matchedBy === 'user' ||
-          existing.matchStatus === 'manual' ||
-          existing.matchStatus === 'exact' ||
-          existing.matchStatus === 'dismissed';
-        if (!isUserLinked) {
-          const activeSg = existing.suggestedFromId
-            ? useStore.getState().patientSuggestions.find(sg =>
-                sg.id === existing.suggestedFromId &&
-                (sg.status === 'pending' || sg.status === 'pending-confirm'))
-            : null;
-          if (!activeSg) {
-            const backRaw  = extractPatientName(existing.googleSummary || ev.summary || '');
-            const backNorm = _normalize(backRaw);
-            const result = this._buildSuggestionForName(
-              backRaw, backNorm, dismissedNames, calId,
-              existing.googleSummary || ev.summary || '',
-              existing.fecha, existing.hora, autoThreshold, suggestThreshold,
-            );
-            useStore.getState().updateConsultation(existing.id, {
-              matchStatus:        result.matchStatus,
-              matchedBy:          'system',
-              matchedAt:          nowISO(),
-              suggestedFromId:    result.suggestedFromId    || undefined,
-              suggestedClienteId: result.suggestedClienteId || undefined,
-              matchScore:         result.matchScore         ?? undefined,
-            }, SYNC);
-            if (result.suggestedFromId) {
-              useStore.getState().attachConsultationToSuggestion(result.suggestedFromId, existing.id);
-            }
-          }
-        }
+        this._rematch(existing, ev, ctx);
         continue;
       }
 
       // Brand-new event. Skip ones already imported from another calendar
       // (shared events keep their id) and ones deleted here by the user.
       if (allGoogleIds.has(ev.id) || tombstoned.has(ev.id)) continue;
-
-      // ── Patient name extraction + matching ──────────────────────────────────
-      const rawName        = extractPatientName(ev.summary || '');
-      const normalizedName = _normalize(rawName);
-
-      // eventToConsultation already tries exact-match via its internal normalize
-      let { clienteId } = partial;
-      let matchStatus, suggestedClienteId = null, matchScore = null, suggestedFromId;
-      const matchedAt = nowISO();
-
-      if (clienteId) {
-        // Exact match found by eventToConsultation
-        matchStatus = 'exact';
-      } else {
-        // No exact match — run fuzzy pipeline (handles empty normalizedName gracefully)
-        const result = this._buildSuggestionForName(
-          rawName, normalizedName, dismissedNames, calId, ev.summary || '',
-          partial.fecha, partial.hora, autoThreshold, suggestThreshold,
-        );
-        matchStatus        = result.matchStatus;
-        suggestedFromId    = result.suggestedFromId;
-        suggestedClienteId = result.suggestedClienteId;
-        matchScore         = result.matchScore;
-      }
-
-      const newC = useStore.getState().addConsultation({
-        ...partial,
-        // For non-exact matches: clienteId stays null until user confirms
-        clienteId: matchStatus === 'exact' ? clienteId : null,
-        remoteUpdated: ev.updated || null,
-        matchStatus,
-        matchedBy: 'system',
-        matchedAt,
-        ...(suggestedClienteId != null ? { suggestedClienteId } : {}),
-        ...(matchScore != null         ? { matchScore }          : {}),
-        ...(suggestedFromId            ? { suggestedFromId }     : {}),
-      }, SYNC);
+      this._importEvent(ev, partial, ctx);
       allGoogleIds.add(ev.id);
-
-      // Attach the new consultation ID to the suggestion for back-fill tracking
-      if (suggestedFromId && newC?.id) {
-        useStore.getState().attachConsultationToSuggestion(suggestedFromId, newC.id);
-      }
       stats.pulled++;
     }
 
@@ -1214,11 +1159,10 @@ export const googleCalendar = {
           const remoteChanged = !!remote && ts(remote.updated) > ts(c.remoteUpdated);
           if (remoteChanged && hasLocalChange(c) && ts(c.localUpdatedAt) < ts(remote.updated)) {
             // ── True conflict, remote is newer → pull it, keep local as shadow
-            const partial = this.eventToConsultation(remote, useStore.getState().clients, calId);
+            const partial = this.eventToConsultation(remote, calId);
             if (partial) {
               useStore.getState().updateConsultation(c.id, {
                 ...partial,
-                clienteId: partial.clienteId || c.clienteId, // preserve manual/fuzzy link
                 estado: this.mergeRemoteEstado(c.estado, partial.estado),
                 lastSyncedAt: nowISO(),
                 remoteUpdated: remote.updated || nowISO(),
@@ -1257,7 +1201,7 @@ export const googleCalendar = {
     }
 
     // ── PULL phase (all calendars) ───────────────────────────────────────
-    const clients = useStore.getState().clients;
+    const ctx = this._matchContext(calendarConfig);
     const tombstoned = tombstonedIds(calId);
 
     for (const ev of remoteEvents) {
@@ -1276,24 +1220,25 @@ export const googleCalendar = {
       }
 
       if (local) {
-        if (handled.has(local.id)) continue;
         // A pending local change is pushed (not overwritten) unless the push failed for good.
-        if (canPush && needsPush(local)) continue;
-        if (ts(ev.updated) <= ts(local.remoteUpdated) && !local.remoteDeleted) continue;
-
-        const partial = this.eventToConsultation(ev, clients, calId);
-        if (!partial) continue;
-        state.updateConsultation(local.id, {
-          ...partial,
-          clienteId: partial.clienteId || local.clienteId, // preserve manual/fuzzy link
-          estado: this.mergeRemoteEstado(local.estado, partial.estado),
-          lastSyncedAt: nowISO(),
-          remoteUpdated: ev.updated || nowISO(),
-          remoteDeleted: false,
-          syncPending: false,
-          syncConflict: false,
-        }, SYNC);
-        stats.updated++;
+        const apply = !handled.has(local.id) && !(canPush && needsPush(local))
+          && (ts(ev.updated) > ts(local.remoteUpdated) || local.remoteDeleted);
+        const partial = apply && this.eventToConsultation(ev, calId);
+        if (partial) {
+          // `partial` has no clienteId: a link (the user's or the sync's) survives.
+          state.updateConsultation(local.id, {
+            ...partial,
+            estado: this.mergeRemoteEstado(local.estado, partial.estado),
+            lastSyncedAt: nowISO(),
+            remoteUpdated: ev.updated || nowISO(),
+            remoteDeleted: false,
+            syncPending: false,
+            syncConflict: false,
+          }, SYNC);
+          stats.updated++;
+        }
+        // Imported without a patient (before matching existed, or retitled): try again.
+        this._rematch(local, ev, ctx);
         continue;
       }
 
@@ -1301,13 +1246,9 @@ export const googleCalendar = {
       // calendar, or created by NutriPolo) and ones deleted here.
       if (tombstoned.has(ev.id)) continue;
       if (state.consultations.some(c => c.googleEventId === ev.id || (ev.nutripolo_id && c.id === ev.nutripolo_id))) continue;
-      const partial = this.eventToConsultation(ev, clients, calId);
+      const partial = this.eventToConsultation(ev, calId);
       if (!partial) continue;
-      state.addConsultation({
-        ...partial,
-        tipo: 'Google Calendar',
-        remoteUpdated: ev.updated || nowISO(),
-      }, SYNC);
+      this._importEvent(ev, partial, ctx, { tipo: 'Google Calendar' });
       stats.pulled++;
     }
 

@@ -64,7 +64,7 @@ nutripolo-app/
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
 │   │   ├── plan/WebRecipePicker.jsx  # Llista de receptes de nutripoloraquel.com (WebRecipeList: selector i pestanya Recetas)
 │   │   ├── plan/FoodCatalogPicker.jsx # Selector del catàleg d'aliments amb foto
-│   │   ├── PatientSuggestionsInbox.jsx # Pacients detectats en calendaris externs
+│   │   ├── PatientSuggestionsInbox.jsx # Pacients de Google Calendar per revisar (vincular / crear fitxa)
 │   │   ├── RemindersPanel.jsx        # Panells de recordatoris i de ressenyes (Dashboard)
 │   │   ├── SendEmailModal.jsx        # Modal enviament d'emails amb adjunts
 │   │   ├── ServicesView.jsx          # Gestio de serveis/tarifes
@@ -88,7 +88,7 @@ nutripolo-app/
 │   │   ├── invoiceDesignPresets.js   # Presets de disseny per factures
 │   │   ├── foodCatalog.js            # Càrrega i filtres del catàleg d'aliments (pur, amb tests)
 │   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
-│   │   ├── fuzzyMatcher.js           # Coincidencia difusa de noms de pacients
+│   │   ├── fuzzyMatcher.js           # Quin pacient es cada cita importada (pur, amb tests)
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
@@ -196,7 +196,7 @@ fn gcal_exchange_token(client_id, client_secret, code, redirect_uri) -> Result<T
 fn gcal_refresh_token(client_id, client_secret, refresh_token) -> Result<TokenResponse, String>
 fn gcal_revoke_token(token) -> Result<(), String>
 fn gcal_list_calendars(token) -> Result<String, String>
-fn gcal_list_events(token, calendar_id, time_min, time_max, time_zone) -> Result<String, String>  // inclou cancel·lats (showDeleted)
+fn gcal_list_events(token, calendar_id, time_min, time_max, time_zone) -> Result<String, String>  // inclou cancel·lats (showDeleted) i `attendees` (correus, sense el propietari ni sales)
 fn gcal_get_event(token, calendar_id, event_id) -> Result<String, String>
 fn gcal_create_event(token, calendar_id, event_json) -> Result<String, String>      // id determinista; 409 → PATCH
 fn gcal_update_event(token, calendar_id, event_id, event_json) -> Result<String, String>  // PATCH
@@ -236,6 +236,10 @@ fn quit_app()                                         // el JS el crida despres 
 - Esdeveniments creats amb id determinista (`googleEventIdFor`) → mai duplicats
 - Esborrar: `googleCalendar.deleteConsultation` (tombstone a `gcalPendingDeletes` si no hi ha xarxa o el calendari es de nomes lectura); esborrat a Google → s'esborra si la cita es buida, si no queda `cancelada` + `remoteDeleted`
 - Errors del backend: `"<op> failed (<status>) [<reason>]: <msg>"`; es reintenten xarxa, 5xx, 429 i 403 de rate limit
+- Pacient de cada cita importada (tots els calendaris de consultes, propi i de clíniques): `_resolvePatient` / `_rematch` amb `matchPatient` (`fuzzyMatcher.js`), clients indexats un cop per sync (`clientIndex`). Ordre: correu dels convidats o correu/telèfon de la descripció (telèfons sense espais ni +34) → nom exacte únic → difús. S'assigna sol (`matchStatus: 'exact'`, `matchedBy: 'system'`, `matchedVia`, `matchedAt`, `matchScore`) només per contacte o nom exacte únic; un nom repetit o un contacte compartit → suggeriment `pending`; difús ≥ 0,92 → `pending-confirm` sense `clienteId`; res → suggeriment sense candidats (crear fitxa, prerrellenada amb `displayName`, `contactEmail`, `contactPhone`)
+- Un suggeriment per pacient i calendari (`normalizedName`), amb `consultationIds`; els noms descartats no tornen. Soroll (`NOISE_TITLES`: bloqueig, dinar, personal…, sense títol, "Consulta" sola, tot el dia sense coincidència segura) no genera res
+- No es torna a avaluar mai: cita amb `clienteId`, decisió de l'usuari (`matchedBy: 'user'`, `manual`, `exact`, `dismissed`) ni esdeveniment creat per l'app (`nutripolo_id`). Les importades sense pacient ni suggeriment viu s'omplen al sync següent; si Google canvia el títol, es refà. `eventToConsultation` no porta `clienteId`, així un canvi remot mai esborra un vincle
+- Assignar no escriu mai a Google; una cita vinculada pel sync conserva el títol de Google en fer push. Desfer: `unlinkAutoMatch` (cita o fitxa), sense `localUpdatedAt`. `syncAll` torna `suggested` (suggeriments nous) → avís amb "Revisar" (`notifySuggestions`)
 
 ### Recordatoris de cites
 - Configuracio a `config.reminders` (valors per defecte a `DEFAULT_REMINDER_CONFIG`)
