@@ -42,6 +42,10 @@ nutripolo-app/
 │   ├── components/                   # Components UI
 │   │   ├── CalendarView.jsx          # Vista calendari (setmana/mes)
 │   │   ├── ClientDetailView.jsx      # Fitxa completa del client (tabs)
+│   │   ├── client/InterviewTab.jsx   # Pestanya Entrevista (primera visita, amb teclat)
+│   │   ├── client/FollowUpTable.jsx  # Taula de seguiments de pesatge (mètriques × dates)
+│   │   ├── client/EnergyNeedsCard.jsx # Necessitats energètiques (TMB, NEED, macros)
+│   │   ├── client/fields.jsx         # Camps compactes (AutoTextarea, NumberInput, dreceres)
 │   │   ├── ClientDocuments.jsx       # Gestio de documents per client
 │   │   ├── ClientModal.jsx           # Modal creacio/edicio clients
 │   │   ├── ClientsView.jsx           # Llistat de clients
@@ -52,7 +56,7 @@ nutripolo-app/
 │   │   ├── DocumentMetadataModal.jsx # Modal metadades de documents
 │   │   ├── InvoiceModal.jsx          # Modal creacio/edicio factures
 │   │   ├── Invoices.jsx              # Llistat de factures
-│   │   ├── MeasurementChart.jsx      # Grafic d'evolucio de mesures
+│   │   ├── MeasurementChart.jsx      # Pestanya Mediciones: seguiments + grafic + necessitats
 │   │   ├── LoadErrorScreen.jsx       # Pantalla si el fitxer de dades no es pot llegir
 │   │   ├── NutritionPlanEditor.jsx   # Vista Planes (pestanyes Planes / Alimentos / Recetas) + editor antic (per àpats)
 │   │   ├── plan/FoodsView.jsx        # Pestanya Alimentos: catàleg d'aliments bàsics (Mercadona + nutrició)
@@ -74,6 +78,7 @@ nutripolo-app/
 │   │   ├── useBackgroundJobs.js      # Auto-sync GCal + enviament automatic de recordatoris
 │   │   ├── useReminderActions.js     # Accions de recordatori (WhatsApp / email) amb registre
 │   │   ├── useWebRecipes.js          # Receptes de la web en memòria cau + sincronització
+│   │   ├── useKeyboardForm.js        # Navegacio de caselles tipus full de calcul
 │   │   └── useNow.js                 # Rellotge que es refresca
 │   │
 │   ├── services/                     # Serveis de negoci
@@ -92,7 +97,10 @@ nutripolo-app/
 │   │   ├── planPdf.js                # Tria generador segons format + imatges de productes
 │   │   ├── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
 │   │   ├── webRecipes.js             # Receptari de la web: API REST + parseig HTML (pur, amb tests)
-│   │   └── reviewRequestService.js   # Peticio de ressenya a Google despres de la consulta (pura, amb tests)
+│   │   ├── reviewRequestService.js   # Peticio de ressenya a Google despres de la consulta (pura, amb tests)
+│   │   ├── entrevista.js             # Model de l'entrevista de primera visita (pur, amb tests)
+│   │   ├── energia.js                # TMB, NEED, macros i parseDecimal (pur, amb tests)
+│   │   └── keyboardGrid.js           # On salta cada tecla en els formularis rapids (pur, amb tests)
 │   │
 │   ├── stores/                       # Estat global (Zustand)
 │   │   └── store.js                  # Store unic amb totes les entitats
@@ -259,6 +267,15 @@ fn quit_app()                                         // el JS el crida despres 
 - Una sola biblioteca (`buildFoodLibrary` / `loadFoodLibrary`, hook `useFoodLibrary`): els bàsics de Mercadona i els aliments genèrics de `genericFoods.js`, que van primer dins de cada categoria (les mateixes que Mercadona) i prenen la nutrició del producte equivalent (`mercadona` = sourceId, `nutricion.equivalente`). Si Mercadona no s'ha generat, només hi ha els genèrics
 - Canvis propis: des del detall d'un aliment es pot canviar la foto i escriure els valors per 100 g. Es guarden a `planLibrary.alimentos` (`{ [foodId]: { imagen?, por100g?, updatedAt } }`, `setFoodEdit` / `clearFoodEdit`), entren a les còpies de seguretat i s'apliquen amb `applyFoodEdits` (`useFoodLibrary`); el catàleg no es toca i es pot tornar a la foto o als valors originals. Els productes de la planificació també poden canviar de foto (`updatePlanProduct`)
 - Genèrics: fotos reals de Pixabay a `public/alimentos/<id>.jpg` (sí que van a git), totes retallades sobre blanc amb la mateixa mida i ombra (`scripts/food-catalog-photos.py`, cal Pillow). Res d'imatges generades amb IA
+
+### Entrevista, seguiments i necessitats energètiques (fitxa del client)
+- Replica el full de recollida de dades de la Raquel (3 pestanyes): pestanya **Entrevista** i, a **Mediciones**, la taula de seguiments i la targeta de necessitats energètiques
+- Una entrevista per client a `client.entrevista` (text lliure; `gustos.{grup}.{si|no}`, `rutina.{lun…dom}`, `fecha`, `updatedAt`). Les preguntes que ja són camps del perfil (`patologias`, `alergias`, `intolerancias`, `medicacion`, `ejercicio`) editen el client directament (`CLIENT_FIELDS` / `entrevistaPatch`); embaràs i anticonceptius s'amaguen si `genero === 'M'`
+- Desat automàtic a cada tecla (`updateClient`, l'escriptura ja s'agrupa cada 300 ms); el canvi es construeix des de `useStore.getState()`, no des de les props
+- Teclat (`useKeyboardForm` + `keyboardGrid.js`): caselles amb `data-field`, `data-section`, `data-grid/row/col`, `data-enter="down"`. Enter / Maj+Enter = següent / anterior, Alt+Enter = salt de línia, fletxes a les graelles quan el cursor és a la vora, Ctrl+↑/↓ = secció. Ctrl+1…7 ja canvia de vista (no el feu servir aquí)
+- Pesatges: noves mètriques a `measurement` (`masaMuscularPct`, `masaGrasa`, `masaOsea`, `tasaMetabolica`, `edadMetabolica`, `regla`); la columna buida de la dreta crea la mesura en escriure-hi. `updateMeasurement` recalcula l'`imc` si canvia el pes
+- Necessitats: `client.energia` (valors tal com s'escriuen; buit = perfil o últim pesatge), Harris-Benedict / Mifflin-St Jeor / bàscula, NEED = TMB × FA × FE, macros 4/4/9 per a NEED i dos objectius
+- El full original té dades reals de pacients: no en copieu res a codi, tests ni fixtures
 
 ### Estils
 - **Tailwind CSS** amb paleta personalitzada: `sage` (neutres càlids), `wellness` (color principal), `terra` (accent) i semàntics (`success`, `warning`, `danger`, `info`)

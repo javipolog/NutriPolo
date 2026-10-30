@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Button, Input, Textarea, Modal, useToast } from './UI';
+import { Button, Input, Textarea, Modal, TagInput, useToast } from './UI';
 import useStore from '../stores/store';
 import { useT } from '../i18n';
 import { GOALS, DIET_RESTRICTIONS } from '../clientOptions';
@@ -26,36 +26,6 @@ const MultiSelect = ({ options, value = [], onChange, placeholder }) => {
           {opt.label}
         </button>
       ))}
-    </div>
-  );
-};
-
-const TagInput = ({ value = [], onChange, placeholder }) => {
-  const [input, setInput] = useState('');
-  const add = () => {
-    const v = input.trim();
-    if (v && !value.includes(v)) onChange([...value, v]);
-    setInput('');
-  };
-  const remove = (tag) => onChange(value.filter(t => t !== tag));
-  return (
-    <div className="border border-sage-300 rounded-button p-2 bg-white min-h-9">
-      <div className="flex flex-wrap gap-1 mb-1">
-        {value.map(tag => (
-          <span key={tag} className="flex items-center gap-1 text-xs bg-sage-100 text-sage-700 px-2 py-0.5 rounded-badge">
-            {tag}
-            <button type="button" onClick={() => remove(tag)} className="text-sage-400 hover:text-danger ml-0.5">&times;</button>
-          </span>
-        ))}
-      </div>
-      <input
-        value={input}
-        onChange={e => setInput(e.target.value)}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); } }}
-        onBlur={add}
-        placeholder={placeholder}
-        className="text-xs outline-none w-full bg-transparent text-sage-700 placeholder-sage-400"
-      />
     </div>
   );
 };
