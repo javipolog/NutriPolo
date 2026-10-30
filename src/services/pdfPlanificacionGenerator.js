@@ -795,7 +795,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
       // Capçalera: una franja per àpat sobre les seves columnes A i B
       for (const s of part.slots) {
         const first = cols.findIndex(c => c.s === s);
-        const last = cols.findLastIndex(c => c.s === s);
+        const last = first + MENU_VARIANTS.length - 1;
         const w = colX[last] + colW - colX[first];
         box(page, colX[first], gridTop, w, headH, { r: 8, fill: C.olive });
         label(page, s === 'comida' ? L.lunch : L.dinner, colX[first] + w / 2, gridTop - 13.8, { size: 7.4, color: C.white, sp: 1.6, align: 'center' });
