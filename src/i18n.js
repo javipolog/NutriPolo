@@ -844,6 +844,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
+    whats_new_interview_title: 'Entrevista de primera visita en la ficha',
+    whats_new_interview_desc:  'Cada paciente tiene una pestaña Entrevista con las preguntas de tu plantilla (motivo, historial médico, hábitos y gustos alimentarios, rutina de ejercicio) que se rellena solo con el teclado: Enter salta a la siguiente casilla. En Mediciones, los pesajes de la báscula van en una tabla por fechas y la tarjeta de necesidades energéticas calcula TMB, NEED y macros.',
     whats_new_library_title: 'Biblioteca de alimentos con fotos',
     whats_new_library_desc:  'En Planes → Alimentos tienes una biblioteca de alimentos con foto real: genéricos y unos 290 básicos de Mercadona con su información nutricional. Los alimentos que escribes en la planificación cogen su foto con un clic en Productos, y puedes cambiar la foto o los valores nutricionales de cualquiera. Además, esta versión corrige recordatorios duplicados, la fecha de la última visita y la restauración de copias de seguridad.',
     whats_new_foods_title:   'Los alimentos del plan, en Productos',
@@ -2205,6 +2207,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
+    whats_new_interview_title: 'Entrevista de primera visita a la fitxa',
+    whats_new_interview_desc:  'Cada pacient té una pestanya Entrevista amb les preguntes de la teva plantilla (motiu, historial mèdic, hàbits i gustos alimentaris, rutina d\'exercici) que s\'omple només amb el teclat: Enter salta a la casella següent. A Mesures, els pesatges de la bàscula van en una taula per dates i la targeta de necessitats energètiques calcula TMB, NEED i macros.',
     whats_new_library_title: 'Biblioteca d\'aliments amb fotos',
     whats_new_library_desc:  'A Plans → Aliments tens una biblioteca d\'aliments amb foto real: genèrics i uns 290 bàsics de Mercadona amb la seva informació nutricional. Els aliments que escrius a la planificació agafen la seva foto amb un clic a Productes, i pots canviar la foto o els valors nutricionals de qualsevol. A més, aquesta versió corregeix recordatoris duplicats, la data de l\'última visita i la restauració de còpies de seguretat.',
     whats_new_foods_title:   'Els aliments del pla, a Productes',
@@ -3568,6 +3572,8 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
+    whats_new_interview_title: 'First-visit interview in the client file',
+    whats_new_interview_desc:  'Each client has an Interview tab with the questions from your template (reason for visit, medical history, eating habits and food likes, exercise routine) that you fill in from the keyboard: Enter jumps to the next box. In Measurements, scale weigh-ins go in a table by date and the energy needs card works out BMR, NEED and macros.',
     whats_new_library_title: 'Food library with photos',
     whats_new_library_desc:  'Plans → Foods now has a food library with real photos: generic foods and about 290 Mercadona basics with their nutrition facts. Foods you write in a plan get their photo in one click in Products, and you can change the photo or nutrition values of any food. This version also fixes duplicate reminders, the last visit date and backup restores.',
     whats_new_foods_title:   'The plan\'s foods, in Products',
