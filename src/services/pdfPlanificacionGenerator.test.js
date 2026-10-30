@@ -30,12 +30,18 @@ const load = async (bytes) => {
   return { pages, sizes: pages.map(p => p.getSize()) };
 };
 const isLandscape = (s) => s.width > s.height;
-const linkCount = (pages, sizes) => pages
-  .filter((_, i) => isLandscape(sizes[i]))
-  .reduce((n, p) => n + (p.node.Annots()?.size() || 0), 0);
+// Només el menú porta enllaços
+const linkCount = (pages) => pages.reduce((n, p) => n + (p.node.Annots()?.size() || 0), 0);
+const menuPages = async (plan) => {
+  const withMenu = await load(await generatePlanificacionPDF(plan, client, config, { loadFont }));
+  const noMenu = { ...plan, secciones: { ...plan.secciones, menu: false } };
+  const without = await load(await generatePlanificacionPDF(noMenu, client, config, { loadFont }));
+  return withMenu.pages.length - without.pages.length;
+};
+const dish = (titulo, alimentos) => ({ titulo, alimentos: alimentos.join('\n'), receta: '' });
 
 describe('generatePlanificacionPDF', () => {
-  it('builds cover, sections, a landscape menu and recipe links', async () => {
+  it('builds cover, sections, a portrait menu and recipe links', async () => {
     const products = sampleProducts();
     const plan = { ...samplePlanificacion(), productos: products.map(p => p.id) };
     if (products.length) plan.desayunos.productos = products.slice(0, 3).map(p => p.id);
@@ -44,15 +50,29 @@ describe('generatePlanificacionPDF', () => {
 
     const { pages, sizes } = await load(bytes);
     expect(pages.length).toBeGreaterThanOrEqual(4);
-    expect(isLandscape(sizes[0])).toBe(false);
-    expect(sizes.some(isLandscape)).toBe(true);
+    expect(sizes.some(isLandscape)).toBe(false);
     // 10 dishes with a recipe; a wrapped title gets one link per line
-    expect(linkCount(pages, sizes)).toBeGreaterThanOrEqual(10);
+    expect(linkCount(pages)).toBeGreaterThanOrEqual(10);
   });
 
-  it('splits a full menu into lunch and dinner pages to keep the text legible', async () => {
-    const { sizes } = await load(await generatePlanificacionPDF(samplePlanificacion(), client, config, { loadFont }));
-    expect(sizes.filter(isLandscape)).toHaveLength(2);
+  it('splits a very full menu into lunch and dinner pages to keep the text legible', async () => {
+    expect(await menuPages(samplePlanificacion())).toBe(2);
+  });
+
+  it('keeps a typical week with full ingredient lists on a single page', async () => {
+    const plan = samplePlanificacion();
+    plan.menu.dias = plan.menu.dias.map(d => ({
+      ...d,
+      comida: {
+        a: dish('Pizza a la sartén con base de avena', ['Harina de avena o avena molida', 'Tomate triturado', 'Queso mozzarella', 'Jamón cocido']),
+        b: dish('Cuscús con pollo y verduras', ['Cuscús', 'Contramuslo de pollo', 'Cebolla, zanahoria, pimiento rojo', 'Salsa de soja']),
+      },
+      cena: {
+        a: dish('Lasaña de calabaza', ['Calabaza tipo cacahuete', 'Carne picada', 'Cebolla, tomate triturado natural', 'Mozzarella rallada', 'Nata ligera']),
+        b: dish('Poké bowl de salmón', ['Arroz basmati', 'Salmón fresco', 'Pepino', 'Mango', 'Tomates cherry', 'Salsa de soja']),
+      },
+    }));
+    expect(await menuPages(plan)).toBe(1);
   });
 
   it('keeps a light menu on a single page', async () => {
@@ -62,9 +82,9 @@ describe('generatePlanificacionPDF', () => {
       comida: { a: { titulo: 'Ensalada', alimentos: 'Lechuga', receta: '' }, b: { titulo: 'Pasta', alimentos: '', receta: '' } },
       cena: { a: { titulo: 'Tortilla', alimentos: '2 huevos', receta: '' }, b: { titulo: '', alimentos: '', receta: '' } },
     }));
-    const { pages, sizes } = await load(await generatePlanificacionPDF(plan, client, config, { loadFont }));
-    expect(sizes.filter(isLandscape)).toHaveLength(1);
-    expect(linkCount(pages, sizes)).toBe(0);
+    const { pages } = await load(await generatePlanificacionPDF(plan, client, config, { loadFont }));
+    expect(await menuPages(plan)).toBe(1);
+    expect(linkCount(pages)).toBe(0);
   });
 
   it('adds continuation pages for long content and a long patient name', async () => {
@@ -87,7 +107,6 @@ describe('generatePlanificacionPDF', () => {
     const plan = { ...samplePlanificacion(), productos: [] };
     plan.secciones = { ...plan.secciones, menu: false, cantidades: false, mediaManana: false, merienda: false };
     const { sizes } = await load(await generatePlanificacionPDF(plan, client, {}, { products: [], loadFont }));
-    expect(sizes.some(isLandscape)).toBe(false);
     expect(sizes).toHaveLength(2); // portada + desayunos
   });
 
