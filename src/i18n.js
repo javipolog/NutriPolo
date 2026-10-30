@@ -847,6 +847,10 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
+    whats_new_gcal_patients_title: 'Las citas de Google Calendar, con su paciente',
+    whats_new_gcal_patients_desc:  'Las citas que llegan de Google Calendar (tu calendario y los de las clínicas) se vinculan solas a la ficha del paciente cuando el email, el teléfono o el nombre coinciden sin dudas. Si hay dudas o es un paciente nuevo, te sale un aviso con «Revisar» para vincularlo o crear la ficha con sus datos ya puestos. Si alguna se vincula mal, pulsa «No es este paciente» en la cita.',
+    whats_new_plan_pdf_title:      'PDF de la planificación más legible',
+    whats_new_plan_pdf_desc:       'Todas las secciones del PDF tienen los mismos títulos y tamaños de letra, y el menú ya no se encoge hasta ser ilegible: si no cabe, se reparte en comidas y cenas. Los ingredientes llevan viñeta, las cantidades no se separan de su unidad al saltar de línea y las filas vacías del menú ya no se imprimen.',
     whats_new_interview_title: 'Entrevista de primera visita en la ficha',
     whats_new_interview_desc:  'Cada paciente tiene una pestaña Entrevista con las preguntas de tu plantilla (motivo, historial médico, hábitos y gustos alimentarios, rutina de ejercicio) que se rellena solo con el teclado: Enter salta a la siguiente casilla. En Mediciones, los pesajes de la báscula van en una tabla por fechas y la tarjeta de necesidades energéticas calcula TMB, NEED y macros.',
     whats_new_library_title: 'Biblioteca de alimentos con fotos',
@@ -2222,6 +2226,10 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
+    whats_new_gcal_patients_title: 'Les cites de Google Calendar, amb el seu pacient',
+    whats_new_gcal_patients_desc:  'Les cites que arriben de Google Calendar (el teu calendari i els de les clíniques) es vinculen soles a la fitxa del pacient quan el correu, el telèfon o el nom coincideixen sense dubtes. Si hi ha dubtes o és un pacient nou, et surt un avís amb «Revisar» per vincular-lo o crear la fitxa amb les seves dades ja posades. Si alguna es vincula malament, prem «No és aquest pacient» a la cita.',
+    whats_new_plan_pdf_title:      'PDF de la planificació més llegible',
+    whats_new_plan_pdf_desc:       'Totes les seccions del PDF tenen els mateixos títols i mides de lletra, i el menú ja no s\'encongeix fins a ser il·legible: si no hi cap, es reparteix en dinars i sopars. Els ingredients porten pic, les quantitats no se separen de la unitat en saltar de línia i les files buides del menú ja no s\'imprimeixen.',
     whats_new_interview_title: 'Entrevista de primera visita a la fitxa',
     whats_new_interview_desc:  'Cada pacient té una pestanya Entrevista amb les preguntes de la teva plantilla (motiu, historial mèdic, hàbits i gustos alimentaris, rutina d\'exercici) que s\'omple només amb el teclat: Enter salta a la casella següent. A Mesures, els pesatges de la bàscula van en una taula per dates i la targeta de necessitats energètiques calcula TMB, NEED i macros.',
     whats_new_library_title: 'Biblioteca d\'aliments amb fotos',
@@ -3599,6 +3607,10 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
+    whats_new_gcal_patients_title: 'Google Calendar appointments, with their client',
+    whats_new_gcal_patients_desc:  'Appointments coming from Google Calendar (your calendar and the clinics\' calendars) link themselves to the client file when the email, phone or name match without doubt. If there is any doubt or it is a new client, a notice with "Review" lets you link it or create the file with their details already filled in. If one is linked wrongly, press "Not this patient" on the appointment.',
+    whats_new_plan_pdf_title:      'A more legible meal plan PDF',
+    whats_new_plan_pdf_desc:       'Every section of the PDF uses the same titles and text sizes, and the menu no longer shrinks until it is unreadable: if it does not fit, it is split into lunches and dinners. Ingredients have bullets, quantities stay with their unit when a line wraps and empty menu rows are no longer printed.',
     whats_new_interview_title: 'First-visit interview in the client file',
     whats_new_interview_desc:  'Each client has an Interview tab with the questions from your template (reason for visit, medical history, eating habits and food likes, exercise routine) that you fill in from the keyboard: Enter jumps to the next box. In Measurements, scale weigh-ins go in a table by date and the energy needs card works out BMR, NEED and macros.',
     whats_new_library_title: 'Food library with photos',
