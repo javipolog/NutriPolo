@@ -2,8 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   PLAN_FORMAT, WEEK_DAYS, linesOf, nextPlanNumber, latestPlanificacion, createPlanificacion,
   copyContent, normalizeWeek, visibleSections, planificacionStats, isDishEmpty, safeUrl, buildDishIndex,
-  summarizeIngredients, collectOwnRecipes, mergeOwnRecipes, planFoods,
+  summarizeIngredients, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes, planFoods, dishKey,
 } from './planificacion';
+import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
 import { samplePlanificacion } from './planificacion.fixture';
 
 const plan = (over) => ({ formato: PLAN_FORMAT, clienteId: 'c1', ...over });
@@ -208,5 +209,34 @@ describe('own recipes', () => {
     expect(mergeOwnRecipes(list, [{ titulo: 'Bowl', alimentos: 'Pollo', receta: '' }], 't2')).toBe(list);
     const next = mergeOwnRecipes(list, [{ titulo: 'bowl', alimentos: 'Pollo\nBoniato' }], 't3');
     expect(next).toEqual([{ ...list[0], titulo: 'bowl', alimentos: 'Pollo\nBoniato', updatedAt: 't3' }]);
+  });
+
+  it('adds only the seed recipes whose title is not there yet', () => {
+    const own = [{ id: 'r1', titulo: 'Bowl de pollo', alimentos: 'Pollo\nQuinoa', receta: '', nota: 'mía', updatedAt: 't0' }];
+    const seeds = [
+      { titulo: 'BOWL DE POLLO', alimentos: 'Otra cosa' },
+      { titulo: ' Lentejas con verduras ', alimentos: 'Lentejas\nZanahoria', receta: 'https://example.com/l' },
+      { titulo: 'lentejas con verduras', alimentos: 'Repetida' },
+      { titulo: 'Sin alimentos', alimentos: '  ' },
+    ];
+    const got = addMissingRecipes(own, seeds, 't1');
+    expect(got).toEqual([
+      own[0],
+      { id: expect.any(String), titulo: 'Lentejas con verduras', alimentos: 'Lentejas\nZanahoria', receta: 'https://example.com/l', nota: '', updatedAt: 't1' },
+    ]);
+    expect(addMissingRecipes(got, seeds, 't2')).toBe(got);
+  });
+});
+
+describe('recetas de las planificaciones de Canva', () => {
+  it('has one recipe per title, each with foods and a valid link when it has one', () => {
+    const keys = RECETAS_PLANIFICACIONES.map(r => dishKey(r.titulo));
+    expect(RECETAS_PLANIFICACIONES.length).toBeGreaterThan(1000);
+    expect(new Set(keys).size).toBe(keys.length);
+    for (const r of RECETAS_PLANIFICACIONES) {
+      expect(r.titulo.trim()).toBe(r.titulo);
+      expect(linesOf(r.alimentos).length).toBeGreaterThan(0);
+      if (r.receta) expect(safeUrl(r.receta)).toBeTruthy();
+    }
   });
 });

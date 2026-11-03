@@ -337,6 +337,22 @@ export function mergeOwnRecipes(list = [], entries = [], now = new Date().toISOS
 }
 
 /**
+ * Afegeix a "Mis recetas" les receptes que encara no hi són (per títol); les
+ * que ja hi ha no es toquen. Retorna la mateixa llista si no n'afegeix cap.
+ */
+export function addMissingRecipes(list = [], seeds = [], now = new Date().toISOString()) {
+  const known = new Set(list.map(r => dishKey(r.titulo)));
+  const added = [];
+  for (const s of seeds) {
+    const k = dishKey(s.titulo);
+    if (!k || known.has(k) || !linesOf(s.alimentos).length) continue;
+    known.add(k);
+    added.push({ id: uid(), titulo: s.titulo.trim(), alimentos: s.alimentos, receta: s.receta || '', nota: s.nota || '', updatedAt: now });
+  }
+  return added.length ? [...list, ...added] : list;
+}
+
+/**
  * Plats i opcions coneguts, per títol, per autocompletar-ne els ingredients.
  * Manen "Mis recetas" (`planLibrary.recetas`); després, les receptes de la web.
  * @returns {{ titles: string[], find(title): { alimentos, receta?, nota?, web? } | null }}

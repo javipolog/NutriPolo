@@ -3,7 +3,8 @@ import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
-import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes } from '../services/planificacion.js';
+import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes } from '../services/planificacion.js';
+import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
 
 // ============================================
 // TAURI STORAGE — Write queue amb debounce
@@ -298,7 +299,7 @@ export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [], alimentos: {} };
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 14;
+const STORE_VERSION = 15;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -326,6 +327,12 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 15) {
+    // v14 → v15: "Mis recetas" s'omple amb els plats i opcions de les
+    // planificacions fetes amb Canva (scripts/recetas). Les que ja hi són no es toquen.
+    const planLibrary = { ...EMPTY_PLAN_LIBRARY, ...(s.planLibrary || {}) };
+    s.planLibrary = { ...planLibrary, recetas: addMissingRecipes(planLibrary.recetas || [], RECETAS_PLANIFICACIONES) };
+  }
   if (version < 14 && Array.isArray(s.clients)) {
     // v13 → v14: l'última visita es calcula (lastVisitByClient); el camp desat
     // podia anar enrere en editar una consulta antiga.
