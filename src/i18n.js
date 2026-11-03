@@ -848,7 +848,7 @@ export const TRANSLATIONS = {
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
     whats_new_canva_recipes_title: 'Tus recetas de las planificaciones de Canva',
-    whats_new_canva_recipes_desc:  'En «Mis recetas» ya tienes los platos y las opciones de desayuno, almuerzo y merienda de las planificaciones que hacías con Canva (más de 1.300, con su enlace a la receta cuando lo tenían). Salen al elegir una receta para un plato y al escribir su nombre, con los ingredientes ya puestos. Las cantidades son las que ponías a cada paciente: revísalas. Las que ya tenías no han cambiado y las que no quieras se borran con la papelera.',
+    whats_new_canva_recipes_desc:  'En «Mis recetas» ya tienes los platos y las opciones de desayuno, almuerzo y merienda de las planificaciones que hacías con Canva (unas 1.260, revisadas y sin duplicados, con su enlace a la receta cuando lo tenían). Salen al elegir una receta para un plato y al escribir su nombre, con los ingredientes ya puestos. Las cantidades son las que ponías a cada paciente: revísalas. Las que ya tenías no han cambiado y las que no quieras se borran con la papelera.',
     whats_new_gcal_patients_title: 'Las citas de Google Calendar, con su paciente',
     whats_new_gcal_patients_desc:  'Las citas que llegan de Google Calendar (tu calendario y los de las clínicas) se vinculan solas a la ficha del paciente cuando el email, el teléfono o el nombre coinciden sin dudas. Si hay dudas o es un paciente nuevo, te sale un aviso con «Revisar» para vincularlo o crear la ficha con sus datos ya puestos. Si alguna se vincula mal, pulsa «No es este paciente» en la cita.',
     whats_new_plan_pdf_title:      'PDF de la planificación más legible',
@@ -2229,7 +2229,7 @@ export const TRANSLATIONS = {
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
     whats_new_canva_recipes_title: 'Les teves receptes de les planificacions de Canva',
-    whats_new_canva_recipes_desc:  'A «Les meves receptes» ja tens els plats i les opcions d\'esmorzar, mig matí i berenar de les planificacions que feies amb Canva (més de 1.300, amb l\'enllaç a la recepta quan en tenien). Surten en triar una recepta per a un plat i en escriure\'n el nom, amb els ingredients ja posats. Les quantitats són les que posaves a cada pacient: revisa-les. Les que ja tenies no han canviat i les que no vulguis s\'esborren amb la paperera.',
+    whats_new_canva_recipes_desc:  'A «Les meves receptes» ja tens els plats i les opcions d\'esmorzar, mig matí i berenar de les planificacions que feies amb Canva (unes 1.260, revisades i sense duplicats, amb l\'enllaç a la recepta quan en tenien). Surten en triar una recepta per a un plat i en escriure\'n el nom, amb els ingredients ja posats. Les quantitats són les que posaves a cada pacient: revisa-les. Les que ja tenies no han canviat i les que no vulguis s\'esborren amb la paperera.',
     whats_new_gcal_patients_title: 'Les cites de Google Calendar, amb el seu pacient',
     whats_new_gcal_patients_desc:  'Les cites que arriben de Google Calendar (el teu calendari i els de les clíniques) es vinculen soles a la fitxa del pacient quan el correu, el telèfon o el nom coincideixen sense dubtes. Si hi ha dubtes o és un pacient nou, et surt un avís amb «Revisar» per vincular-lo o crear la fitxa amb les seves dades ja posades. Si alguna es vincula malament, prem «No és aquest pacient» a la cita.',
     whats_new_plan_pdf_title:      'PDF de la planificació més llegible',
@@ -3612,7 +3612,7 @@ export const TRANSLATIONS = {
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
     whats_new_canva_recipes_title: 'Your recipes from the Canva meal plans',
-    whats_new_canva_recipes_desc:  'My recipes now holds the dishes and the breakfast, mid-morning and snack options from the meal plans you made in Canva (more than 1,300, with their recipe link when they had one). They show up when you pick a recipe for a dish and as you type its name, with the ingredients already filled in. The quantities are the ones you gave each client, so check them. The recipes you already had are unchanged, and the ones you do not want can be deleted with the bin.',
+    whats_new_canva_recipes_desc:  'My recipes now holds the dishes and the breakfast, mid-morning and snack options from the meal plans you made in Canva (about 1,260, checked and without duplicates, with their recipe link when they had one). They show up when you pick a recipe for a dish and as you type its name, with the ingredients already filled in. The quantities are the ones you gave each client, so check them. The recipes you already had are unchanged, and the ones you do not want can be deleted with the bin.',
     whats_new_gcal_patients_title: 'Google Calendar appointments, with their client',
     whats_new_gcal_patients_desc:  'Appointments coming from Google Calendar (your calendar and the clinics\' calendars) link themselves to the client file when the email, phone or name match without doubt. If there is any doubt or it is a new client, a notice with "Review" lets you link it or create the file with their details already filled in. If one is linked wrongly, press "Not this patient" on the appointment.',
     whats_new_plan_pdf_title:      'A more legible meal plan PDF',

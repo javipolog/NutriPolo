@@ -3,8 +3,9 @@ import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
-import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes } from '../services/planificacion.js';
+import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes, replaceSeedRecipes } from '../services/planificacion.js';
 import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
+import RECETAS_V15_A_NUEVAS from '../data/recetasPlanificacionesV15.json';
 
 // ============================================
 // TAURI STORAGE — Write queue amb debounce
@@ -299,7 +300,7 @@ export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [], alimentos: {} };
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 15;
+const STORE_VERSION = 16;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -327,6 +328,11 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version === 15 && Array.isArray(s.planLibrary?.recetas)) {
+    // v15 → v16: les receptes de Canva que va sembrar la v1.18.0 i que no
+    // s'han tocat passen a la versió neta (errates, unitats, duplicats fusionats).
+    s.planLibrary = { ...s.planLibrary, recetas: replaceSeedRecipes(s.planLibrary.recetas, RECETAS_V15_A_NUEVAS, RECETAS_PLANIFICACIONES) };
+  }
   if (version < 15) {
     // v14 → v15: "Mis recetas" s'omple amb els plats i opcions de les
     // planificacions fetes amb Canva (scripts/recetas). Les que ja hi són no es toquen.
