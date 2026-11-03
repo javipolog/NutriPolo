@@ -6,7 +6,7 @@ Aplicacio d'escriptori per a Windows 11 per a la gestio de consultes de nutricio
 
 **Autor:** Javier Polo Garcia
 **Llicencia:** MIT
-**Versio:** 1.18.0
+**Versio:** 1.18.1
 **Identificador:** com.nutripolo.app
 
 ---
@@ -103,7 +103,8 @@ nutripolo-app/
 │   │   └── keyboardGrid.js           # On salta cada tecla en els formularis rapids (pur, amb tests)
 │   │
 │   ├── data/
-│   │   └── recetasPlanificaciones.json # Receptes dels plans antics de Canva (llavor de "Mis recetas")
+│   │   ├── recetasPlanificaciones.json # Receptes dels plans antics de Canva (llavor de "Mis recetas")
+│   │   └── recetasPlanificacionesV15.json # Firma de cada recepta de la v1.18.0 → la nova (migració v16)
 │   │
 │   ├── stores/                       # Estat global (Zustand)
 │   │   └── store.js                  # Store unic amb totes les entitats
@@ -259,7 +260,8 @@ fn quit_app()                                         // el JS el crida despres 
 - Secció Productos: un aliment de la planificació que es diu igual que un de la biblioteca d'aliments (`foodMatcher`: primer els genèrics, després el bàsic de Mercadona sense parèntesi) agafa la foto amb un clic; el botó "Biblioteca de alimentos" (`FoodCatalogPicker`) tria de tota la biblioteca. La foto es copia a `planLibrary.productos` (`foodPhotoDataUrl`)
 - Una planificació nova copia el contingut de l'última del client; els títols de "Mis recetas" i de la web autocompleten ingredients (`buildDishIndex`)
 - "Mis recetas": `planLibrary.recetas` (`{ id, titulo, alimentos, receta, nota, updatedAt }`, clau = `dishKey(titulo)`). En desar una planificació s'hi desen sols els plats i opcions amb títol i aliments nous o canviats des que es va obrir l'editor (`collectOwnRecipes` + `mergeOwnRecipes`), excepte receptes de la web sense retocar (així una recepta esborrada no torna); la migració v13 la sembra amb les planificacions existents. Es tria i s'esborra des de la pestanya del selector de receptes
-- Receptes dels plans antics de Canva: `src/data/recetasPlanificaciones.json` (~1.300 plats i opcions, `{ titulo, alimentos, receta? }`), afegides a "Mis recetas" per la migració v15 (`addMissingRecipes`: només els títols que no hi són). Es regenera amb `scripts/recetas/extract-planificaciones.py` (PyMuPDF) + `build-recetas.py`, que treu les notes amb noms de pacients; els PDF i l'extracció intermèdia no van a git
+- Receptes dels plans antics de Canva: `src/data/recetasPlanificaciones.json` (~1.260 plats i opcions, `{ titulo, alimentos, receta?, nota? }`), afegides a "Mis recetas" per la migració v15 (`addMissingRecipes`: només els títols que no hi són). Es regenera amb `scripts/recetas/extract-planificaciones.py` (PyMuPDF) + `build-recetas.py`, que treu les notes amb noms de pacients, corregeix errates (`WORD_FIXES`), escriu les quantitats en "g" / "ml", treu majúscules i fusiona el mateix plat escrit de maneres diferents (`merge_key`: sense ordre, articles, parèntesis ni plurals); `--review` en treu la llista per revisar. Els PDF i l'extracció intermèdia no van a git
+- La v1.18.0 va sembrar la versió sense netejar. La migració v16 (`replaceSeedRecipes`) canvia les receptes d'aquella llavor que no s'han tocat (`seedSignature`, FNV-1a de títol + aliments + enllaç) per la nova segons `recetasPlanificacionesV15.json`; les editades o esborrades no es toquen. Si es torna a canviar la llavor, cal una migració i un mapa nous a partir de la publicada
 - PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt. Mides de text només de l'escala `T` del generador (una mida per rol)
 - Ingredients "Nom (170 g)" → quantitat alineada a la dreta (`splitQuantity`); a la guia, "Pa: 60 g" → taula aliment | ració
 - El menú va en una pàgina horitzontal si el text hi cap a mida llegible; si no, es parteix en comidas i cenas

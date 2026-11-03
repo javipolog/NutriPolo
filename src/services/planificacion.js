@@ -353,6 +353,40 @@ export function addMissingRecipes(list = [], seeds = [], now = new Date().toISOS
 }
 
 /**
+ * Firma d'una recepta de la llavor ("titulo\nalimentos\nreceta", FNV-1a de
+ * 32 bits en hex), per reconèixer-la mentre no s'hagi tocat. La mateixa que
+ * calcula scripts/recetas/build-recetas.py.
+ */
+export function seedSignature(r) {
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(`${r.titulo}\n${r.alimentos}\n${r.receta || ''}`)) {
+    h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
+ * Canvia les receptes d'una llavor antiga que no s'han tocat per la versió
+ * nova: `oldToNew` va de la firma antiga a l'índex a `seeds` (-1 si s'ha
+ * tret). La nova conserva l'id; les tocades o esborrades es queden com estan.
+ */
+export function replaceSeedRecipes(list = [], oldToNew = {}, seeds = [], now = new Date().toISOString()) {
+  const idByNew = new Map();
+  const kept = list.filter(r => {
+    const i = oldToNew[seedSignature(r)];
+    if (i === undefined) return true;
+    if (i >= 0 && seeds[i] && !idByNew.has(i)) idByNew.set(i, r.id);
+    return false;
+  });
+  if (kept.length === list.length) return list;
+  const known = new Set(kept.map(r => dishKey(r.titulo)));
+  const added = [...idByNew]
+    .filter(([i]) => !known.has(dishKey(seeds[i].titulo)))
+    .map(([i, id]) => ({ id, titulo: seeds[i].titulo, alimentos: seeds[i].alimentos, receta: seeds[i].receta || '', nota: seeds[i].nota || '', updatedAt: now }));
+  return [...kept, ...added];
+}
+
+/**
  * Plats i opcions coneguts, per títol, per autocompletar-ne els ingredients.
  * Manen "Mis recetas" (`planLibrary.recetas`); després, les receptes de la web.
  * @returns {{ titles: string[], find(title): { alimentos, receta?, nota?, web? } | null }}

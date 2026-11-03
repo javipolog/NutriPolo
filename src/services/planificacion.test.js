@@ -3,8 +3,10 @@ import {
   PLAN_FORMAT, WEEK_DAYS, linesOf, nextPlanNumber, latestPlanificacion, createPlanificacion,
   copyContent, normalizeWeek, visibleSections, planificacionStats, isDishEmpty, safeUrl, buildDishIndex,
   summarizeIngredients, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes, planFoods, dishKey,
+  seedSignature, replaceSeedRecipes,
 } from './planificacion';
 import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
+import RECETAS_V15_A_NUEVAS from '../data/recetasPlanificacionesV15.json';
 import { samplePlanificacion } from './planificacion.fixture';
 
 const plan = (over) => ({ formato: PLAN_FORMAT, clienteId: 'c1', ...over });
@@ -226,6 +228,36 @@ describe('own recipes', () => {
     ]);
     expect(addMissingRecipes(got, seeds, 't2')).toBe(got);
   });
+
+  it('signs a seed recipe like the Python build script', () => {
+    // Valors de fnv1a() a scripts/recetas/build-recetas.py
+    expect(seedSignature({ titulo: 'Lentejas con jamón', alimentos: 'Lentejas\nJamón' })).toBe('f4baf88b');
+    expect(seedSignature({ titulo: 'Bowl', alimentos: 'Pollo', receta: 'https://example.com/b' })).toBe('e0a7d212');
+  });
+
+  it('swaps untouched old seed recipes for the new ones and keeps the rest', () => {
+    const oldA = { id: 'a', titulo: 'Fajita de pollo y verdura', alimentos: 'Fajita\nPollo', receta: '', nota: '', updatedAt: 't0' };
+    const oldB = { id: 'b', titulo: 'Fajitas de pollo y verduras', alimentos: 'Fajitas\nPollo', receta: '', nota: '', updatedAt: 't0' };
+    const gone = { id: 'c', titulo: 'Pediasure', alimentos: 'Comprar en farmacia', receta: '', nota: '', updatedAt: 't0' };
+    const edited = { id: 'd', titulo: 'Lentejas', alimentos: 'Lentejas\nMi toque', receta: '', nota: '', updatedAt: 't0' };
+    const mine = { id: 'e', titulo: 'Mi plato', alimentos: 'Algo', receta: '', nota: '', updatedAt: 't0' };
+    const seeds = [
+      { titulo: 'Fajitas de pollo y verdura', alimentos: 'Fajitas\nPollo, pechuga' },
+      { titulo: 'Lentejas con verdura', alimentos: 'Lentejas\nZanahoria', nota: 'Tritura la verdura' },
+      { titulo: 'Arroz', alimentos: 'Arroz' },
+    ];
+    const map = {
+      [seedSignature(oldA)]: 0, [seedSignature(oldB)]: 0, [seedSignature(gone)]: -1,
+      [seedSignature({ ...edited, alimentos: 'Lentejas' })]: 1, // la versió original, abans de retocar-la
+      [seedSignature({ titulo: 'Arroz blanco', alimentos: 'Arroz' })]: 2, // esborrada per l'usuari: no torna
+    };
+    const got = replaceSeedRecipes([oldA, edited, oldB, mine, gone], map, seeds, 't1');
+    expect(got).toEqual([
+      edited, mine,
+      { id: 'a', titulo: 'Fajitas de pollo y verdura', alimentos: 'Fajitas\nPollo, pechuga', receta: '', nota: '', updatedAt: 't1' },
+    ]);
+    expect(replaceSeedRecipes(got, map, seeds, 't2')).toBe(got);
+  });
 });
 
 describe('recetas de las planificaciones de Canva', () => {
@@ -238,5 +270,11 @@ describe('recetas de las planificaciones de Canva', () => {
       expect(linesOf(r.alimentos).length).toBeGreaterThan(0);
       if (r.receta) expect(safeUrl(r.receta)).toBeTruthy();
     }
+  });
+
+  it('maps every v1.18.0 recipe to a new one or to -1', () => {
+    const targets = Object.values(RECETAS_V15_A_NUEVAS);
+    expect(targets.length).toBeGreaterThan(1000);
+    for (const i of targets) expect(i === -1 || (Number.isInteger(i) && i >= 0 && i < RECETAS_PLANIFICACIONES.length)).toBe(true);
   });
 });
