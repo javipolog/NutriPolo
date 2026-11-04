@@ -101,7 +101,7 @@ Quitando los solapes, quedan unos 140 problemas distintos. Abajo están agrupado
 - Copias de seguridad: periódicas también con la app en la bandeja, avisando si fallan; copia previa antes de restaurar, migrar o importar; validación de versión y formato.
 - Cambio de contraseña transaccional, `fsync`, aviso si falla el guardado al salir, protección de los editores sin guardar.
 
-**Fase 2 — Facturación legal (M–L)** ⚖️ *Validar con su gestor.*
+**Fase 2 — Facturación legal (M–L)** ⚖️ *Validar con su gestor.* — ✅ hecha salvo VeriFactu, gastos, bonos y 347 (rama `claude/auditoria-fase2`)
 - Guardar una copia de los datos de la clienta y del emisor en cada factura; bloquear la edición de las emitidas; facturas rectificativas.
 - Exportación trimestral para el gestor (CSV/PDF con base, IVA e IRPF).
 - Datos obligatorios, IBAN, mención de exención, PDF sin desbordes, envío de la factura por email.

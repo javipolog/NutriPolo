@@ -35,6 +35,10 @@ export const SendEmailModal = ({
   const toast = useToast();
 
   const [mode, setMode] = useState(initialMode);
+  // Only modes with something to send: never an invoice email without its
+  // invoice, nor the plan's PDF attached as "factura.pdf".
+  const hasData = { plan: !!plan, appointment: !!consultation, invoice: !!invoice, document: !!docRecord };
+  const modes = MODES.filter(m => m.id === initialMode || hasData[m.id]);
   const [lang, setLang] = useState(clientLanguage(client, config));
   // The password does not need to be in memory: sendEmailSMTP reads it from
   // the OS keyring when missing.
@@ -185,12 +189,14 @@ export const SendEmailModal = ({
     >
       <div className="space-y-4">
         {/* Mode selector */}
-        <SegmentedControl
-          className="w-full [&>button]:flex-1"
-          value={mode}
-          onChange={id => { setMode(id); resetTemplate(id, lang); }}
-          options={MODES.map(({ id, labelKey }) => ({ value: id, label: t[labelKey] }))}
-        />
+        {modes.length > 1 && (
+          <SegmentedControl
+            className="w-full [&>button]:flex-1"
+            value={mode}
+            onChange={id => { setMode(id); resetTemplate(id, lang); }}
+            options={modes.map(({ id, labelKey }) => ({ value: id, label: t[labelKey] }))}
+          />
+        )}
 
         {/* Client selector (if not pre-set) */}
         {!client && (

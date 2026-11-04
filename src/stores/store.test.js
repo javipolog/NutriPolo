@@ -144,55 +144,75 @@ describe('measurements', () => {
   });
 });
 
-describe('invoice numbering', () => {
-  const add = (fecha) => useStore.getState().addInvoice({ fecha, clienteId: 'k1', items: [] });
+// Issuing needs the professional's NIF; drafts do not.
+const withNif = () => useStore.setState(s => ({ config: { ...s.config, nif: '00000000T' } }));
+const issue = (fecha, extra = {}) => {
+  const draft = useStore.getState().saveInvoiceDraft({ fecha, clienteId: 'k1', items: [{ id: 'l', descripcion: 'Consulta', cantidad: 1, precioUnitario: 40 }], ...extra });
+  const result = useStore.getState().issueInvoice(draft.id);
+  if (!result.ok) throw new Error(result.problems.map(p => p.code).join());
+  return result.invoice;
+};
 
-  it('uses the series of the invoice date, not of today', () => {
-    expect(add('2025-12-30').numero).toBe('NP-2025-001');
-    expect(add('2026-01-02').numero).toBe('NP-2026-001');
-    expect(add('2025-12-31').numero).toBe('NP-2025-002');
+describe('invoices', () => {
+  beforeEach(withNif);
+
+  it('gives the number on issue, from the series of the invoice date', () => {
+    const draft = useStore.getState().saveInvoiceDraft({ fecha: '2025-12-30', clienteId: 'k1', items: [] });
+    expect(draft.numero).toBeUndefined();
+    expect(useStore.getState().issueInvoice(draft.id).invoice.numero).toBe('NP-2025-001');
+    expect(issue('2026-01-02').numero).toBe('NP-2026-001');
+    expect(issue('2025-12-31').numero).toBe('NP-2025-002');
   });
 
-  it('only deletes the last invoice of a series, so there are no gaps', () => {
-    const first = add('2026-03-01');
-    const second = add('2026-03-02');
-    const otherYear = add('2027-01-10');
-    const manual = useStore.getState().addInvoice({ numero: 'R-1', fecha: '2026-03-03', items: [] });
-    const { invoices } = useStore.getState();
-    expect(canDeleteInvoice(invoices, first)).toBe(false);
-    expect(canDeleteInvoice(invoices, second)).toBe(true);
-    expect(canDeleteInvoice(invoices, otherYear)).toBe(true);
-    expect(canDeleteInvoice(invoices, manual)).toBe(true);
+  it("does not issue without the professional's NIF", () => {
+    useStore.setState(s => ({ config: { ...s.config, nif: '' } }));
+    const draft = useStore.getState().saveInvoiceDraft({ fecha: '2026-03-01', clienteId: 'k1', items: [] });
+    expect(useStore.getState().issueInvoice(draft.id)).toMatchObject({ ok: false, problems: [{ code: 'issuer_nif' }] });
+  });
 
-    expect(useStore.getState().deleteInvoice(first.id)).toBe(false);
-    expect(useStore.getState().deleteInvoice(second.id)).toBe(true);
-    expect(useStore.getState().invoices.map(i => i.numero)).toEqual(['NP-2026-001', 'NP-2027-001', 'R-1']);
-    // The freed number is the next one again
-    expect(useStore.getState().generateInvoiceNumber('2026-04-01')).toBe('NP-2026-002');
+  it('only deletes drafts, and an issued invoice only changes how it was paid', () => {
+    const draft = useStore.getState().saveInvoiceDraft({ fecha: '2026-03-01', clienteId: 'k1', items: [] });
+    const issued = issue('2026-03-02');
+    expect(canDeleteInvoice(useStore.getState().invoices, draft)).toBe(true);
+    expect(useStore.getState().deleteInvoice(issued.id)).toBe(false);
+    expect(useStore.getState().deleteInvoice(draft.id)).toBe(true);
+
+    useStore.getState().updateInvoice(issued.id, { estado: 'pagada', fechaCobro: '2026-03-05', fecha: '2020-01-01', items: [], estado2: 'x' });
+    const after = useStore.getState().invoices.find(i => i.id === issued.id);
+    expect(after).toMatchObject({ estado: 'pagada', fechaCobro: '2026-03-05', fecha: '2026-03-02', total: 40 });
+    // "Anulada" only comes from a corrective invoice
+    useStore.getState().updateInvoice(issued.id, { estado: 'anulada' });
+    expect(useStore.getState().invoices.find(i => i.id === issued.id).estado).toBe('pagada');
+  });
+
+  it('cancels an invoice with a corrective one in its own series', () => {
+    const original = issue('2026-03-02', { items: [{ id: 'l', descripcion: 'Consulta', cantidad: 1, precioUnitario: 40, consultationId: 'c1' }] });
+    const draft = useStore.getState().createCorrectiveDraft(original.id);
+    expect(draft).toMatchObject({ tipo: 'rectificativa', rectificaNumero: original.numero, total: -40 });
+    expect(useStore.getState().issueInvoice(draft.id).ok).toBe(false);   // needs a reason
+    useStore.getState().saveInvoiceDraft({ motivoRectificacion: 'Cobrada dos veces' }, draft.id);
+    const corrective = useStore.getState().issueInvoice(draft.id).invoice;
+    expect(corrective.numero).toBe('R-2026-001');
+    const updated = useStore.getState().invoices.find(i => i.id === original.id);
+    expect(updated).toMatchObject({ estado: 'anulada', rectificadaPor: [corrective.id] });
+  });
+
+  it('keeps the client data on the invoice when the client record changes', () => {
+    useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana', nif: '11111111H' }] });
+    const inv = issue('2026-03-02');
+    useStore.getState().updateClient('k1', { nombre: 'Ana Cambiada' });
+    expect(useStore.getState().invoices.find(i => i.id === inv.id).destinatario.nombre).toBe('Ana');
   });
 });
 
 describe('undo', () => {
-  const add = (fecha) => useStore.getState().addInvoice({ fecha, clienteId: 'k1', items: [] });
-  const numbers = () => useStore.getState().invoices.map(i => i.numero).sort();
+  beforeEach(withNif);
 
-  it('restores a deleted invoice while its number is still free', () => {
-    add('2026-03-01');
-    const second = add('2026-03-02');
-    useStore.getState().deleteInvoice(second.id);
+  it('restores a deleted draft', () => {
+    const draft = useStore.getState().saveInvoiceDraft({ fecha: '2026-03-01', clienteId: 'k1', items: [] });
+    useStore.getState().deleteInvoice(draft.id);
     expect(useStore.getState().undo()).toEqual({ ok: true });
-    expect(numbers()).toEqual(['NP-2026-001', 'NP-2026-002']);
-  });
-
-  it('does not bring back a deleted invoice whose number was reused', () => {
-    add('2026-03-01');
-    const second = add('2026-03-02');
-    useStore.getState().deleteInvoice(second.id);
-    add('2026-03-05'); // gets NP-2026-002 again
-    expect(useStore.getState().undo()).toEqual({ ok: false, reason: 'invoice_number_taken' });
-    expect(numbers()).toEqual(['NP-2026-001', 'NP-2026-002']);
-    // The blocked entry is gone, so it can't block the next undo
-    expect(useStore.getState()._history).toHaveLength(0);
+    expect(useStore.getState().invoices.map(i => i.id)).toEqual([draft.id]);
   });
 
   it('undoes a new client only while it is untouched', () => {
@@ -313,6 +333,16 @@ describe('backups', () => {
     await expect(useStore.getState().restoreFromAutoBackup('2026-11-01')).rejects.toThrow('not_a_backup');
     expect(useStore.getState().clients.map(c => c.nombre)).toEqual(['Ana']);
     expect(files['backup-safety']).toBeUndefined();
+  });
+
+  it('treats invoices from before v17 as issued, with the data they have now', () => {
+    const { data } = readBackup({ version: 16, data: {
+      config: { nombre: 'Nutricionista', nif: '00000000T' },
+      clients: [{ id: 'k1', nombre: 'Ana', nif: '11111111H' }],
+      invoices: [{ id: 'i1', numero: 'NP-2026-001', fecha: '2026-02-03', clienteId: 'k1' }, { id: 'i2', numero: 'NP-2026-002', fecha: '2026-02-04', clienteId: 'gone' }],
+    } });
+    expect(data.invoices[0]).toMatchObject({ emitidaAt: '2026-02-03T12:00:00.000Z', emisor: { nif: '00000000T' }, destinatario: { nombre: 'Ana', nif: '11111111H' } });
+    expect(data.invoices[1].destinatario.nombre).toBe('');
   });
 
   it('does not back up an empty store over a real backup', async () => {
