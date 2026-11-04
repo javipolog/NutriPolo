@@ -12,6 +12,8 @@ const TICK_MS = 5 * 60 * 1000;
 const inFlight = new Set();
 // The "reconnect Google" toast is shown once, not on every tick.
 let reauthNotified = false;
+// The "automatic backup failed" toast is shown once until a backup works again.
+let backupFailureNotified = false;
 
 /** Discreet notice after a sync left new patients in the inbox, with a shortcut to it. */
 export function notifySuggestions(toast, t, n) {
@@ -103,6 +105,7 @@ async function runReviewEmails() {
  * Background work that must run while the app is open, whatever view is on
  * screen. Mounted once by AppContent (i.e. after hydration and unlock).
  *
+ *  - Daily automatic backup, checked now and every 5 min (also offline).
  *  - Google Calendar auto-sync (when connected + autoSync), every 5 min.
  *  - Automatic email reminders and Google review requests, every 5 min
  *    (after the sync, when enabled).
@@ -119,6 +122,24 @@ export function useBackgroundJobs({ toast }) {
   const tRef = useRef(t);
   toastRef.current = toast;
   tRef.current = t;
+
+  // The app may live in the tray for weeks: the daily copy cannot wait for a restart.
+  useEffect(() => {
+    // Only in the desktop app (the browser preview has no data folder).
+    if (typeof window.__TAURI_IPC__ !== 'function') return undefined;
+    const backup = async () => {
+      const result = await useStore.getState().runAutoBackup();
+      if (result?.ok === false && !backupFailureNotified) {
+        backupFailureNotified = true;
+        toastRef.current.error(tRef.current.backup_auto_failed.replace('{error}', result.error), 15000);
+      } else if (result?.ok) {
+        backupFailureNotified = false;
+      }
+    };
+    backup();
+    const interval = setInterval(backup, TICK_MS);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

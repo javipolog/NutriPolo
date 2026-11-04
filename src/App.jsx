@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { Home, Calendar, Users, ClipboardList, Receipt, Package, BookOpen, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
-import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, useToast, hasOpenDialog } from './components/UI';
+import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, ConfirmModal, useToast, useConfirm, hasOpenDialog, hasUnsavedWork } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
 import { LoadErrorScreen } from './components/LoadErrorScreen';
@@ -61,6 +61,7 @@ const UpdateChecker = () => {
   const [dismissed, setDismissed] = useState(false);
   const toast = useToast();
   const t = useT();
+  const { confirm, ConfirmDialog } = useConfirm();
 
   const check = useCallback(async () => {
     try {
@@ -83,12 +84,19 @@ const UpdateChecker = () => {
   }, [check]);
 
   const handleInstall = async () => {
+    // The installer closes the app: an open form or editor would be lost.
+    if (hasUnsavedWork() && !(await confirm({
+      title: t.quit_unsaved_title, message: t.update_unsaved_msg, danger: true, confirmText: t.update_install_anyway,
+    }))) return;
     setInstalling(true);
     try {
       const { installUpdate } = await import('@tauri-apps/api/updater');
       const { relaunch } = await import('@tauri-apps/api/process');
-      // The installer closes the app: save pending changes first.
-      await flushAllPending();
+      if (!(await flushAllPending())) {
+        toast.error(t.update_save_failed, 10000);
+        setInstalling(false);
+        return;
+      }
       await installUpdate();
       await relaunch();
     } catch (e) {
@@ -102,6 +110,7 @@ const UpdateChecker = () => {
   return (
     // Top-right so it never overlaps the toast stack in the bottom-right corner
     <div role="status" className="fixed top-4 right-4 z-50 max-w-sm animate-slideIn">
+      {ConfirmDialog}
       <div className="bg-white border border-wellness-300 rounded-soft shadow-lg p-4 space-y-3">
         <div className="flex items-start gap-3">
           <Download size={20} className="text-wellness-500 mt-0.5 shrink-0" />
@@ -292,7 +301,6 @@ function AppContent() {
   const redo = useStore(s => s.redo);
   const _history = useStore(s => s._history);
   const _future = useStore(s => s._future);
-  const runAutoBackup = useStore(s => s.runAutoBackup);
   const validateDataIntegrity = useStore(s => s.validateDataIntegrity);
   const pendingTotal = useStore(s =>
     (s.patientSuggestions || []).filter(sg =>
@@ -336,19 +344,15 @@ function AppContent() {
   }, [appTheme]);
 
 
-  // Post-hydration: backup + integrity check
+  // Post-hydration integrity check (the daily backup runs in useBackgroundJobs)
   useEffect(() => {
-    const run = async () => {
-      await runAutoBackup();
-      validateDataIntegrity();
-    };
     if (useStore.persist?.hasHydrated?.()) {
-      run();
+      validateDataIntegrity();
     } else {
-      const unsub = useStore.persist?.onFinishHydration?.(() => run());
+      const unsub = useStore.persist?.onFinishHydration?.(() => validateDataIntegrity());
       return () => unsub?.();
     }
-  }, [runAutoBackup, validateDataIntegrity]);
+  }, [validateDataIntegrity]);
 
   // Auto-lock on inactivity. Only active when at-rest encryption is enabled.
   // Timeout is configurable in Settings via `config.autoLockMinutes`:
@@ -371,11 +375,14 @@ function AppContent() {
       const resetTimer = () => {
         clearTimeout(timer);
         timer = setTimeout(async () => {
-          try {
-            // Write pending changes while the key is still available.
-            await flushAllPending();
-            await invoke('encryption_lock');
-          } catch {}
+          // Locking reloads the window: never over an open form or editor
+          // with unsaved changes, nor while changes are not on disk (they
+          // would be lost). Try again after the next idle period.
+          if (hasUnsavedWork()) { resetTimer(); return; }
+          // Write pending changes while the key is still available.
+          const saved = await flushAllPending().catch(() => false);
+          if (!saved) { resetTimer(); return; }
+          try { await invoke('encryption_lock'); } catch {}
           window.location.reload();
         }, minutes * 60 * 1000);
       };
@@ -420,6 +427,11 @@ function AppContent() {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyboard = (e) => {
+      // F5 / Ctrl+R would reload the window and drop open forms: not in the installed app.
+      if (!import.meta.env.DEV && (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r'))) {
+        e.preventDefault();
+        return;
+      }
       // With a modal or the full-screen editor open, changing view or undoing
       // behind it would throw away what is being typed.
       if (hasOpenDialog()) return;
@@ -681,19 +693,47 @@ function EncryptionGate() {
   return <AppContent />;
 }
 
-export default function App() {
-  // "Quit" in the tray menu: write pending changes before the process exits.
+/**
+ * "Quit" in the tray menu (or closing the window without close-to-tray):
+ * write pending changes, then exit. If a write failed or a form has unsaved
+ * changes, stay open (`cancel_quit` also shows the window) and ask.
+ */
+function QuitGuard() {
+  const t = useT();
+  const [reason, setReason] = useState(null);   // 'save_failed' | 'unsaved'
   useEffect(() => {
     let unlisten;
     listen('tray-quit', async () => {
-      try { await flushAllPending(); } finally { invoke('quit_app').catch(() => {}); }
+      const saved = await flushAllPending().catch(() => false);
+      if (saved && !hasUnsavedWork()) {
+        invoke('quit_app').catch(() => {});
+        return;
+      }
+      await invoke('cancel_quit').catch(() => {});
+      setReason(saved ? 'unsaved' : 'save_failed');
     }).then(u => { unlisten = u; }).catch(() => {});
     return () => unlisten?.();
   }, []);
 
   return (
+    <ConfirmModal
+      open={!!reason}
+      onClose={() => setReason(null)}
+      onConfirm={() => invoke('quit_app').catch(() => {})}
+      title={reason === 'save_failed' ? t.quit_save_failed_title : t.quit_unsaved_title}
+      message={reason === 'save_failed' ? t.quit_save_failed_msg : t.quit_unsaved_msg}
+      confirmText={t.quit_anyway}
+      cancelText={t.quit_stay}
+      danger
+    />
+  );
+}
+
+export default function App() {
+  return (
     <ToastProvider>
       <EncryptionGate />
+      <QuitGuard />
     </ToastProvider>
   );
 }

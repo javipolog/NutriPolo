@@ -1170,13 +1170,15 @@ const SecuritySection = () => {
     }
     setBusy(true);
     try {
+      // Pending changes go to disk before the files are converted.
+      if (!(await flushAllPending())) throw new Error(t.security_save_first);
       await invoke('encryption_setup', { password: newPw });
       toast.success(t.security_enabled_ok);
       setEnabled(true);
       setSetupOpen(false);
       setNewPw(''); setConfirmPw(''); setAckLoss(false);
     } catch (e) {
-      toast.error(t.security_enable_error.replace('{error}', String(e)));
+      toast.error(t.security_enable_error.replace('{error}', errMsg(e)));
     } finally {
       setBusy(false);
     }
@@ -1193,6 +1195,8 @@ const SecuritySection = () => {
     }
     setBusy(true);
     try {
+      // Pending changes go to disk before the files are re-encrypted.
+      if (!(await flushAllPending())) throw new Error(t.security_save_first);
       await invoke('encryption_change_password', {
         oldPassword: oldPw,
         newPassword: changeNewPw,
@@ -1201,11 +1205,12 @@ const SecuritySection = () => {
       setChangeOpen(false);
       setOldPw(''); setChangeNewPw(''); setChangeConfirmPw('');
     } catch (e) {
-      const code = String(e || '');
+      const code = errMsg(e);
       if (code.includes('wrong_password')) {
         toast.error(t.security_wrong_password);
       } else {
-        toast.error(t.security_change_error.replace('{error}', code));
+        // On any failure the backend puts every file back on the old password.
+        toast.error(t.security_change_rolled_back.replace('{error}', code), 10000);
       }
     } finally {
       setBusy(false);
@@ -1774,9 +1779,11 @@ export const SettingsView = () => {
   const appTheme = useStore(s => s.appTheme);
   const setAppTheme = useStore(s => s.setAppTheme);
   const exportDataToZip = useStore(s => s.exportDataToZip);
-  const importDataFromZip = useStore(s => s.importDataFromZip);
+  const pickBackupFile = useStore(s => s.pickBackupFile);
+  const importBackup = useStore(s => s.importBackup);
   const getAutoBackupInfo = useStore(s => s.getAutoBackupInfo);
-  const restoreFromAutoBackup = useStore(s => s.restoreFromAutoBackup);
+  const loadAutoBackup = useStore(s => s.loadAutoBackup);
+  const applyBackup = useStore(s => s.applyBackup);
   const lastError = useStore(s => s.lastError);
   const clearLastError = useStore(s => s.clearLastError);
   const t = useT();
@@ -1785,17 +1792,16 @@ export const SettingsView = () => {
   const { confirm, ConfirmDialog } = useConfirm();
 
   const [exportProgress, setExportProgress] = useState(null);
-  const [backupInfo, setBackupInfo] = useState({ count: 0, lastDate: null, dates: [] });
+  const [backupInfo, setBackupInfo] = useState({ count: 0, lastDate: null, dates: [], safety: null });
   const [selectedBackupDate, setSelectedBackupDate] = useState('');
   const [importing, setImporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
-  useEffect(() => {
-    getAutoBackupInfo().then(info => {
-      setBackupInfo(info);
-      if (info.dates.length > 0) setSelectedBackupDate(info.dates[info.dates.length - 1]);
-    });
-  }, []);
+  const refreshBackupInfo = () => getAutoBackupInfo().then(info => {
+    setBackupInfo(info);
+    setSelectedBackupDate(info.dates.length > 0 ? info.dates[info.dates.length - 1] : (info.safety ? 'safety' : ''));
+  });
+  useEffect(() => { refreshBackupInfo(); }, []);
 
   const set = (k, v) => updateConfig({ [k]: v });
 
@@ -1817,21 +1823,45 @@ export const SettingsView = () => {
     }
   };
 
+  const formatBackupDate = (iso) => new Date(iso.length === 10 ? `${iso}T12:00:00` : iso)
+    .toLocaleString(locale, iso.length === 10 ? { dateStyle: 'long' } : { dateStyle: 'long', timeStyle: 'short' });
+  // "Copy of 3 November 2026: 214 clients, 1,830 appointments, 96 invoices, 40 plans."
+  const backupSummary = (backup) => t.backup_summary
+    .replace('{date}', backup.date ? formatBackupDate(backup.date) : t.backup_summary_no_date)
+    .replace('{clients}', backup.counts.clients)
+    .replace('{consultations}', backup.counts.consultations)
+    .replace('{invoices}', backup.counts.invoices)
+    .replace('{plans}', backup.counts.nutritionPlans);
+  const backupError = (e) => (e?.code && t[`backup_${e.code}`]) || errMsg(e);
+  const reportKeptInvoices = (n) => {
+    if (n > 0) toast.info(plural(t, 'backup_kept_invoices', n), 8000);
+  };
+
   const handleImportZip = async () => {
+    let picked;
+    try {
+      picked = await pickBackupFile();
+    } catch (e) {
+      toast.error(t.backup_import_error + ': ' + backupError(e));
+      return;
+    }
+    if (!picked) return;
     const ok = await confirm({
       title: t.backup_import_confirm_title,
-      message: t.backup_import_confirm_msg,
+      message: `${backupSummary(picked)}\n\n${t.backup_import_confirm_msg}`,
       danger: true,
+      confirmText: t.backup_import_confirm_action,
     });
     if (!ok) return;
     setImporting(true);
     try {
-      const result = await importDataFromZip();
-      if (result) {
-        toast.success(t.backup_import_success);
-      }
+      const result = await importBackup(picked);
+      toast.success(t.backup_import_success);
+      if (result.documentsFailed > 0) toast.warning(t.backup_import_docs_failed.replace('{n}', result.documentsFailed), 10000);
+      reportKeptInvoices(result.keptInvoices);
+      refreshBackupInfo();
     } catch (e) {
-      toast.error(t.backup_import_error + ': ' + errMsg(e));
+      toast.error(t.backup_import_error + ': ' + backupError(e));
     } finally {
       setImporting(false);
     }
@@ -1839,22 +1869,30 @@ export const SettingsView = () => {
 
   const handleRestoreAutoBackup = async () => {
     if (!selectedBackupDate) return;
-    const ok = await confirm({
-      title: t.backup_auto_restore,
-      message: t.backup_auto_restore_confirm.replace('{date}', selectedBackupDate),
-      danger: true,
-    });
-    if (!ok) return;
     setRestoring(true);
     try {
-      await restoreFromAutoBackup(selectedBackupDate);
+      const backup = await loadAutoBackup(selectedBackupDate);
+      const ok = await confirm({
+        title: t.backup_auto_restore,
+        message: `${backupSummary(backup)}\n\n${t.backup_auto_restore_confirm}`,
+        danger: true,
+        confirmText: t.backup_restore_action,
+      });
+      if (!ok) return;
+      const result = await applyBackup(backup);
       toast.success(t.backup_import_success);
+      reportKeptInvoices(result.keptInvoices);
+      refreshBackupInfo();
     } catch (e) {
-      toast.error(t.backup_restore_error + ': ' + errMsg(e));
+      toast.error(t.backup_restore_error + ': ' + backupError(e));
     } finally {
       setRestoring(false);
     }
   };
+
+  // The last automatic copy is shown in red when it is more than 2 days old.
+  const backupStale = backupInfo.lastDate
+    && (Date.now() - new Date(`${backupInfo.lastDate}T00:00:00`).getTime()) > 3 * 86400000;
 
   const THEMES = [
     { id: 'light', icon: Sun, label: t.settings_theme_light },
@@ -2024,13 +2062,13 @@ export const SettingsView = () => {
           <div className="flex items-center gap-2 text-xs text-sage-500">
             <History size={13} />
             {backupInfo.lastDate ? (
-              <span>{t.backup_auto_last}: <strong className="text-sage-700">{backupInfo.lastDate}</strong> — {backupInfo.count} {t.backup_auto_count}</span>
+              <span>{t.backup_auto_last}: <strong className={backupStale ? 'text-danger' : 'text-sage-700'}>{formatBackupDate(backupInfo.lastDate)}</strong> — {backupInfo.count} {t.backup_auto_count}</span>
             ) : (
               <span>{t.backup_auto_none}</span>
             )}
           </div>
 
-          {backupInfo.dates.length > 0 && (
+          {(backupInfo.dates.length > 0 || backupInfo.safety) && (
             <div className="flex items-center gap-2">
               <select
                 value={selectedBackupDate}
@@ -2038,9 +2076,12 @@ export const SettingsView = () => {
                 aria-label={t.backup_auto_select}
                 className="text-xs border border-sage-300 rounded-button px-2 py-1.5 bg-white text-sage-700 focus:border-wellness-400 focus:ring-1 focus:ring-wellness-400 outline-none"
               >
-                {backupInfo.dates.map(d => (
-                  <option key={d} value={d}>{d}</option>
+                {[...backupInfo.dates].reverse().map(d => (
+                  <option key={d} value={d}>{formatBackupDate(d)}</option>
                 ))}
+                {backupInfo.safety && (
+                  <option value="safety">{t.backup_safety_option.replace('{date}', formatBackupDate(backupInfo.safety.date))}</option>
+                )}
               </select>
               <Button
                 variant="ghost"

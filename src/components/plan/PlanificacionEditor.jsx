@@ -5,7 +5,7 @@ import {
   Apple, Cookie, Scale, CalendarDays, ShoppingBasket, Settings2, BookOpen,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { Button, SegmentedControl, Combobox, useToast, useConfirm, useDialogA11y } from '../UI';
+import { Button, SegmentedControl, Combobox, useToast, useConfirm, useDialogA11y, setUnsavedWork } from '../UI';
 import useStore, { todayISO, generateId, errMsg } from '../../stores/store';
 import { useT } from '../../i18n';
 import {
@@ -810,6 +810,14 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   };
 
   useDialogA11y(true, close, dialogRef);
+
+  // While there are unsaved changes the app neither locks nor quits silently.
+  const unsavedToken = useRef({}).current;
+  const hasUnsaved = !!(dirty && form);
+  useEffect(() => {
+    setUnsavedWork(unsavedToken, hasUnsaved);
+    return () => setUnsavedWork(unsavedToken, false);
+  }, [hasUnsaved, unsavedToken]);
 
   // Ctrl+S desa sense tancar
   const saveRef = useRef(save);

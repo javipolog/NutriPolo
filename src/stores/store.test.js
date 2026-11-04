@@ -8,6 +8,9 @@ vi.mock('@tauri-apps/api/tauri', () => ({
       if (!(args.key in files)) throw 'not_found';
       return files[args.key];
     }
+    if (cmd === 'save_data') { files[args.key] = args.value; return null; }
+    if (cmd === 'delete_data') { delete files[args.key]; return null; }
+    if (cmd === 'list_data_keys') return Object.keys(files).filter(k => k.startsWith(args.prefix)).sort();
     return null;
   }),
 }));
@@ -20,7 +23,7 @@ globalThis.localStorage = {
   removeItem: (k) => { delete saved[k]; },
 };
 
-const { default: useStore, changedFields, lastVisitByClient, canDeleteInvoice, flushAllPending } = await import('./store');
+const { default: useStore, changedFields, lastVisitByClient, canDeleteInvoice, flushAllPending, readBackup, todayISO } = await import('./store');
 
 const initial = useStore.getState();
 
@@ -255,11 +258,81 @@ describe('restoring a backup', () => {
   });
 
   it('includes the patient inbox in new backups', async () => {
-    useStore.setState({ patientSuggestions: [{ id: 'sg9', status: 'pending' }], lastBackupDate: null });
+    useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana' }], patientSuggestions: [{ id: 'sg9', status: 'pending' }], lastBackupDate: null });
     const { invoke } = await import('@tauri-apps/api/tauri');
     invoke.mockClear();
     await useStore.getState().runAutoBackup();
     const call = invoke.mock.calls.find(([cmd, args]) => cmd === 'save_data' && args.key.startsWith('backup-2'));
     expect(JSON.parse(call[1].value).data.patientSuggestions).toEqual([{ id: 'sg9', status: 'pending' }]);
+  });
+});
+
+describe('backups', () => {
+  const backupFile = (data, version = 16) => JSON.stringify({ version, date: '2026-11-01T08:00:00Z', data });
+
+  it('rejects files that are not a NutriPolo backup or come from a newer version', () => {
+    expect(() => readBackup({ name: 'x', version: '1.0.0', dependencies: {} })).toThrow('not_a_backup');
+    expect(() => readBackup({ version: 16, data: { clients: {} } })).toThrow('not_a_backup');
+    expect(() => readBackup({ version: 16, data: { clients: [], invoices: 'x' } })).toThrow('not_a_backup');
+    expect(() => readBackup({ version: 999, data: { clients: [] } })).toThrow('backup_newer');
+    const ok = readBackup({ version: 16, date: '2026-11-01T08:00:00Z', data: { clients: [{ id: 'k1' }], invoices: [{ id: 'i1' }] } });
+    expect(ok.counts).toMatchObject({ clients: 1, invoices: 1, consultations: 0 });
+    expect(ok.date).toBe('2026-11-01T08:00:00Z');
+  });
+
+  it('saves the current data first and keeps invoices and reminders that happened after the backup', async () => {
+    useStore.setState({
+      clients: [{ id: 'k1', nombre: 'Ana' }],
+      invoices: [
+        { id: 'i1', numero: 'NP-2026-001' },
+        { id: 'i2', numero: 'NP-2026-002' },   // issued after the backup
+      ],
+      consultations: [{ id: 'c1', clienteId: 'k1', reminders: { email: { status: 'sent', slot: '2026-11-05T10:00' } } }],
+    });
+    files['backup-2026-11-01'] = backupFile({
+      clients: [{ id: 'k1', nombre: 'Ana (copia)' }],
+      invoices: [{ id: 'i1', numero: 'NP-2026-001' }],
+      consultations: [{ id: 'c1', clienteId: 'k1' }],
+    });
+    const result = await useStore.getState().restoreFromAutoBackup('2026-11-01');
+
+    const s = useStore.getState();
+    expect(s.clients[0].nombre).toBe('Ana (copia)');
+    expect(s.invoices.map(i => i.numero)).toEqual(['NP-2026-001', 'NP-2026-002']);
+    expect(result.keptInvoices).toBe(1);
+    // The reminder sent after the backup is not sent again
+    expect(s.consultations[0].reminders.email.status).toBe('sent');
+    // What was there before can be brought back
+    expect(JSON.parse(files['backup-safety']).data.clients[0].nombre).toBe('Ana');
+    expect((await s.getAutoBackupInfo()).safety).not.toBeNull();
+  });
+
+  it('does not replace anything if the backup cannot be read', async () => {
+    useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana' }] });
+    files['backup-2026-11-01'] = JSON.stringify({ name: 'otro', version: '2.0.0' });
+    await expect(useStore.getState().restoreFromAutoBackup('2026-11-01')).rejects.toThrow('not_a_backup');
+    expect(useStore.getState().clients.map(c => c.nombre)).toEqual(['Ana']);
+    expect(files['backup-safety']).toBeUndefined();
+  });
+
+  it('does not back up an empty store over a real backup', async () => {
+    useStore.setState({ lastBackupDate: null });
+    expect(await useStore.getState().runAutoBackup()).toEqual({ ok: true, skipped: true });
+    expect(Object.keys(files)).toEqual([]);
+  });
+
+  it('finds the backups on disk even with a damaged manifest, and keeps 7', async () => {
+    for (let d = 1; d <= 7; d++) files[`backup-2026-10-0${d}`] = backupFile({ clients: [] });
+    files['backup-manifest'] = '{ not json';
+    useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana' }], lastBackupDate: null });
+    expect(await useStore.getState().runAutoBackup()).toEqual({ ok: true });
+
+    const today = todayISO();
+    const info = await useStore.getState().getAutoBackupInfo();
+    expect(info.count).toBe(7);
+    expect(info.lastDate).toBe(today);
+    expect(info.dates[0]).toBe('2026-10-02');   // the oldest one was rotated out
+    expect(files['backup-2026-10-01']).toBeUndefined();
+    expect(JSON.parse(files['backup-manifest'])).toEqual(info.dates);
   });
 });

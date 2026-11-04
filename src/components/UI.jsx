@@ -176,6 +176,14 @@ const dialogStack = [];
 // shortcuts (Ctrl+1…7, Ctrl+K, Ctrl+Z) must not act behind it.
 export const hasOpenDialog = () => dialogStack.length > 0;
 
+// Forms and editors holding typed-but-unsaved changes. Quitting, locking and
+// installing an update ask first (or wait) while any is registered.
+const unsavedWork = new Set();
+export const setUnsavedWork = (token, dirty) => {
+  if (dirty) unsavedWork.add(token); else unsavedWork.delete(token);
+};
+export const hasUnsavedWork = () => unsavedWork.size > 0;
+
 export const useDialogA11y = (open, onClose, dialogRef, initialFocusRef) => {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -269,7 +277,7 @@ export const ConfirmModal = ({
       >
         <div className="p-6">
           <h3 id={titleId} className="font-serif text-lg font-semibold text-sage-900 mb-2">{title || t.confirm_title}</h3>
-          <p id={messageId} className="text-sage-600 text-sm">{message || t.confirm_message}</p>
+          <p id={messageId} className="text-sage-600 text-sm whitespace-pre-line">{message || t.confirm_message}</p>
         </div>
         <div className="flex justify-end gap-3 px-6 py-4 bg-sage-50 border-t border-sage-300">
           <Button ref={cancelRef} variant="ghost" onClick={onClose}>{cancelText || t.cancel}</Button>
@@ -520,8 +528,13 @@ export const Modal = ({ open, onClose, title, children, footer, size = 'md', gua
   const dialogRef = useRef(null);
   const editedRef = useRef(false);
   const pressedOnBackdropRef = useRef(false);
+  const unsavedToken = useRef({}).current;
   const [askDiscard, setAskDiscard] = useState(false);
-  useEffect(() => { if (open) editedRef.current = false; }, [open]);
+  useEffect(() => {
+    editedRef.current = false;
+    setUnsavedWork(unsavedToken, false);
+    return () => setUnsavedWork(unsavedToken, false);
+  }, [open, unsavedToken]);
   const requestClose = useCallback(() => {
     if (guardChanges && editedRef.current) setAskDiscard(true);
     else onClose?.();
@@ -530,7 +543,7 @@ export const Modal = ({ open, onClose, title, children, footer, size = 'md', gua
   const titleId = useId();
   if (!open) return null;
   const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-7xl' };
-  const markEdited = guardChanges ? () => { editedRef.current = true; } : undefined;
+  const markEdited = guardChanges ? () => { editedRef.current = true; setUnsavedWork(unsavedToken, true); } : undefined;
 
   return (
     <>
