@@ -379,8 +379,10 @@ function drawPartyDetails(page, layout, tokens, fonts, config, client, invoice) 
   if (config?.nif) {
     page.drawText(`NIF: ${config.nif}`, { x: lx, y: nifY, size: SIZE.body, font: fonts.priReg, color: tokens.colorSecondary });
   }
-  if (client?.cifNif) {
-    page.drawText(client.cifNif, { x: rx, y: nifY, size: SIZE.body, font: fonts.priReg, color: tokens.colorSecondary });
+  // La fitxa desa el NIF a `client.nif` (`cifNif` només per si algun import antic el porta)
+  const clientNif = (client?.nif || client?.cifNif || '').trim();
+  if (clientNif) {
+    page.drawText(`NIF: ${clientNif}`, { x: rx, y: nifY, size: SIZE.body, font: fonts.priReg, color: tokens.colorSecondary });
   }
 
   // Núm. Colegiada (esquerra)

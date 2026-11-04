@@ -33,6 +33,7 @@ const ServiceModal = ({ service, onClose }) => {
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? t.service_edit : t.new_service}
       footer={
@@ -81,7 +82,7 @@ export const ServicesView = () => {
   const [editService, setEditService] = useState(null);
 
   const handleDelete = async (svc) => {
-    const ok = await confirm(t.service_confirm_delete.replace('{name}', svc.nombre));
+    const ok = await confirm({ message: t.service_confirm_delete.replace('{name}', svc.nombre), danger: true, confirmText: t.delete });
     if (!ok) return;
     deleteService(svc.id);
     toast.success(t.service_deleted);

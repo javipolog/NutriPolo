@@ -94,7 +94,7 @@ export const FollowUpTable = ({ client, measurements }) => {
 
   const handleDelete = async (col) => {
     if (!col.m) return;
-    if (!(await confirm(t.measurement_confirm_delete))) return;
+    if (!(await confirm({ message: t.measurement_confirm_delete, danger: true, confirmText: t.delete }))) return;
     deleteMeasurement(col.m.id);
     if (col.m.id === draftId) setDraftId(null);
     toast.success(t.measurement_deleted);

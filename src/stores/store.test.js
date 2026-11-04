@@ -169,6 +169,53 @@ describe('invoice numbering', () => {
   });
 });
 
+describe('undo', () => {
+  const add = (fecha) => useStore.getState().addInvoice({ fecha, clienteId: 'k1', items: [] });
+  const numbers = () => useStore.getState().invoices.map(i => i.numero).sort();
+
+  it('restores a deleted invoice while its number is still free', () => {
+    add('2026-03-01');
+    const second = add('2026-03-02');
+    useStore.getState().deleteInvoice(second.id);
+    expect(useStore.getState().undo()).toEqual({ ok: true });
+    expect(numbers()).toEqual(['NP-2026-001', 'NP-2026-002']);
+  });
+
+  it('does not bring back a deleted invoice whose number was reused', () => {
+    add('2026-03-01');
+    const second = add('2026-03-02');
+    useStore.getState().deleteInvoice(second.id);
+    add('2026-03-05'); // gets NP-2026-002 again
+    expect(useStore.getState().undo()).toEqual({ ok: false, reason: 'invoice_number_taken' });
+    expect(numbers()).toEqual(['NP-2026-001', 'NP-2026-002']);
+    // The blocked entry is gone, so it can't block the next undo
+    expect(useStore.getState()._history).toHaveLength(0);
+  });
+
+  it('undoes a new client only while it is untouched', () => {
+    const client = useStore.getState().addClient({ nombre: 'Nueva' });
+    expect(useStore.getState().undo()).toEqual({ ok: true });
+    expect(useStore.getState().clients).toHaveLength(0);
+    // Redo brings it back
+    useStore.getState().redo();
+    expect(useStore.getState().clients.map(c => c.id)).toEqual([client.id]);
+  });
+
+  it('keeps a new client once it has been edited', () => {
+    const client = useStore.getState().addClient({ nombre: 'Nueva' });
+    useStore.getState().updateClient(client.id, { entrevista: { motivo: 'Primera visita' } });
+    expect(useStore.getState().undo()).toEqual({ ok: false, reason: 'client_in_use' });
+    expect(useStore.getState().clients[0].entrevista.motivo).toBe('Primera visita');
+  });
+
+  it('keeps a new client that already has a measurement', () => {
+    const client = useStore.getState().addClient({ nombre: 'Nueva' });
+    useStore.getState().addMeasurement({ clienteId: client.id, fecha: '2026-11-04', peso: 70 });
+    expect(useStore.getState().undo()).toEqual({ ok: false, reason: 'client_in_use' });
+    expect(useStore.getState().clients).toHaveLength(1);
+  });
+});
+
 describe('restoring a backup', () => {
   it('migrates an old backup and clears the undo history', async () => {
     const { addClient, deleteClient } = useStore.getState();

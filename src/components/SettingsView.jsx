@@ -1806,8 +1806,9 @@ export const SettingsView = () => {
     try {
       const result = await exportDataToZip(({ current, total }) => setExportProgress({ current, total }));
       setExportProgress(null);
+      if (!result?.saved) return; // dialog cancelled: nothing was written
       toast.success(t.backup_export_success);
-      if (result?.skipped > 0) {
+      if (result.skipped > 0) {
         toast.warning(t.backup_skipped_files.replace('{count}', result.skipped));
       }
     } catch (e) {

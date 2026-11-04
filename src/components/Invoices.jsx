@@ -51,7 +51,7 @@ export const Invoices = () => {
       toast.info(t.invoice_delete_not_last);
       return;
     }
-    const ok = await confirm(t.invoice_confirm_delete.replace('{number}', inv.numero));
+    const ok = await confirm({ message: t.invoice_confirm_delete.replace('{number}', inv.numero), danger: true, confirmText: t.delete });
     if (!ok) return;
     if (deleteInvoice(inv.id)) toast.success(t.invoice_deleted);
   };

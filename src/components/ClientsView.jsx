@@ -52,7 +52,7 @@ export const ClientsView = () => {
   }
 
   const handleDelete = async (client) => {
-    const ok = await confirm(t.client_confirm_delete.replace('{name}', client.nombre));
+    const ok = await confirm({ message: t.client_confirm_delete.replace('{name}', client.nombre), danger: true, confirmText: t.delete });
     if (!ok) return;
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);

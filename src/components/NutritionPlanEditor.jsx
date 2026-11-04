@@ -226,6 +226,7 @@ const LegacyPlanEditorModal = ({ plan, defaultClientId, onClose }) => {
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? t.plan_edit : t.plan_new_title}
       size="xl"
@@ -434,7 +435,7 @@ const PlansList = () => {
   }, [nutritionPlans, filterEstado]);
 
   const handleDelete = async (plan) => {
-    const ok = await confirm(t.plan_confirm_delete.replace('{name}', plan.nombre));
+    const ok = await confirm({ message: t.plan_confirm_delete.replace('{name}', plan.nombre), danger: true, confirmText: t.delete });
     if (!ok) return;
     deleteNutritionPlan(plan.id);
     toast.success(t.plan_deleted);

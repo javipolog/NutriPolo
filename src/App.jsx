@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { Home, Calendar, Users, ClipboardList, Receipt, Package, BookOpen, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
-import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, useToast } from './components/UI';
+import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, useToast, hasOpenDialog } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
 import { LoadErrorScreen } from './components/LoadErrorScreen';
@@ -420,16 +420,25 @@ function AppContent() {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyboard = (e) => {
+      // With a modal or the full-screen editor open, changing view or undoing
+      // behind it would throw away what is being typed.
+      if (hasOpenDialog()) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setShowCommandPalette(true);
         return;
       }
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
       const key = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        if (histRef.current.length > 0) { undo(); toastRef.current.info(tRef.current.undo_done, 3000); }
+        if (histRef.current.length > 0) {
+          const res = undo();
+          if (res?.ok) toastRef.current.info(tRef.current.undo_done, 3000);
+          else if (res?.reason === 'invoice_number_taken') toastRef.current.warning(tRef.current.undo_blocked_invoice, 6000);
+          else if (res?.reason === 'client_in_use') toastRef.current.warning(tRef.current.undo_blocked_client, 6000);
+        }
         return;
       }
       // With Shift held the key arrives as 'Z'.
