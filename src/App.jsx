@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { Home, Calendar, Users, ClipboardList, Receipt, Package, BookOpen, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
-import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, ConfirmModal, useToast, useConfirm, hasOpenDialog, hasUnsavedWork } from './components/UI';
+import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, ConfirmModal, useToast, useConfirm, useDialogA11y, hasOpenDialog, hasUnsavedWork } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
 import { LoadErrorScreen } from './components/LoadErrorScreen';
@@ -285,6 +285,24 @@ function usePendingReminders(now) {
 // ============================================
 // MAIN APP
 // ============================================
+/**
+ * Idle lock that keeps the session: the unlock screen covers everything
+ * without reloading, so an open form or changes not yet on disk survive.
+ * Used when a full lock (key wiped + reload) would lose them. The key stays
+ * in memory so those changes can still be saved; nothing is visible until
+ * the password is typed again.
+ */
+function ScreenLock({ onUnlocked }) {
+  const ref = useRef(null);
+  // Topmost dialog: the modals behind it ignore keys and cannot take the focus.
+  useDialogA11y(true, () => {}, ref);
+  return (
+    <div ref={ref} role="dialog" aria-modal="true" aria-label="NutriPolo" tabIndex={-1} className="fixed inset-0 z-[200] overflow-auto focus:outline-none">
+      <UnlockScreen onUnlocked={onUnlocked} />
+    </div>
+  );
+}
+
 function AppContent() {
   const currentView = useStore(s => s.currentView);
   const setCurrentView = useStore(s => s.setCurrentView);
@@ -308,6 +326,7 @@ function AppContent() {
     ).length
   );
   const now = useNow(60000);
+  const [screenLocked, setScreenLocked] = useState(false);
   const pendingReminders = usePendingReminders(now);
 
   const toast = useToast();
@@ -375,13 +394,13 @@ function AppContent() {
       const resetTimer = () => {
         clearTimeout(timer);
         timer = setTimeout(async () => {
-          // Locking reloads the window: never over an open form or editor
-          // with unsaved changes, nor while changes are not on disk (they
-          // would be lost). Try again after the next idle period.
-          if (hasUnsavedWork()) { resetTimer(); return; }
+          // A full lock reloads the window. With an open form or editor
+          // holding unsaved changes, or changes not yet on disk, that would
+          // lose them: cover the screen instead (ScreenLock) and keep them.
+          if (hasUnsavedWork()) { setScreenLocked(true); return; }
           // Write pending changes while the key is still available.
           const saved = await flushAllPending().catch(() => false);
-          if (!saved) { resetTimer(); return; }
+          if (!saved) { setScreenLocked(true); return; }
           try { await invoke('encryption_lock'); } catch {}
           window.location.reload();
         }, minutes * 60 * 1000);
@@ -605,6 +624,7 @@ function AppContent() {
       />
       <WhatsNewModal />
       <UpdateChecker />
+      {screenLocked && <ScreenLock onUnlocked={() => setScreenLocked(false)} />}
     </div>
   );
 }
