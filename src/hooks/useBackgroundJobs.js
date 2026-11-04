@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import useStore, { filterVisibleConsultations } from '../stores/store';
 import { googleCalendar } from '../services/googleCalendarService';
-import { getReminderCandidates, getReminderConfig, isAutoSendable, isQuietTime } from '../services/reminderService';
+import { getReminderCandidates, getReminderConfig, isAutoSendable, isQuietTime, reminderState } from '../services/reminderService';
 import { getReviewCandidates, getReviewConfig, isReviewAutoSendable, reviewState } from '../services/reviewRequestService';
 import { deliverEmailReminder, deliverReviewEmail } from './useReminderActions';
 import { plural, useT } from '../i18n';
@@ -40,10 +40,16 @@ async function runEmailReminders() {
     if (inFlight.has(id)) continue;
     inFlight.add(id);
     try {
-      // Re-read: the consultation may have changed while earlier emails were sending.
-      const fresh = useStore.getState().consultations.find(c => c.id === id);
-      if (!fresh || fresh.estado !== 'programada') continue;
-      const result = await deliverEmailReminder(fresh, entry.client);
+      // Re-check against fresh state: while earlier emails were sending, this
+      // one may have been sent by hand, rescheduled, unlinked or opted out.
+      const state = useStore.getState();
+      const fresh = state.consultations.find(c => c.id === id);
+      if (!fresh || fresh.estado !== 'programada' || !fresh.clienteId) continue;
+      const client = state.clients.find(c => c.id === fresh.clienteId);
+      if (!client) continue;
+      const current = reminderState({ consultation: fresh, client, channel: 'email', config: state.config, now: Date.now() });
+      if (!isAutoSendable({ ...entry, consultation: fresh, client, state: current, record: fresh.reminders?.email })) continue;
+      const result = await deliverEmailReminder(fresh, client);
       if (result.success) sent++; else failed++;
     } finally {
       inFlight.delete(id);
@@ -76,13 +82,15 @@ async function runReviewEmails() {
       // asked the same client already.
       const state = useStore.getState();
       const fresh = state.consultations.find(c => c.id === id);
-      if (!fresh) continue;
+      if (!fresh || !fresh.clienteId) continue;
+      const client = state.clients.find(c => c.id === fresh.clienteId);
+      if (!client) continue;
       const current = reviewState({
-        consultation: fresh, client: entry.client, channel: 'email',
+        consultation: fresh, client, channel: 'email',
         config: state.config, now: Date.now(), history: state.consultations,
       });
-      if (!isReviewAutoSendable({ ...entry, consultation: fresh, state: current, record: fresh.reviewRequest?.email })) continue;
-      const result = await deliverReviewEmail(fresh, entry.client);
+      if (!isReviewAutoSendable({ ...entry, consultation: fresh, client, state: current, record: fresh.reviewRequest?.email })) continue;
+      const result = await deliverReviewEmail(fresh, client);
       if (result.success) sent++; else failed++;
     } finally {
       inFlight.delete(key);

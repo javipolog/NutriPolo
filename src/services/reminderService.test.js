@@ -62,6 +62,13 @@ describe('reminder records', () => {
     c.reminders = { email: { status: 'sending', at: new Date(NOW - 60 * 60000).toISOString(), slot: reminderSlot(c) } };
     expect(state(c)).toBe('error');
   });
+  it('does not retry a failed email once the client opted out or lost the address', () => {
+    const c = consult();
+    c.reminders = { email: { status: 'error', at: new Date(NOW).toISOString(), slot: reminderSlot(c), attempts: 1 } };
+    expect(state(c)).toBe('error');
+    expect(state(c, { ...client, recordatorios: { email: false } })).toBe('opted_out');
+    expect(state(c, { ...client, email: '' })).toBe('no_contact');
+  });
   it('stops automatic retries after MAX_AUTO_ATTEMPTS', () => {
     const entry = { channel: 'email', state: 'error', record: { attempts: MAX_AUTO_ATTEMPTS } };
     expect(isAutoSendable(entry)).toBe(false);

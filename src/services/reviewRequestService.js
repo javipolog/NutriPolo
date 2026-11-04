@@ -168,8 +168,14 @@ export function reviewState({ consultation, client, channel, config, now, histor
   const rv = getReviewConfig(config);
   const record = consultation.reviewRequest?.[channel];
   if (record) {
-    if (record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS) return 'error';
-    return record.status;
+    const stale = record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS;
+    if (!stale && record.status !== 'error') return record.status;
+    // A failed attempt is retried on its own: not once the client has opted
+    // out or has been asked by another channel / consultation meanwhile.
+    if (client?.recordatorios?.review === false) return 'opted_out';
+    if (alreadyAsked(consultation, channel, history)) return 'already_asked';
+    if (!channelContact(channel, client, config)) return 'no_contact';
+    return 'error';
   }
   if (client?.recordatorios?.review === false) return 'opted_out';
   if (alreadyAsked(consultation, channel, history)) return 'already_asked';

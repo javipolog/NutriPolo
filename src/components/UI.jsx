@@ -172,6 +172,10 @@ const ErrorFallback = ({ error, onRetry }) => {
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 const dialogStack = [];
 
+// True while any modal, confirm or full-screen editor is open: the global
+// shortcuts (Ctrl+1…7, Ctrl+K, Ctrl+Z) must not act behind it.
+export const hasOpenDialog = () => dialogStack.length > 0;
+
 export const useDialogA11y = (open, onClose, dialogRef, initialFocusRef) => {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -281,16 +285,16 @@ export const ConfirmModal = ({
 // ============================================
 export const useConfirm = () => {
   const [state, setState] = useState({
-    open: false, title: '', message: '', danger: false, resolve: null,
+    open: false, title: '', message: '', danger: false, confirmText: '', resolve: null,
   });
 
   const confirm = useCallback((arg) => {
     // An empty title falls back to the translated default in ConfirmModal
-    const { title, message, danger } = typeof arg === 'string'
-      ? { title: '', message: arg, danger: false }
-      : { title: arg.title || '', message: arg.message, danger: arg.danger || false };
+    const { title, message, danger, confirmText } = typeof arg === 'string'
+      ? { title: '', message: arg, danger: false, confirmText: '' }
+      : { title: arg.title || '', message: arg.message, danger: arg.danger || false, confirmText: arg.confirmText || '' };
     return new Promise((resolve) => {
-      setState({ open: true, title, message, danger, resolve });
+      setState({ open: true, title, message, danger, confirmText, resolve });
     });
   }, []);
 
@@ -312,6 +316,7 @@ export const useConfirm = () => {
       title={state.title}
       message={state.message}
       danger={state.danger}
+      confirmText={state.confirmText}
     />
   );
 
@@ -507,18 +512,34 @@ export const clickableProps = (onClick) => ({
 // ============================================
 // `footer` renders below the scrolling body, so the main actions stay visible
 // however long the form is.
-export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) => {
+// `guardChanges`: forms. Once something has been typed or picked inside,
+// Escape, ✕ and a click on the backdrop ask before discarding it (the form's
+// own Cancel / Save buttons call onClose directly and are not asked).
+export const Modal = ({ open, onClose, title, children, footer, size = 'md', guardChanges = false }) => {
   const t = useT();
   const dialogRef = useRef(null);
-  useDialogA11y(open, onClose, dialogRef);
+  const editedRef = useRef(false);
+  const pressedOnBackdropRef = useRef(false);
+  const [askDiscard, setAskDiscard] = useState(false);
+  useEffect(() => { if (open) editedRef.current = false; }, [open]);
+  const requestClose = useCallback(() => {
+    if (guardChanges && editedRef.current) setAskDiscard(true);
+    else onClose?.();
+  }, [guardChanges, onClose]);
+  useDialogA11y(open, requestClose, dialogRef);
   const titleId = useId();
   if (!open) return null;
   const sizes = { sm: 'max-w-md', md: 'max-w-2xl', lg: 'max-w-4xl', xl: 'max-w-6xl', full: 'max-w-7xl' };
+  const markEdited = guardChanges ? () => { editedRef.current = true; } : undefined;
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-fadeIn"
-      onClick={onClose}
+      // Only a click that starts and ends on the backdrop closes: releasing a
+      // text selection dragged out of a field must not.
+      onMouseDown={e => { pressedOnBackdropRef.current = e.target === e.currentTarget; }}
+      onClick={e => { if (e.target === e.currentTarget && pressedOnBackdropRef.current) requestClose(); }}
     >
       <div
         ref={dialogRef}
@@ -527,11 +548,12 @@ export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) =
         aria-labelledby={titleId}
         tabIndex={-1}
         className={`w-full ${sizes[size]} bg-white border border-sage-300 rounded-soft shadow-modal max-h-[90vh] overflow-hidden flex flex-col animate-scaleIn focus:outline-none`}
-        onClick={e => e.stopPropagation()}
+        onInput={markEdited}
+        onChange={markEdited}
       >
         <div className="flex items-center justify-between px-6 py-5 border-b border-sage-300">
           <h2 id={titleId} className="font-serif text-heading text-sage-900">{title}</h2>
-          <button onClick={onClose} aria-label={t.close} className="p-2 hover:bg-sage-100 rounded-button transition-colors">
+          <button onClick={requestClose} aria-label={t.close} className="p-2 hover:bg-sage-100 rounded-button transition-colors">
             <X size={18} className="text-sage-500" />
           </button>
         </div>
@@ -541,6 +563,16 @@ export const Modal = ({ open, onClose, title, children, footer, size = 'md' }) =
         )}
       </div>
     </div>
+    <ConfirmModal
+      open={askDiscard}
+      onClose={() => setAskDiscard(false)}
+      onConfirm={() => onClose?.()}
+      title={t.discard_changes_title}
+      message={t.discard_changes_msg}
+      confirmText={t.discard_changes_confirm}
+      danger
+    />
+    </>
   );
 };
 

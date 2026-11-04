@@ -219,6 +219,7 @@ export const InvoiceModal = ({ invoice, defaultClientId, onClose }) => {
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? t.invoice_edit : t.new_invoice}
       size="lg"

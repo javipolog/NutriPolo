@@ -117,6 +117,14 @@ describe('asked once', () => {
     const failed = earlier({ reviewRequest: { email: { status: 'error', at: '2026-09-01T12:00:00Z' } } });
     expect(state(consult(), { history: [failed, consult()] })).toBe('due');
   });
+  it('does not retry a failed email once asked by WhatsApp or after an opt-out', () => {
+    const failed = { status: 'error', at: '2026-10-14T14:00:00Z', attempts: 1 };
+    const c = consult({ reviewRequest: { email: failed } });
+    expect(state(c)).toBe('error');
+    const askedByWa = consult({ reviewRequest: { email: failed, whatsapp: { status: 'opened', at: '2026-10-14T14:30:00Z' } } });
+    expect(state(askedByWa)).toBe('already_asked');
+    expect(state(c, { cl: { ...client, recordatorios: { review: false } } })).toBe('opted_out');
+  });
   it('respects the client opt-out', () => {
     expect(state(consult(), { cl: { ...client, recordatorios: { review: false } } })).toBe('opted_out');
   });

@@ -14,6 +14,11 @@ export default defineConfig({
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
   },
+  // Only this checkout's tests: Claude worktrees under .claude/ carry their own src/.
+  test: {
+    dir: 'src',
+    exclude: ['**/node_modules/**', '**/.claude/**'],
+  },
   optimizeDeps: {
     esbuildOptions: {
       target: 'esnext',

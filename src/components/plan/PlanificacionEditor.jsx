@@ -202,7 +202,7 @@ const CantidadesEditor = ({ value, onChange }) => {
   const update = (id, data) => setGrupos(grupos.map(g => (g.id === id ? { ...g, ...data } : g)));
 
   const restore = async () => {
-    if (!(await confirm(t.pf_restore_confirm))) return;
+    if (!(await confirm({ message: t.pf_restore_confirm, danger: true }))) return;
     onChange({ nota: DEFAULT_CANTIDADES_NOTA, grupos: DEFAULT_CANTIDADES.map(g => ({ ...g, id: generateId() })) });
   };
 
@@ -514,7 +514,7 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
   };
 
   const remove = async (pr) => {
-    if (!(await confirm(t.pf_product_delete_confirm.replace('{name}', pr.nombre)))) return;
+    if (!(await confirm({ message: t.pf_product_delete_confirm.replace('{name}', pr.nombre), danger: true, confirmText: t.delete }))) return;
     deletePlanProduct(pr.id);
     onChange(selected.filter(id => id !== pr.id));
   };
@@ -805,7 +805,7 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   };
 
   const close = async () => {
-    if (dirty && form && !(await confirm(t.pf_discard_confirm))) return;
+    if (dirty && form && !(await confirm({ message: t.pf_discard_confirm, danger: true, confirmText: t.discard_changes_confirm }))) return;
     onClose();
   };
 
@@ -824,7 +824,7 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
 
   const copyFrom = async (id) => {
     const src = plans.find(p => p.id === id);
-    if (!src || !(await confirm(t.pf_copy_confirm.replace('{name}', src.nombre)))) return;
+    if (!src || !(await confirm({ message: t.pf_copy_confirm.replace('{name}', src.nombre), danger: true }))) return;
     update(f => ({ ...f, ...copyContent(src) }));
     setState(s => ({ ...s, origin: src.nombre }));
     toast.success(t.pf_copy_done);

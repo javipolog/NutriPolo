@@ -89,6 +89,7 @@ export const ClientModal = ({ client, onClose }) => {
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? `${t.edit} — ${client.nombre}` : t.new_client}
       size="lg"

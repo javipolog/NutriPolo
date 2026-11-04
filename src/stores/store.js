@@ -995,6 +995,28 @@ function restoredState(d, current) {
   };
 }
 
+// Why an undo entry can no longer be applied safely (null = it can).
+// - delete_invoice: its number was reused by a newer invoice → two invoices
+//   with the same number (numbering must be unique and correlative).
+// - add_client: undoing deletes the client; not once it has been edited
+//   (interview, energy…) or has anything linked to it.
+export function undoBlockReason(s, entry) {
+  if (entry?.type === 'delete_invoice') {
+    const { id, numero } = entry.item || {};
+    return (s.invoices || []).some(i => i.id === id || (numero && i.numero === numero))
+      ? 'invoice_number_taken' : null;
+  }
+  if (entry?.type === 'add_client') {
+    const id = entry.item?.id;
+    const current = (s.clients || []).find(c => c.id === id);
+    if (!current) return null;
+    const linked = [s.consultations, s.measurements, s.nutritionPlans, s.invoices, s.clientDocuments]
+      .some(list => (list || []).some(x => x?.clienteId === id));
+    return current !== entry.item || linked ? 'client_in_use' : null;
+  }
+  return null;
+}
+
 // ============================================
 // STORE
 // ============================================
@@ -1848,10 +1870,17 @@ const useStore = create(
       _history: [],
       _future: [],
 
+      // Returns { ok: true } or { ok: false, reason } when undoing would break
+      // data: the blocked entry is dropped so it doesn't stay stuck on top.
       undo: () => {
         const history = get()._history;
-        if (!history.length) return;
+        if (!history.length) return { ok: false, reason: 'empty' };
         const [last, ...rest] = history;
+        const reason = undoBlockReason(get(), last);
+        if (reason) {
+          set({ _history: rest });
+          return { ok: false, reason };
+        }
         // Single set() so every consumer sees a consistent snapshot —
         // previously this fired 2 separate updates and components could
         // observe the item list mutated before the history bookkeeping.
@@ -1867,6 +1896,7 @@ const useStore = create(
           if (last.type === 'delete_invoice')      next.invoices        = [last.item, ...s.invoices];
           return next;
         });
+        return { ok: true };
       },
       redo: () => {
         const future = get()._future;
@@ -1969,7 +1999,17 @@ const useStore = create(
         set(s => restoredState(d, s));
       },
 
+      // Returns { saved: false } if the save dialog is cancelled, or
+      // { saved: true, skipped } once the file is on disk; a failed write throws
+      // (the caller must not report a backup that does not exist).
       exportDataToZip: async (onProgress) => {
+        const fileName = `nutripolo-backup-${todayISO()}.zip`;
+        let path = null;
+        if (isTauri()) {
+          const { save } = await import('@tauri-apps/api/dialog');
+          path = await save({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip'] }], defaultPath: fileName });
+          if (!path) return { saved: false };
+        }
         const JSZip = (await import('jszip')).default;
         const { clientDocuments } = get();
         const payload = {
@@ -2000,24 +2040,19 @@ const useStore = create(
 
         const zipBytes = await zip.generateAsync({ type: 'uint8array' });
 
-        try {
-          const { save } = await import('@tauri-apps/api/dialog');
-          const { writeBinaryFile } = await import('@tauri-apps/api/fs');
-          const path = await save({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip'] }], defaultPath: `nutripolo-backup-${todayISO()}.zip` });
-          if (path) {
-            await writeBinaryFile(path, zipBytes);
-          }
-        } catch {
-          const blob = new Blob([zipBytes], { type: 'application/zip' });
-          const url = URL.createObjectURL(blob);
+        if (!path) {
+          // Browser preview only (npm run dev): plain download
+          const url = URL.createObjectURL(new Blob([zipBytes], { type: 'application/zip' }));
           const a = document.createElement('a');
           a.href = url;
-          a.download = `nutripolo-backup-${todayISO()}.zip`;
+          a.download = fileName;
           a.click();
-          URL.revokeObjectURL(url);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          return { saved: true, skipped };
         }
-
-        return { skipped };
+        const { writeBinaryFile } = await import('@tauri-apps/api/fs');
+        await writeBinaryFile(path, zipBytes);
+        return { saved: true, skipped };
       },
 
       importDataFromZip: async () => {

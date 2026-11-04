@@ -167,6 +167,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? t.consultation_edit : t.new_consultation}
       size="lg"

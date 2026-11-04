@@ -165,6 +165,7 @@ export const SendEmailModal = ({
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={t.email_send_title}
       size="lg"

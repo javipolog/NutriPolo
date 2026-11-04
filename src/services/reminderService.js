@@ -125,8 +125,13 @@ export function reminderState({ consultation, client, channel, config, now }) {
   const start = consultationStart(consultation);
   const record = consultation.reminders?.[channel];
   if (record && record.slot === reminderSlot(consultation)) {
-    if (record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS) return 'error';
-    return record.status;
+    const stale = record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS;
+    if (!stale && record.status !== 'error') return record.status;
+    // A failed attempt is retried on its own: not once the client has opted
+    // out or the contact is gone.
+    if (client?.recordatorios?.[channel] === false) return 'opted_out';
+    if (!channelContact(channel, client, config)) return 'no_contact';
+    return 'error';
   }
   if (client?.recordatorios?.[channel] === false) return 'opted_out';
   if (!channelContact(channel, client, config)) return 'no_contact';

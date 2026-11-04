@@ -292,7 +292,7 @@ fn quit_app()                                         // el JS el crida despres 
 - `sage`, `wellness` i `terra` són variables CSS a `styles.css` (clar i fosc); no feu servir colors de Tailwind (`red-*`, `orange-*`…) ni hex als components
 - Contrast WCAG AA: `sage-400`+ com a text; `wellness-400` / `terra-500` porten text blanc
 - Dark mode via `data-theme` a `<html>`; les excepcions (`bg-white`, text semàntic) són a `styles.css`
-- Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Combobox` (llistes llargues, p. ex. clients), `Modal` (prop `footer` fora del scroll)
+- Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Combobox` (llistes llargues, p. ex. clients), `Modal` (prop `footer` fora del scroll; `guardChanges` als formularis: Escape, ✕ o clic fora pregunten abans de descartar). Amb un diàleg obert (`hasOpenDialog`) les dreceres globals no actuen. Esborrats amb `confirm({ message, danger: true, confirmText: t.delete })` (focus a Cancel·lar)
 - Tipografia: **Onest a tot arreu** (UI, títols i PDFs). `font-serif` / `font-mono` són només rols (títols de vista `font-serif text-title`, codis) i també són Onest; xifres amb `tabular-nums`; res per sota d'11 px
 - UI: Onest empaquetada amb @fontsource (`main.jsx`); PDFs: instàncies estàtiques completes (latin-ext, fletxes) a `public/fonts` amb `Onest-OFL.txt`, via `pdfFonts.js`. Cap petició a Google Fonts
 
