@@ -108,6 +108,16 @@ describe('income book', () => {
     expect(lines[1]).toBe('02/04/2026;NP-2026-002;Ordinaria;;"Clínica; ""Sol""";B00000000;60,00;0,00;0,00;15,00;9,00;51,00;Cobrada;05/04/2026;');
     expect(lines.at(-1)).toBe(';;;;TOTAL;;60,00;;0,00;;9,00;51,00;;;');
   });
+
+  it('never lets a client name run as a formula in Excel', () => {
+    const rows = [issued({ numero: 'NP-2026-004', fecha: '2026-06-01', baseImponible: -40, total: -40,
+      destinatario: { nombre: '=HYPERLINK("http://x","clic")', nif: '+34 600' } })];
+    const line = incomeBookCsv(rows).trim().split('\r\n')[1].split(';');
+    expect(line[4]).toBe(`"'=HYPERLINK(""http://x"",""clic"")"`);
+    expect(line[5]).toBe("'+34 600");
+    // Negative amounts stay numbers
+    expect(line[6]).toBe('-40,00');
+  });
 });
 
 describe('IBAN', () => {

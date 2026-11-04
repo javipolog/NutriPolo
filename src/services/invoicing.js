@@ -228,8 +228,16 @@ export function periodTotals(invoices = []) {
 
 const csvNumber = (n) => (Number(n) || 0).toFixed(2).replace('.', ',');
 const csvDate = (iso) => (iso ? iso.slice(0, 10).split('-').reverse().join('/') : '');
+/**
+ * A free-text cell (client name, NIF, number…). Text starting with = + - @
+ * (or a tab / CR) would run as a formula when the file is opened in Excel,
+ * and a client name can come from a Google Calendar event: it gets a leading
+ * apostrophe so it stays text. Numbers and dates are built by csvNumber /
+ * csvDate and never go through here (a negative amount must stay a number).
+ */
 const csvText = (v) => {
-  const s = String(v ?? '');
+  let s = String(v ?? '');
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[;"\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
@@ -246,11 +254,11 @@ const BOOK_COLUMNS = [
 export function incomeBookCsv(invoices = []) {
   const rows = invoices.map(inv => [
     csvDate(inv.fecha),
-    inv.numero,
+    csvText(inv.numero),
     isCorrective(inv) ? 'Rectificativa' : 'Ordinaria',
-    inv.rectificaNumero || '',
-    inv.destinatario?.nombre || '',
-    inv.destinatario?.nif || '',
+    csvText(inv.rectificaNumero),
+    csvText(inv.destinatario?.nombre),
+    csvText(inv.destinatario?.nif),
     csvNumber(inv.baseImponible),
     csvNumber(inv.ivaPct),
     csvNumber(inv.ivaImporte),
@@ -259,11 +267,11 @@ export function incomeBookCsv(invoices = []) {
     csvNumber(inv.total),
     inv.estado === 'pagada' ? 'Cobrada' : inv.estado === 'anulada' ? 'Anulada' : 'Pendiente',
     csvDate(inv.fechaCobro),
-    inv.metodoPago || '',
+    csvText(inv.metodoPago),
   ]);
   const totals = periodTotals(invoices);
   rows.push(['', '', '', '', 'TOTAL', '', csvNumber(totals.base), '', csvNumber(totals.iva), '', csvNumber(totals.irpf), csvNumber(totals.total), '', '', '']);
-  return '﻿' + [BOOK_COLUMNS, ...rows].map(r => r.map(csvText).join(';')).join('\r\n') + '\r\n';
+  return '﻿' + [BOOK_COLUMNS.map(csvText), ...rows].map(r => r.join(';')).join('\r\n') + '\r\n';
 }
 
 // ---- IBAN ------------------------------------------------------------------------
