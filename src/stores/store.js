@@ -60,11 +60,10 @@ async function loadRaw(name) {
     const msg = String(err || '');
     // Nothing saved yet (first launch).
     if (msg.includes('not_found')) return null;
-    // If the vault is locked return null so Zustand keeps its defaults
-    // and let App.jsx re-trigger rehydration after unlock.
-    if (msg.includes('not_unlocked')) return null;
-    // The file exists but is unreadable: never fall back to empty
-    // defaults silently, or the next save would destroy the real data.
+    // Anything else means the file exists but is unreadable: never fall back
+    // to empty defaults silently, or the next save would destroy the real
+    // data. That includes `not_unlocked`: hydration only runs once the vault
+    // is open, so it means an encrypted file whose `encryption.json` is gone.
     loadFailure = { key: name, error: msg };
     return null;
   }
@@ -95,14 +94,19 @@ const tauriStorage = {
   },
 };
 
-/** Write every queued value now. Await it before locking the vault. */
-export function flushAllPending() {
+/**
+ * Write every queued value now. Await it before locking the vault or quitting.
+ * Resolves to true when everything reached the disk, false when a write
+ * failed (it stays queued and is retried).
+ */
+export async function flushAllPending() {
   const names = new Set([...Object.keys(writeTimers), ...Object.keys(writeQueue)]);
-  return Promise.all([...names].map(name => {
+  await Promise.all([...names].map(name => {
     clearTimeout(writeTimers[name]);
     delete writeTimers[name];
     return flushWrite(name);
   }));
+  return Object.keys(writeQueue).length === 0;
 }
 
 if (typeof window !== 'undefined') {
@@ -952,15 +956,68 @@ function restoreClientDeletion(s, entry) {
   };
 }
 
+/** A file that is not a usable NutriPolo backup; `code` is shown translated. */
+export class BackupError extends Error {
+  constructor(code) { super(code); this.code = code; }
+}
+
+const BACKUP_ARRAYS = ['clients', 'measurements', 'consultations', 'nutritionPlans', 'services', 'invoices', 'clientDocuments'];
+
 /**
- * Data of a parsed backup brought up to the current schema, like a normal
+ * Check a parsed backup and bring it up to the current schema, like a normal
  * load. Accepts exports/auto-backups (`{ version, data }`), the raw store
  * file (`{ version, state }`) and very old bare objects (taken as current).
+ * Returns { data, date, counts }. Throws BackupError:
+ *   not_a_backup → no NutriPolo data in it (another JSON, an empty object…)
+ *   backup_newer → written by a newer version of the app
  */
-export function backupData(parsed) {
-  const raw = parsed?.data || parsed?.state || parsed || {};
+export function readBackup(parsed) {
+  const raw = parsed?.data || parsed?.state || parsed;
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.clients)) throw new BackupError('not_a_backup');
+  if (BACKUP_ARRAYS.some(k => raw[k] != null && !Array.isArray(raw[k]))) throw new BackupError('not_a_backup');
   const version = Number.isInteger(parsed?.version) ? parsed.version : STORE_VERSION;
-  return version < STORE_VERSION ? migrateStore(raw, version) : raw;
+  if (version > STORE_VERSION) throw new BackupError('backup_newer');
+  const data = version < STORE_VERSION ? migrateStore(raw, version) : raw;
+  const count = (k) => (Array.isArray(data[k]) ? data[k].length : 0);
+  return {
+    data,
+    date: parsed?.exportDate || parsed?.date || null,
+    counts: { clients: count('clients'), consultations: count('consultations'), invoices: count('invoices'), nutritionPlans: count('nutritionPlans') },
+  };
+}
+
+const hasData = (s) => !!(s.clients?.length || s.consultations?.length || s.invoices?.length || s.nutritionPlans?.length);
+
+// Copy of the data taken right before a restore or import replaces it, so a
+// wrong file can be undone (Settings and the load error screen offer it).
+const SAFETY_BACKUP_KEY = 'backup-safety';
+const SAFETY_INFO_KEY = 'backup-safety-info';
+const AUTO_BACKUP_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Dates of the automatic backups on disk, oldest first. */
+async function listAutoBackupDates() {
+  // The files themselves are the truth: a damaged manifest must not hide them.
+  const keys = await invoke('list_data_keys', { prefix: 'backup-' }).catch(() => null);
+  let dates;
+  if (Array.isArray(keys)) {
+    dates = keys.map(k => k.slice('backup-'.length));
+  } else {
+    const raw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
+    try { dates = raw ? JSON.parse(raw) : []; } catch { dates = []; }
+    if (!Array.isArray(dates)) dates = [];
+  }
+  return [...new Set(dates)].filter(d => AUTO_BACKUP_DATE.test(d)).sort();
+}
+
+function backupSnapshot(s) {
+  return { version: STORE_VERSION, date: new Date().toISOString(), data: { config: stripGoogleSecrets(s.config), ...backupCollections(s) } };
+}
+
+/** Save the current data as the safety copy (skipped when there is nothing to keep). Throws if it cannot. */
+async function saveSafetyBackup(s) {
+  if (!hasData(s)) return;
+  await invoke('save_data', { key: SAFETY_BACKUP_KEY, value: JSON.stringify(backupSnapshot(s)) });
+  await invoke('save_data', { key: SAFETY_INFO_KEY, value: JSON.stringify({ date: new Date().toISOString() }) });
 }
 
 /** Collections included in backups and exports (config is added stripped). */
@@ -972,17 +1029,39 @@ function backupCollections(s) {
 }
 
 /**
- * State patch that replaces the data with a backup's (`d` from backupData).
+ * State patch that replaces the data with a backup's (`d` from readBackup).
+ * Two things are kept from the current data, because they already happened
+ * outside the app:
+ *  - invoices issued after the backup (dropping them would hand their
+ *    numbers out again), counted in `keptInvoices`;
+ *  - the reminder / review-request status of each consultation (or the
+ *    next tick would send them again).
  * The undo history belongs to the replaced data, so it is cleared.
  */
-function restoredState(d, current) {
+export function restoredState(d, current) {
+  const backupInvoices = d.invoices || [];
+  const ids = new Set(backupInvoices.map(i => i.id));
+  const numbers = new Set(backupInvoices.map(i => i.numero).filter(Boolean));
+  const newerInvoices = (current.invoices || []).filter(i => !ids.has(i.id) && !(i.numero && numbers.has(i.numero)));
+  const sent = new Map((current.consultations || []).filter(c => c.reminders || c.reviewRequest).map(c => [c.id, c]));
+  const consultations = (d.consultations || []).map(c => {
+    const now = sent.get(c.id);
+    return now ? { ...c, reminders: now.reminders ?? c.reminders, reviewRequest: now.reviewRequest ?? c.reviewRequest } : c;
+  });
+  return {
+    keptInvoices: newerInvoices.length,
+    patch: restoredPatch(d, current, { invoices: [...backupInvoices, ...newerInvoices], consultations }),
+  };
+}
+
+function restoredPatch(d, current, { invoices, consultations }) {
   return {
     clients:        d.clients        || [],
     measurements:   d.measurements   || [],
-    consultations:  d.consultations  || [],
+    consultations,
     nutritionPlans: d.nutritionPlans || [],
     services:       d.services       || DEFAULT_SERVICES,
-    invoices:       d.invoices       || [],
+    invoices,
     clientDocuments:d.clientDocuments || [],
     emailTemplates: d.emailTemplates || null,
     planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
@@ -1964,40 +2043,61 @@ const useStore = create(
       // ---- BACKUP ----
       lastBackupDate: null,
 
+      // Once a day, also while the app lives in the tray (useBackgroundJobs
+      // calls it every few minutes). Returns { ok, skipped?, error? }.
       runAutoBackup: async () => {
         const today = todayISO();
-        if (get().lastBackupDate === today) return;
-        const backup = {
-          version: STORE_VERSION,
-          date: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
-        };
+        const s = get();
+        if (s.lastBackupDate === today) return { ok: true, skipped: true };
+        // A backup of nothing (e.g. right after "start empty") would push a
+        // real one out of the rotation.
+        if (!hasData(s)) return { ok: true, skipped: true };
         try {
-          const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
-          const manifest = manifestRaw ? JSON.parse(manifestRaw) : [];
-          await invoke('save_data', { key: `backup-${today}`, value: JSON.stringify(backup) });
-          const newManifest = [...manifest.filter(d => d !== today), today].slice(-7);
-          await invoke('save_data', { key: 'backup-manifest', value: JSON.stringify(newManifest) });
-          for (const old of manifest.slice(0, Math.max(0, manifest.length - 6))) {
+          const dates = await listAutoBackupDates();
+          await invoke('save_data', { key: `backup-${today}`, value: JSON.stringify(backupSnapshot(s)) });
+          const keep = [...dates.filter(d => d !== today), today].slice(-7);
+          await invoke('save_data', { key: 'backup-manifest', value: JSON.stringify(keep) });
+          for (const old of dates.filter(d => !keep.includes(d))) {
             await invoke('delete_data', { key: `backup-${old}` }).catch(() => {});
           }
           set({ lastBackupDate: today });
-        } catch (e) { if (import.meta.env.DEV) console.warn('Backup failed:', e); }
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: String(e?.message || e) };
+        }
       },
 
+      // { count, lastDate, dates, safety: { date } | null }
       getAutoBackupInfo: async () => {
-        try {
-          const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
-          const manifest = manifestRaw ? JSON.parse(manifestRaw) : [];
-          return { count: manifest.length, lastDate: manifest.length > 0 ? manifest[manifest.length - 1] : null, dates: manifest };
-        } catch { return { count: 0, lastDate: null, dates: [] }; }
+        const dates = await listAutoBackupDates().catch(() => []);
+        const info = await invoke('load_data', { key: SAFETY_INFO_KEY }).then(JSON.parse).catch(() => null);
+        return {
+          count: dates.length,
+          lastDate: dates.length > 0 ? dates[dates.length - 1] : null,
+          dates,
+          safety: info?.date ? { date: info.date } : null,
+        };
       },
 
-      restoreFromAutoBackup: async (date) => {
-        const raw = await invoke('load_data', { key: `backup-${date}` });
-        const d = backupData(JSON.parse(raw));
-        set(s => restoredState(d, s));
+      // Read and check an automatic backup ('YYYY-MM-DD') or the copy taken
+      // before the last restore ('safety'). Nothing changes yet.
+      loadAutoBackup: async (date) => {
+        const key = date === 'safety' ? SAFETY_BACKUP_KEY : `backup-${date}`;
+        const raw = await invoke('load_data', { key });
+        return readBackup(JSON.parse(raw));
       },
+
+      // Replace the data with a checked backup (from loadAutoBackup or
+      // pickBackupFile). The current data is first saved as the safety copy;
+      // if that fails nothing is replaced. Returns { keptInvoices }.
+      applyBackup: async (backup, { safety = true } = {}) => {
+        if (safety) await saveSafetyBackup(get());
+        const { patch, keptInvoices } = restoredState(backup.data, get());
+        set(patch);
+        return { keptInvoices };
+      },
+
+      restoreFromAutoBackup: async (date) => get().applyBackup(await get().loadAutoBackup(date)),
 
       // Returns { saved: false } if the save dialog is cancelled, or
       // { saved: true, skipped } once the file is on disk; a failed write throws
@@ -2055,58 +2155,69 @@ const useStore = create(
         return { saved: true, skipped };
       },
 
-      importDataFromZip: async () => {
+      // Choose a .zip export (or an old .json) and check it. Returns null if
+      // the dialog is cancelled; throws BackupError / read errors. Nothing
+      // changes until importBackup.
+      pickBackupFile: async () => {
         const { open } = await import('@tauri-apps/api/dialog');
         const path = await open({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip', 'json'] }] });
         if (!path) return null;
+        const parse = (text) => {
+          try { return JSON.parse(text); } catch { throw new BackupError('not_a_backup'); }
+        };
 
         // JSON fallback for old backups
-        if (path.endsWith('.json')) {
+        if (path.toLowerCase().endsWith('.json')) {
           const { readTextFile } = await import('@tauri-apps/api/fs');
-          const raw = await readTextFile(path);
-          const d = backupData(JSON.parse(raw));
-          set(s => restoredState(d, s));
-          return { documentsRestored: 0 };
+          return { ...readBackup(parse(await readTextFile(path))), zip: null, documents: 0 };
         }
 
-        // ZIP import
         const JSZip = (await import('jszip')).default;
         const { readBinaryFile } = await import('@tauri-apps/api/fs');
-
-        const zipBytes = await readBinaryFile(path);
-        const zip = await JSZip.loadAsync(zipBytes);
-
-        // Restore data.json
+        let zip;
+        try { zip = await JSZip.loadAsync(await readBinaryFile(path)); } catch { throw new BackupError('not_a_backup'); }
         const dataFile = zip.file('data.json');
-        if (!dataFile) throw new Error('Invalid backup: data.json not found');
-        const dataRaw = await dataFile.async('string');
-        const d = backupData(JSON.parse(dataRaw));
+        if (!dataFile) throw new BackupError('not_a_backup');
+        const backup = readBackup(parse(await dataFile.async('string')));
+        const documents = Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir).length;
+        return { ...backup, zip, documents };
+      },
+
+      // Apply a backup from pickBackupFile: safety copy of the current data,
+      // then the documents, then the data.
+      // Returns { documentsRestored, documentsFailed, keptInvoices }.
+      importBackup: async (picked) => {
+        await saveSafetyBackup(get());
 
         // Restore document files through the backend so they are encrypted
         // when at-rest encryption is on. Only `documents/<clientId>/<file>`
         // entries with safe names are accepted.
         const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
         let documentsRestored = 0;
-        const docFiles = Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir);
+        let documentsFailed = 0;
+        const zip = picked.zip;
+        const docFiles = zip ? Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir) : [];
         for (const filePath of docFiles) {
+          const parts = filePath.split('/');
+          const [, clienteId, storedFileName] = parts;
+          if (parts.length !== 3 || !SAFE_SEGMENT.test(clienteId) || !SAFE_SEGMENT.test(storedFileName)
+            || clienteId.includes('..') || storedFileName.includes('..')) {
+            documentsFailed++;
+            continue;
+          }
           try {
-            const parts = filePath.split('/');
-            if (parts.length !== 3) continue;
-            const [, clienteId, storedFileName] = parts;
-            if (!SAFE_SEGMENT.test(clienteId) || !SAFE_SEGMENT.test(storedFileName)
-              || clienteId.includes('..') || storedFileName.includes('..')) continue;
             const base64Data = await zip.files[filePath].async('base64');
             await invoke('save_bytes_to_documents', { clientId: clienteId, destFilename: storedFileName, base64Data });
             documentsRestored++;
           } catch (e) {
+            documentsFailed++;
             if (import.meta.env.DEV) console.warn('Failed to restore document:', filePath, e);
           }
         }
 
-        // Apply data to store
-        set(s => restoredState(d, s));
-
-        return { documentsRestored };
+        const { patch, keptInvoices } = restoredState(picked.data, get());
+        set(patch);
+        return { documentsRestored, documentsFailed, keptInvoices };
       },
 
       emailTemplates: null,

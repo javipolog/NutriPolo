@@ -173,6 +173,7 @@ fn save_data(app_handle, key, value) -> Result<(), String>      // escriptura at
 fn load_data(app_handle, key) -> Result<String, String>
 fn delete_data(app_handle, key) -> Result<(), String>
 fn quarantine_data(app_handle, key) -> Result<(), String>       // mou un fitxer illegible a *.corrupt-<ts>
+fn list_data_keys(app_handle, prefix) -> Result<Vec<String>, String>  // claus al disc (troba les còpies encara que el manifest es perdi)
 
 // Secrets (Windows Credential Manager)
 fn store_smtp_password / get_smtp_password / clear_smtp_password / has_smtp_password
@@ -213,6 +214,7 @@ fn recipes_fetch(path) -> Result<String, String>
 fn autostart_is_enabled() / autostart_set(enabled)   // clau Run del registre, arrenca amb --hidden
 fn configure_tray(close_to_tray, show_label, quit_label)
 fn quit_app()                                         // el JS el crida despres de flushAllPending (event `tray-quit`)
+fn cancel_quit()                                      // el JS es queda obert (canvis sense desar o escriptura fallida) i mostra la finestra
 ```
 
 ---
@@ -230,7 +232,10 @@ fn quit_app()                                         // el JS el crida despres 
 - Store unic (`store.js`) amb totes les entitats i accions
 - Undo/redo integrat (`_history`, `_future`)
 - Migracions a `migrateStore` (STORE_VERSION); `config` es fusiona amb els valors per defecte en hidratar
-- Si el fitxer de dades no es pot llegir, les escriptures queden bloquejades (`getLoadFailure`)
+- Si el fitxer de dades no es pot llegir, les escriptures queden bloquejades (`getLoadFailure`); també un `.enc` sense `encryption.json` (`not_unlocked`). `LoadErrorScreen` llegeix i valida la còpia abans de moure el fitxer a quarantena
+- `flushAllPending()` torna `true` si tot és al disc. Sortir i instal·lar una actualització no continuen si no (ni amb un formulari amb canvis: `setUnsavedWork` / `hasUnsavedWork` a `UI.jsx`, que ja fan servir `Modal guardChanges` i l'editor de planificacions). El bloqueig automàtic, en aquests casos, tapa la pantalla amb `ScreenLock` (sense recarregar, la clau segueix en memòria per poder desar) en lloc de no bloquejar
+- Còpies automàtiques: una al dia des de `useBackgroundJobs` (també amb l'app a la safata), 7 a la rotació, mai d'un store buit; la llista surt dels fitxers (`list_data_keys`), no només del manifest. Restaurar o importar: `readBackup` valida (rebutja altres JSON i versions més noves), es desa abans `backup-safety` ("Abans de l'última restauració") i es conserven les factures posteriors a la còpia i l'estat dels recordatoris (`restoredState`)
+- Xifratge (Rust): totes les lectures/escriptures prenen `VAULT` (RwLock) i l'activació / canvi de contrasenya l'agafen en exclusiva. El canvi de contrasenya és transaccional (`backup_pre_rekey`: si falla es restaura; a l'arrencada `recover_vault` resol un canvi tallat). `encryption.json` té una còpia a `encryption.backup.json`. `write_atomic` fa `sync_all` abans del rename
 - Canvis de sincronitzacio o de recordatoris no han de tocar `localUpdatedAt` (si no, es fa push a Google)
 
 ### Google Calendar

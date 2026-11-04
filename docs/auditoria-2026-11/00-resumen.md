@@ -97,7 +97,7 @@ Quitando los solapes, quedan unos 140 problemas distintos. Abajo están agrupado
 5. Mensaje de copia de seguridad veraz. Excluir `.claude/worktrees` en vitest.
 6. Los recordatorios automáticos respetan el opt-out y vuelven a leer el estado justo antes de enviar.
 
-**Fase 1 — Que no se pierdan datos (M–L)**
+**Fase 1 — Que no se pierdan datos (M–L)** — ✅ hecha (rama `claude/auditoria-fase1`)
 - Copias de seguridad: periódicas también con la app en la bandeja, avisando si fallan; copia previa antes de restaurar, migrar o importar; validación de versión y formato.
 - Cambio de contraseña transaccional, `fsync`, aviso si falla el guardado al salir, protección de los editores sin guardar.
 
