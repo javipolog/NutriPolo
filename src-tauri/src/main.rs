@@ -54,11 +54,37 @@ fn get_data_dir(app_handle: &tauri::AppHandle) -> PathBuf {
         .expect("Failed to get app data dir")
 }
 
+/// A client id or a document file name used as one path segment under
+/// `documents/`. Only letters, digits, `.`, `_` and `-` (what the app
+/// generates): on Windows `Path::join("C:")` replaces the whole path, and
+/// trailing dots, `:` streams or `..` would point elsewhere. An id can come
+/// from an imported backup, so this is not only defensive.
 fn validate_path_component(name: &str, label: &str) -> Result<(), String> {
-    if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') || name.contains('\0') {
-        return Err(format!("Invalid {}: must not be empty or contain path separators", label));
+    let ok = !name.is_empty()
+        && name.len() <= 200
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+        && !name.starts_with('.')
+        && !name.ends_with('.')
+        && !name.contains("..");
+    if !ok {
+        return Err(format!("invalid_{}", label));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod path_component_tests {
+    use super::validate_path_component;
+
+    #[test]
+    fn only_plain_names_are_path_components() {
+        for ok in ["0b2c4f1e-8a1d-4c3e-9b7a-2f6d5e4c3b2a", "lq3k9x_informe_analitica.pdf", "a"] {
+            assert!(validate_path_component(ok, "x").is_ok(), "{ok:?}");
+        }
+        for bad in ["", "C:", "x:y", "..", "../a", "a/b", "a\\b", "a.", ".hidden", "a b", "nul\0", "a..b"] {
+            assert!(validate_path_component(bad, "x").is_err(), "{bad:?} must be rejected");
+        }
+    }
 }
 
 /// Keys the frontend may read and write: lowercase words joined by hyphens

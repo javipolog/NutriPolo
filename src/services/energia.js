@@ -32,7 +32,10 @@ export const DEFAULT_MACROS = { hc: 45, prot: 25, lip: 30 };
 /** Número escrit a mà ("99,9", " 1.55 ") o null si no n'és cap. */
 export function parseDecimal(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const s = String(value ?? '').trim().replace(',', '.');
+  let s = String(value ?? '').trim();
+  // Spanish thousands ("1.500" or "1 500" kcal) are not decimals
+  if (/^\d{1,3}([. ]\d{3})+$/.test(s)) s = s.replace(/[. ]/g, '');
+  s = s.replace(',', '.');
   if (!s || !/^-?\d*\.?\d+$/.test(s)) return null;
   return Number(s);
 }

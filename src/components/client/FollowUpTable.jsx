@@ -108,7 +108,8 @@ export const FollowUpTable = ({ client, measurements }) => {
     const m = col.m;
     const label = `${t[row.label]} · ${col.isDraft ? t.seg_new : (m?.fecha || '')}`;
     if (row.kind === 'computed') {
-      const value = m?.imc ?? calcIMC(m?.peso, client.altura);
+      // From the current height: a corrected height also corrects old weigh-ins
+      const value = calcIMC(m?.peso, client.altura) ?? m?.imc;
       return <span className="block px-2 py-1 text-right tabular-nums text-sage-500">{formatNumber(value, locale, 1)}</span>;
     }
     if (row.kind === 'check') {

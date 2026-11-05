@@ -78,7 +78,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const firstMeasurement = measurements[0];
   const lastMeasurement = measurements[measurements.length - 1];
   const altura = client.altura || lastMeasurement?.altura;
-  const currentIMC = lastMeasurement?.imc || (lastMeasurement?.peso && altura ? calcIMC(lastMeasurement.peso, altura) : null);
+  const currentIMC = (lastMeasurement?.peso && altura ? calcIMC(lastMeasurement.peso, altura) : null) ?? lastMeasurement?.imc ?? null;
   const deltaOf = key => (measurements.length > 1 && firstMeasurement[key] != null && lastMeasurement[key] != null)
     ? Number(lastMeasurement[key]) - Number(firstMeasurement[key])
     : null;

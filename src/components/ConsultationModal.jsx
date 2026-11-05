@@ -69,8 +69,10 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     clienteId: defaultClientId || '',
     fecha: defaultDate || todayISO(),
     hora: defaultHora || '09:00',
-    locationId: config.locations?.[0]?.id || '',
-    tipo: config.consultationTypes?.[0] || 'Primera visita',
+    // Defaults only for a new appointment: on an existing one (an imported one
+    // has none) they would count as an edit and be pushed to Google
+    locationId: consultation ? '' : (config.locations?.[0]?.id || ''),
+    tipo: consultation ? '' : (config.consultationTypes?.[0] || 'Primera visita'),
     duracion: config.defaultConsultationDuration || 45,
     estado: 'programada',
     notasPrivadas: '',
@@ -287,6 +289,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_location}</label>
             <select value={form.locationId} onChange={e => set('locationId', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400">
+              {!form.locationId && <option value="">{t.not_specified}</option>}
               {(config.locations || []).map(loc => (
                 <option key={loc.id} value={loc.id}>{loc.name}</option>
               ))}
@@ -296,9 +299,12 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_type}</label>
             <select value={form.tipo} onChange={e => set('tipo', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400">
+              {!form.tipo && <option value="">{t.not_specified}</option>}
               {(config.consultationTypes || []).map(tp => (
                 <option key={tp} value={tp}>{tp}</option>
               ))}
+              {/* A type no longer in Settings stays visible */}
+              {form.tipo && !(config.consultationTypes || []).includes(form.tipo) && <option value={form.tipo}>{form.tipo}</option>}
             </select>
           </div>
         </div>

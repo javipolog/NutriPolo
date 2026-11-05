@@ -1284,7 +1284,8 @@ export const googleCalendar = {
       if (state.consultations.some(c => c.googleEventId === ev.id || (ev.nutripolo_id && c.id === ev.nutripolo_id))) continue;
       const partial = this.eventToConsultation(ev, calId);
       if (!partial) continue;
-      this._importEvent(ev, partial, ctx, { tipo: 'Google Calendar' });
+      // No technical `tipo`: it would reach the patient as "Tipo: Google Calendar"
+      this._importEvent(ev, partial, ctx);
       stats.pulled++;
     }
 

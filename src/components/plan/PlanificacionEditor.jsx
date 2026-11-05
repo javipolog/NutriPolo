@@ -2,8 +2,9 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   X, Save, Eye, EyeOff, Download, Plus, Trash2, Copy, ChevronUp, ChevronDown,
   ArrowLeftRight, ClipboardPaste, Eraser, Link2, ImagePlus, RotateCcw, Info, Coffee,
-  Apple, Cookie, Scale, CalendarDays, ShoppingBasket, Settings2, BookOpen,
+  Apple, Cookie, Scale, CalendarDays, ShoppingBasket, Settings2, BookOpen, Mail,
 } from 'lucide-react';
+import { SendEmailModal } from '../SendEmailModal';
 import { invoke } from '@tauri-apps/api/tauri';
 import { Button, SegmentedControl, Combobox, useToast, useConfirm, useDialogA11y, setUnsavedWork } from '../UI';
 import useStore, { todayISO, generateId, errMsg } from '../../stores/store';
@@ -859,6 +860,17 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
     }
   };
 
+  // Send the plan by email from here, with its PDF (the patient's address from the record)
+  const [emailing, setEmailing] = useState(null);   // PDF bytes while the email dialog is open
+  const sendByEmail = async () => {
+    if (!client?.email) { toast.error(t.email_client_no_email); return; }
+    try {
+      setEmailing(await generate());
+    } catch (e) {
+      toast.error(t.pdf_error.replace('{error}', errMsg(e)));
+    }
+  };
+
   const sectionLabel = (id) => t[`pf_section_${id}`];
   const stats = form ? planificacionStats(form) : null;
   const countFor = (id) => {
@@ -910,6 +922,7 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
               {t.pf_preview}
             </Button>
             <Button variant="secondary" icon={Download} onClick={download}>{t.download_pdf}</Button>
+            <Button variant="secondary" icon={Mail} onClick={sendByEmail} disabled={!form?.clienteId}>{t.invoice_send_email}</Button>
             <Button variant="primary" icon={Save} onClick={save} disabled={!dirty && !!savedId}>{t.save}</Button>
           </>
         )}
@@ -990,6 +1003,9 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
         </div>
       )}
       {ConfirmDialog}
+      {emailing && (
+        <SendEmailModal mode="plan" client={client} plan={form} pdfBytes={emailing} onClose={() => setEmailing(null)} />
+      )}
     </div>
   );
 };

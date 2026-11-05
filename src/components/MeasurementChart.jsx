@@ -16,12 +16,21 @@ export const MeasurementChart = ({ client, measurements }) => {
   const c = useChartTheme();
   const [chartType, setChartType] = useState('weight');
 
+  // Energy needs from the last weigh-in that has a weight (a column with only
+  // the period or a note must not blank them), and the last scale BMR
+  const energyMeasurement = (() => {
+    const withWeight = [...measurements].reverse().find(m => m.peso !== '' && m.peso != null);
+    const withBmr = [...measurements].reverse().find(m => m.tasaMetabolica !== '' && m.tasaMetabolica != null);
+    if (!withWeight && !withBmr) return measurements[measurements.length - 1];
+    return { ...(withWeight || {}), tasaMetabolica: withBmr?.tasaMetabolica };
+  })();
+
   const chartData = measurements.map(m => ({
     fecha: formatDateShort(m.fecha),
     peso: m.peso || null,
     grasa: m.grasaCorporal || null,
     musculo: m.masaMuscular || null,
-    imc: m.imc || (m.peso && clientHeight ? calcIMC(m.peso, clientHeight) : null),
+    imc: (m.peso && clientHeight ? calcIMC(m.peso, clientHeight) : null) ?? m.imc ?? null,
     cintura: m.cintura || null,
     cadera: m.cadera || null,
     brazo: m.brazo || null,
@@ -87,7 +96,7 @@ export const MeasurementChart = ({ client, measurements }) => {
         </div>
       )}
 
-      <EnergyNeedsCard client={client} lastMeasurement={measurements[measurements.length - 1]} />
+      <EnergyNeedsCard client={client} lastMeasurement={energyMeasurement} />
     </div>
   );
 };
