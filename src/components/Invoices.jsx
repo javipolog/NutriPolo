@@ -5,7 +5,6 @@ import useStore, { formatCurrency, formatDate, canDeleteInvoice, errMsg } from '
 import { useT, plural } from '../i18n';
 import { InvoiceModal, downloadInvoicePdf } from './InvoiceModal';
 import { SendEmailModal } from './SendEmailModal';
-import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
 import {
   isIssued, isCorrective, invoiceClientName, issuedInPeriod, periodTotals, incomeBookCsv, quarterOf, countsInTotals,
 } from '../services/invoicing';
@@ -84,6 +83,7 @@ export const Invoices = () => {
     const client = record || { id: inv.clienteId, nombre: inv.destinatario?.nombre, email: inv.destinatario?.email };
     if (!client.email) { toast.error(t.email_client_no_email); return; }
     try {
+      const { generateInvoicePDF } = await import('../services/pdfInvoiceGenerator');
       const pdfBytes = await generateInvoicePDF(inv, record, useStore.getState().config);
       setEmailing({ invoice: inv, client, pdfBytes });
     } catch (err) {

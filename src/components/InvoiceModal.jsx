@@ -3,7 +3,6 @@ import { Plus, Trash2, FileDown, FileMinus, Lock } from 'lucide-react';
 import { Modal, Textarea, Button, SegmentedControl, useToast } from './UI';
 import useStore, { todayISO, generateId, computeInvoiceTotals, formatDate, errMsg } from '../stores/store';
 import { useT } from '../i18n';
-import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
 import { isIssued, isCorrective, seriesOf } from '../services/invoicing';
 import { save } from '@tauri-apps/api/dialog';
 import { writeBinaryFile } from '@tauri-apps/api/fs';
@@ -23,6 +22,8 @@ const inputCls = 'w-full px-3 py-2 text-sm border border-sage-300 rounded-button
 /** Ask where to save an invoice PDF, write it and open it. Returns whether it was saved. */
 export async function downloadInvoicePdf(invoice) {
   const { clients, config } = useStore.getState();
+  // pdf-lib + fontkit (~1 MB) only load when a PDF is made
+  const { generateInvoicePDF } = await import('../services/pdfInvoiceGenerator');
   const pdfBytes = await generateInvoicePDF(invoice, clients.find(c => c.id === invoice.clienteId), config);
   const filePath = await save({ defaultPath: `${invoice.numero}.pdf`, filters: [{ name: 'PDF', extensions: ['pdf'] }] });
   if (!filePath) return false;

@@ -307,6 +307,19 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   doc.setCreator('NutriPolo');
 
   const F = await embedFonts(doc, loadFont);
+  // Measuring text (fontkit shaping) is most of the time of a PDF, and the
+  // same words are measured again and again while wrapping: cache each
+  // (text, size) per font for this document.
+  for (const font of new Set(Object.values(F))) {
+    const measure = font.widthOfTextAtSize.bind(font);
+    const cache = new Map();
+    font.widthOfTextAtSize = (t, size) => {
+      const key = `${size}|${t}`;
+      let w = cache.get(key);
+      if (w === undefined) { w = measure(t, size); cache.set(key, w); }
+      return w;
+    };
+  }
   const sanitizers = new Map([...new Set(Object.values(F))].map(f => [f, makeSanitizer(f)]));
   const clean = (font, s) => sanitizers.get(font)(s);
   const width = (s, font, size) => font.widthOfTextAtSize(clean(font, s), size);
@@ -328,16 +341,24 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     const out = [];
     for (const para of String(s ?? '').split(/\r?\n/)) {
       const words = glueUnits(clean(font, para).split(/\s+/).filter(Boolean));
+      const spaceW = font.widthOfTextAtSize(' ', size);
       let line = '';
+      let lineW = 0;
       for (let word of words) {
         // Paraules més llargues que la línia (URLs…) es tallen per caràcters
         if (font.widthOfTextAtSize(word, size) > wAt(out.length)) {
-          if (line) { out.push(line); line = ''; }
+          if (line) { out.push(line); line = ''; lineW = 0; }
           word = splitLong(word, font, size, wAt(out.length), out);
         }
+        const wordW = font.widthOfTextAtSize(word, size);
+        const max = wAt(out.length);
+        // Amplada sumada per paraules (ja a la memòria cau); només a prop del
+        // límit es mesura la línia sencera, per si l'interlletratge hi compta
+        const guess = line ? lineW + spaceW + wordW : wordW;
         const test = line ? `${line} ${word}` : word;
-        if (font.widthOfTextAtSize(test, size) <= wAt(out.length)) line = test;
-        else { if (line) out.push(line); line = word; }
+        const fits = guess <= max - 0.5 || (guess <= max + 0.5 && font.widthOfTextAtSize(test, size) <= max);
+        if (fits) { line = test; lineW = guess; }
+        else { if (line) out.push(line); line = word; lineW = wordW; }
       }
       if (line) out.push(line);
     }

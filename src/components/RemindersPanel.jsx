@@ -38,9 +38,17 @@ const needsUser = (autoEmail) => (e) =>
 export function countPendingReminders(state, now = Date.now()) {
   const { config, consultations, clients } = state;
   const smtp = !!config.smtp?.host;
-  const visible = filterVisibleConsultations(consultations, config.googleCalendar);
+  const rc = getReminderConfig(config);
+  // It runs on every change of clients or appointments (each key typed in a
+  // record): only the days that can have a reminder or a review are looked
+  // at, compared as YYYY-MM-DD strings before any date is built.
+  const dayOf = (ms) => localISODate(new Date(ms));
+  const from = dayOf(now - ((getReviewConfig(config).maxAgeDays || 0) + 1) * 86400000);
+  const to = dayOf(now + (Math.max(rc.email.leadHours, rc.whatsapp.leadHours) + 48) * 3600000);
+  const visible = filterVisibleConsultations(consultations, config.googleCalendar)
+    .filter(c => c.fecha && c.fecha >= from && c.fecha <= to);
   const reminders = getReminderCandidates({ consultations: visible, clients, config, now })
-    .filter(needsUser(getReminderConfig(config).email.auto && smtp));
+    .filter(needsUser(rc.email.auto && smtp));
   const reviews = getReviewCandidates({ consultations: visible, history: consultations, clients, config, now })
     .filter(needsUser(getReviewConfig(config).email.auto && smtp));
   return reminders.length + reviews.length;

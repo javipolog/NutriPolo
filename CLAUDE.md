@@ -229,7 +229,7 @@ fn cancel_quit()                                      // el JS es queda obert (c
 - i18n via `src/i18n.js` amb suport ES/CA
 
 ### Gestio d'Estat
-- **Zustand** amb persistencia automatica al filesystem via Tauri
+- **Zustand** amb persistencia automatica al filesystem via Tauri, per parts (vegeu Persistencia de Dades)
 - Store unic (`store.js`) amb totes les entitats i accions
 - Undo/redo integrat (`_history`, `_future`)
 - Migracions a `migrateStore` (STORE_VERSION); `config` es fusiona amb els valors per defecte en hidratar
@@ -330,7 +330,7 @@ Les dades es guarden localment a:
 Windows: C:\Users\<usuari>\AppData\Roaming\com.nutripolo.app\
 ```
 
-Cada entitat es guarda com a fitxer JSON separat (`clients.json`, `consultations.json`, etc.).
+El store es desa per parts (`STORE_PARTS` a `store.js`): `nutripolo-clients`, `-consultations`, `-measurements`, `-plans`, `-invoices`, `-documents`, `-suggestions`, `-personal-events`, `-library` i `-library-products` (les fotos), més `nutripolo-storage` amb la resta (config, sync, preferències) i la marca `split`. Cada canvi reescriu només les parts que han canviat per referència; canviar de vista no escriu res. Fins que totes les parts s'han escrit un cop, `nutripolo-storage` conserva el store sencer (migració des del fitxer únic); un fitxer `split` amb una part que falta és un error de càrrega. No s'escriu res abans d'acabar la càrrega (`storeLoaded`).
 Documents dels clients es guarden a `documents/<clientId>/`.
 
 ---

@@ -26,6 +26,8 @@ globalThis.localStorage = {
 const { default: useStore, changedFields, lastVisitByClient, canDeleteInvoice, flushAllPending, readBackup, todayISO } = await import('./store');
 
 const initial = useStore.getState();
+// Like the app: nothing is written before the data has been loaded
+await useStore.persist.rehydrate();
 
 beforeEach(() => {
   useStore.setState(initial, true);
@@ -33,16 +35,77 @@ beforeEach(() => {
 });
 
 describe('persistence', () => {
-  it('serializes the store once per write, not on every change', async () => {
+  it('serializes each changed part once per write, not on every change', async () => {
+    await flushAllPending(); await flushAllPending();   // whatever an earlier test left queued
     const stringify = vi.spyOn(JSON, 'stringify');
     for (let i = 0; i < 20; i++) useStore.getState().addClient({ nombre: `Cliente ${i}` });
     expect(stringify).not.toHaveBeenCalled();
 
     await flushAllPending();
+    // Only the clients part: not the appointments, the plans, the photos nor the main file
     expect(stringify).toHaveBeenCalledTimes(1);
     stringify.mockRestore();
-    const persisted = JSON.parse(saved['nutripolo-storage']);
-    expect(persisted.state.clients).toHaveLength(20);
+    expect(JSON.parse(saved['nutripolo-clients'])).toHaveLength(20);
+  });
+
+  it('writes nothing when only what is not saved changes (changing view)', async () => {
+    await flushAllPending(); await flushAllPending();
+    const stringify = vi.spyOn(JSON, 'stringify');
+    useStore.getState().setCurrentView('clients');
+    useStore.getState().setCurrentView('invoices');
+    await flushAllPending();
+    expect(stringify).not.toHaveBeenCalled();
+    stringify.mockRestore();
+  });
+
+  it('moves from the single file to parts without ever leaving an incomplete main file', async () => {
+    for (const k of Object.keys(saved)) delete saved[k];
+    saved['nutripolo-storage'] = JSON.stringify({ version: 17, state: { clients: [{ id: 'k1', nombre: 'Ana' }], consultations: [{ id: 'c1' }] } });
+    await useStore.persist.rehydrate();
+    const order = [];
+    const write = globalThis.localStorage.setItem;
+    globalThis.localStorage.setItem = (k, v) => { order.push([k, JSON.parse(v)?.split === true]); write(k, v); };
+    // The first change writes every part
+    useStore.getState().setSidebarCollapsed(true);
+    await flushAllPending(); await flushAllPending();
+    globalThis.localStorage.setItem = write;
+
+    expect(JSON.parse(saved['nutripolo-consultations'])).toEqual([{ id: 'c1' }]);
+    const main = JSON.parse(saved['nutripolo-storage']);
+    expect(main.split).toBe(true);
+    expect(main.state.clients).toBeUndefined();
+    // The small main file is only written once every part is on disk
+    const firstSplit = order.findIndex(([k, split]) => k === 'nutripolo-storage' && split);
+    const parts = new Set(order.slice(0, firstSplit).map(([k]) => k).filter(k => k !== 'nutripolo-storage'));
+    expect(parts.size).toBe(10);
+
+    useStore.setState({ clients: [], consultations: [] });
+    await useStore.persist.rehydrate();
+    expect(useStore.getState().clients.map(c => c.nombre)).toEqual(['Ana']);
+    expect(useStore.getState().consultations.map(c => c.id)).toEqual(['c1']);
+  });
+
+  it('writes nothing before the data is loaded', async () => {
+    for (const k of Object.keys(saved)) delete saved[k];
+    saved['nutripolo-storage'] = JSON.stringify({ version: 17, state: { clients: [{ id: 'k1', nombre: 'Ana' }] } });
+    const loading = useStore.persist.rehydrate();
+    useStore.setState({ clients: [] });   // a change while the file is being read
+    await loading;
+    await flushAllPending();
+    expect(JSON.parse(saved['nutripolo-storage']).state.clients).toHaveLength(1);
+  });
+
+  it('does not load a split store with a part missing', async () => {
+    useStore.getState().addClient({ nombre: 'Para escribir' });
+    await flushAllPending(); await flushAllPending();
+    expect(JSON.parse(saved['nutripolo-storage']).split).toBe(true);
+    const backup = saved['nutripolo-invoices'];
+    delete saved['nutripolo-invoices'];
+    const { getLoadFailure, clearLoadFailure } = await import('./store');
+    await useStore.persist.rehydrate();
+    expect(getLoadFailure()).toMatchObject({ key: 'nutripolo-invoices', error: 'missing' });
+    clearLoadFailure();
+    saved['nutripolo-invoices'] = backup;
   });
 
   it('turns read-only calendars saved as bidirectional off on load', async () => {
