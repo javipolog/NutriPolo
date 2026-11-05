@@ -3,7 +3,7 @@ import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast, u
 import useStore, { todayISO, canPushToCalendar, changedFields } from '../stores/store';
 import { useT, useLocale } from '../i18n';
 import { AlertTriangle, CheckCircle2, Mail, MessageCircle, Trash2 } from 'lucide-react';
-import { googleCalendar, shortGcalError } from '../services/googleCalendarService';
+import { googleCalendar, shortGcalError, notesGoToGoogle } from '../services/googleCalendarService';
 import { reminderSlot } from '../services/reminderService';
 import { useReminderActions } from '../hooks/useReminderActions';
 import { SendEmailModal } from './SendEmailModal';
@@ -17,6 +17,11 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const unlinkAutoMatch = useStore(s => s.unlinkAutoMatch);
   const patientSuggestions = useStore(s => s.patientSuggestions);
   const config = useStore(s => s.config);
+  // The client notes of this appointment are written to Google (shown under the field)
+  const notesShared = (() => {
+    const calId = googleCalendar.pushTargetFor(config.googleCalendar, consultation || { clienteId: null });
+    return !!calId && notesGoToGoogle(config.googleCalendar, calId);
+  })();
   const t = useT();
   const locale = useLocale();
   const toast = useToast();
@@ -318,6 +323,8 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_client_notes}</label>
             <Textarea value={form.notasCliente} onChange={e => set('notasCliente', e.target.value)} rows={3} placeholder={t.consultation_client_notes_placeholder} />
+            {/* Where these notes end up (see notesGoToGoogle) */}
+            {notesShared && <p className="text-[11px] text-warning mt-1">{t.consultation_notes_to_google}</p>}
           </div>
         </div>
 

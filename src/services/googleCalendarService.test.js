@@ -228,6 +228,29 @@ describe('push', () => {
     expect(liveEvents()[0].start_datetime).toContain('T12:00');
   });
 
+  it('does not send the client notes to Google unless Raquel turns it on', async () => {
+    const c = newConsultation({ notasCliente: 'Analítica de tiroides' });
+    await googleCalendar.pushConsultation(c.id);
+    expect(liveEvents()[0].description).toBeFalsy();
+
+    connect({ syncNotes: true });
+    useStore.getState().updateConsultation(c.id, { notasCliente: 'Traer la analítica' });
+    await googleCalendar.pushConsultation(c.id);
+    expect(liveEvents()[0].description).toBe('Traer la analítica');
+  });
+
+  it("keeps notes typed here when Google's event changes and notes are not shared", async () => {
+    cal(CAL).set('g2', { id: 'g2', summary: 'Consulta', start_datetime: '2026-10-22T08:00:00Z', end_datetime: '2026-10-22T09:00:00Z', updated: stamp(), organizer_self: true });
+    tick();
+    await googleCalendar.syncAll();
+    const local = useStore.getState().consultations.find(x => x.googleEventId === 'g2');
+    useStore.getState().updateConsultation(local.id, { notasCliente: 'Solo aquí' }, { sync: true });
+    tick();
+    cal(CAL).set('g2', { ...cal(CAL).get('g2'), summary: 'Consulta movida', description: '', updated: stamp() });
+    await googleCalendar.syncAll();
+    expect(useStore.getState().consultations.find(x => x.id === local.id).notasCliente).toBe('Solo aquí');
+  });
+
   it('a save racing the background sync creates a single event', async () => {
     const c = newConsultation();
     tick();
@@ -640,6 +663,43 @@ describe('patient matching', () => {
     expect(byEvent('x1')).toMatchObject({ clienteId: null, matchStatus: 'suggested' });
     expect(byEvent('x2')).toMatchObject({ clienteId: 'lucia', matchedVia: 'email' });
     expect(open()[0].sourceCalendarId).toBe(CLINIC);
+  });
+
+  it('keeps a cancellation made here on a clinic calendar when the clinic edits the event', async () => {
+    connect({
+      calendars: [
+        { id: CAL, name: 'NutriPolo', syncMode: 'bidirectional', purpose: 'primary' },
+        { id: CLINIC, name: 'Clínica', syncMode: 'readonly', purpose: 'external-clinic' },
+      ],
+    });
+    remote('x3', 'Marcos Prieto', {}, CLINIC);
+    await sync();
+    useStore.getState().updateConsultation(byEvent('x3').id, { estado: 'cancelada' });
+    // The clinic adds a note to the event: still confirmed in Google
+    remote('x3', 'Marcos Prieto', { description: 'pagado' }, CLINIC);
+    await sync();
+    expect(byEvent('x3').estado).toBe('cancelada');
+  });
+
+  it('gives imported appointments the location of their calendar', async () => {
+    connect({
+      calendars: [
+        { id: CAL, name: 'NutriPolo', syncMode: 'bidirectional', purpose: 'primary' },
+        { id: CLINIC, name: 'Clínica', syncMode: 'readonly', purpose: 'external-clinic', locationId: 'elda' },
+      ],
+    });
+    remote('x4', 'Marcos Prieto', {}, CLINIC);
+    remote('own2', 'Marcos Prieto');
+    await sync();
+    expect(byEvent('x4').locationId).toBe('elda');
+    expect(byEvent('own2').locationId).toBeFalsy();
+  });
+
+  it("ignores Raquel's own Google account among the guests", async () => {
+    connect({ userEmail: 'raquel.cuenta@example.com' });
+    remote('own', 'Consulta - Persona Nueva', { attendees: ['raquel.cuenta@example.com'] });
+    await sync();
+    expect(open().find(sg => sg.consultationIds?.includes(byEvent('own').id))?.contactEmail || '').toBe('');
   });
 
   it('keeps the Google title of an automatically linked appointment', async () => {

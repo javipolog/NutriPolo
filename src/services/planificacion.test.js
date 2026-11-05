@@ -202,7 +202,8 @@ describe('own recipes', () => {
     expect(got.filter(r => r.titulo === 'Estofado de ternera')).toEqual([
       { titulo: 'Estofado de ternera', alimentos: 'Ternera\nPatatas\nGuisantes', receta: web[0].url },
     ]);
-    expect(got.find(r => r.titulo === 'Pieza de fruta')).toMatchObject({ nota: '' });
+    // An option's note belongs to its patient: it never goes to "Mis recetas"
+    expect(got.find(r => r.titulo === 'Pieza de fruta')).not.toHaveProperty('nota');
   });
 
   it('upserts by title and keeps the same list when nothing changes', () => {

@@ -77,6 +77,10 @@ pub struct CalendarEvent {
     /// in the calendar on its own, so the JS never trusts it to pick a patient.
     #[serde(default)]
     pub organizer: Option<String>,
+    /// Write only: leave the event's description in Google as it is (the
+    /// notes are not shared with Google, see the JS `notesGoToGoogle`).
+    #[serde(default)]
+    pub keep_remote_description: bool,
     /// The organizer is the account itself (read only).
     #[serde(default)]
     pub organizer_self: bool,
@@ -297,13 +301,15 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         attendees,
         organizer,
         organizer_self,
+        keep_remote_description: false,
     }
 }
 
 /// Build the JSON body sent to Google when creating or patching an event.
 /// timeZone is included alongside dateTime so Google handles DST transitions
 /// correctly; `date: null` clears an all-day date when patching. The
-/// description is always sent so clearing the notes locally clears it too.
+/// description is sent (so clearing the notes locally clears it too) unless
+/// `keep_remote_description`: then PATCH leaves Google's as it is.
 fn build_event_body(event: &CalendarEvent) -> serde_json::Value {
     let tz = event.timezone.as_deref().unwrap_or("Europe/Madrid");
     let mut body = serde_json::json!({
@@ -313,6 +319,11 @@ fn build_event_body(event: &CalendarEvent) -> serde_json::Value {
         "end":   { "dateTime": event.end_datetime,   "timeZone": tz, "date": null },
     });
 
+    if event.keep_remote_description {
+        if let Some(obj) = body.as_object_mut() {
+            obj.remove("description");
+        }
+    }
     if let Some(ref loc) = event.location {
         body["location"] = serde_json::Value::String(loc.clone());
     }
@@ -824,6 +835,7 @@ mod tests {
             attendees: vec!["guest@example.com".to_string()],
             organizer: Some("guest@example.com".to_string()),
             organizer_self: false,
+            keep_remote_description: false,
         }
     }
 
@@ -840,6 +852,12 @@ mod tests {
         // Guests and organizer are never written: PATCH keeps the ones in Google.
         assert!(body.get("attendees").is_none());
         assert!(body.get("organizer").is_none());
+    }
+
+    #[test]
+    fn event_body_can_leave_the_description_alone() {
+        let event = CalendarEvent { description: Some("nota".to_string()), keep_remote_description: true, ..sample_event() };
+        assert!(build_event_body(&event).get("description").is_none());
     }
 
     #[test]

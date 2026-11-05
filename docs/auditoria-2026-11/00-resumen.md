@@ -107,7 +107,7 @@ Quitando los solapes, quedan unos 140 problemas distintos. Abajo están agrupado
 - Datos obligatorios, IBAN, mención de exención, PDF sin desbordes, envío de la factura por email.
 - Plan para VeriFactu según la fecha confirmada.
 
-**Fase 3 — Citas y privacidad (M)**
+**Fase 3 — Citas y privacidad (M)** — ✅ hecha salvo borrado y exportación completos por paciente (rama `claude/auditoria-fase3`)
 - Emparejador: prioridad del nombre del título frente al contacto de la descripción, ignorar la cuenta propia y no agrupar por la palabra del tipo de cita.
 - Ubicación de las citas importadas y estado cancelado en calendarios de solo lectura.
 - Aviso antes de subir notas a Google; no guardar las notas de las opciones en "Mis recetas"; borrado y exportación completos por paciente.
