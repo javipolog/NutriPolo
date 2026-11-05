@@ -18,7 +18,7 @@
 import { resolveTemplate } from './emailService';
 import {
   consultationStart, clientLanguage, channelContact, normalizeWhatsAppPhone, whatsAppUrl,
-  openExternal, MAX_AUTO_ATTEMPTS,
+  openExternal, MAX_AUTO_ATTEMPTS, mayHaveBeenSent,
 } from './reminderService';
 
 export const REVIEW_CHANNELS = ['email', 'whatsapp'];
@@ -237,7 +237,7 @@ export function getReviewCandidates({ consultations, history = consultations, cl
 export function isReviewAutoSendable(entry) {
   if (entry.channel !== 'email' || entry.consultation?.estado !== 'completada') return false;
   if (entry.state === 'due') return true;
-  return entry.state === 'error' && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
+  return entry.state === 'error' && !mayHaveBeenSent(entry.record) && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
 }
 
 export function reviewEmailTemplate(config, lang) {

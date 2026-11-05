@@ -482,6 +482,9 @@ fn send_email_smtp(
 
     match transport.send(&email) {
         Ok(response) => SendEmailResult { success: true, message_id: Some(format!("{}", response.code())), error: None },
+        // A timeout may come after the server took the message: the app must
+        // not send it again on its own (the user decides, seeing it may be out)
+        Err(e) if e.is_timeout() => err_result(&sanitize_err(e, "smtp_send_timeout")),
         Err(e) => err_result(&sanitize_err(e, "smtp_send_failed")),
     }
 }

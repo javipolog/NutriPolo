@@ -765,8 +765,14 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
     return clienteId ? fresh(clienteId) : { form: null, origin: null };
   });
   const [savedId, setSavedId] = useState(plan?.id || null);
-  // Contingut en obrir (o en l'últim desat): el que no canvia no torna a "Mis recetas"
-  const baselineRef = useRef(form);
+  // Dishes already there on opening, copied from another plan or saved: only
+  // the ones written or changed after that go to "Mis recetas" (so a recipe
+  // deleted from the list does not come back with copied content)
+  const { items: webRecipes } = useWebRecipes();
+  const recipeKeys = (f) => collectOwnRecipes(f, webRecipes).map(r => JSON.stringify(r));
+  const baselineRef = useRef(null);
+  if (baselineRef.current === null) baselineRef.current = new Set(recipeKeys(form));
+  const addToBaseline = (f) => { recipeKeys(f).forEach(k => baselineRef.current.add(k)); };
   const [dirty, setDirty] = useState(!plan);
   const [section, setSection] = useState(plan ? 'menu' : 'general');
   const [showPreview, setShowPreview] = useState(true);
@@ -774,7 +780,6 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   const titleId = useId();
 
   const client = clients.find(c => c.id === form?.clienteId);
-  const { items: webRecipes } = useWebRecipes();
   const dishIndex = useMemo(() => buildDishIndex(ownRecipes, webRecipes), [ownRecipes, webRecipes]);
   const otherPlans = useMemo(() => plans
     .filter(p => p.formato === PLAN_FORMAT && p.id !== savedId)
@@ -800,9 +805,8 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
     }
     // Els plats escrits o retocats a mà queden a "Mis recetas"; els que no
     // han canviat no, perquè una recepta esborrada de la llista no hi torni
-    const before = new Set(collectOwnRecipes(baselineRef.current, webRecipes).map(r => JSON.stringify(r)));
-    rememberRecipes(collectOwnRecipes(data, webRecipes).filter(r => !before.has(JSON.stringify(r))));
-    baselineRef.current = data;
+    rememberRecipes(collectOwnRecipes(data, webRecipes).filter(r => !baselineRef.current.has(JSON.stringify(r))));
+    addToBaseline(data);
     setDirty(false);
   };
 
@@ -835,6 +839,7 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   const copyFrom = async (id) => {
     const src = plans.find(p => p.id === id);
     if (!src || !(await confirm({ message: t.pf_copy_confirm.replace('{name}', src.nombre), danger: true }))) return;
+    addToBaseline(copyContent(src));
     update(f => ({ ...f, ...copyContent(src) }));
     setState(s => ({ ...s, origin: src.nombre }));
     toast.success(t.pf_copy_done);
@@ -935,7 +940,12 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
             <Combobox
               options={clientOptions}
               value=""
-              onChange={id => id && setState(fresh(id))}
+              onChange={id => {
+                if (!id) return;
+                const next = fresh(id);
+                addToBaseline(next.form);
+                setState(next);
+              }}
               placeholder={t.select_client_placeholder}
               autoFocus
             />

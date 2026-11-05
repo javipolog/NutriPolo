@@ -28,6 +28,22 @@ const DONE = new Set(['sent', 'opened', 'manual', 'sending']);
 const BLOCKED = new Set(['opted_out', 'no_contact', 'already_asked', 'no_link']);
 // Review rows where nothing can be done are left out of the panel.
 const REVIEW_HIDDEN = new Set(['opted_out', 'already_asked']);
+const STILL_PENDING = new Set(['due', 'error']);
+
+/**
+ * The same entry recomputed from the store as it is now, or null if it is no
+ * longer pending: the sync may have moved or cancelled the appointment, or the
+ * message may have gone out, while a queue or "send all" was going through a
+ * list built earlier. `candidates` is getReminderCandidates or getReviewCandidates.
+ */
+function recheckEntry(entry, candidates, extra = {}) {
+  const s = useStore.getState();
+  const consultation = s.consultations.find(c => c.id === entry.consultation.id);
+  if (!consultation) return null;
+  const fresh = candidates({ consultations: [consultation], history: s.consultations, clients: s.clients, config: s.config, now: Date.now(), ...extra })
+    .find(e => e.channel === entry.channel);
+  return fresh && STILL_PENDING.has(fresh.state) ? fresh : null;
+}
 
 /** Entries that need the user: WhatsApp due, or email due/failed when not auto-sent. */
 const needsUser = (autoEmail) => (e) =>
@@ -105,28 +121,41 @@ const ChannelCell = ({ entry, autoEmail, busy, onSend, sendLabels, t }) => {
 /**
  * Walks through the due WhatsApp messages one by one: each step shows the
  * message (editable) and opens the chat; the user presses Send in WhatsApp
- * and comes back for the next. `entries` is a snapshot taken when opening.
+ * and comes back for the next. `entries` is the list taken when opening;
+ * each step reads its appointment again (`recheck`), so a change made by the
+ * sync meanwhile is not sent with the old time, and a cancelled one is skipped.
  * `build` makes the message (reminder or review), `title` heads the modal.
  */
-const WhatsAppQueueModal = ({ entries, onClose, sendWhatsApp, build = buildReminderWhatsApp, title, t }) => {
+const WhatsAppQueueModal = ({ entries, onClose, sendWhatsApp, recheck, build = buildReminderWhatsApp, title, t }) => {
   const config = useStore(s => s.config);
+  const consultations = useStore(s => s.consultations);
+  const clients = useStore(s => s.clients);
   const [index, setIndex] = useState(0);
   const [opened, setOpened] = useState(0);
   const [busy, setBusy] = useState(false);
   const entry = entries[index];
-  const [text, setText] = useState('');
-
-  useEffect(() => {
-    if (entry) setText(build({ consultation: entry.consultation, client: entry.client, config }).text || '');
-    // Rebuild only when moving to another patient, not on every config change.
+  const live = useMemo(() => (entry ? recheck(entry) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry]);
+    [entry, consultations, clients, config]);
+  const [text, setText] = useState('');
+  const [edited, setEdited] = useState(false);
+  const slot = live ? `${live.consultation.fecha}T${live.consultation.hora}` : '';
+
+  useEffect(() => { setEdited(false); }, [entry]);
+  useEffect(() => {
+    // A new patient, or the same one moved by the sync before the text was touched
+    if (live && !edited) setText(build({ consultation: live.consultation, client: live.client, config }).text || '');
+    // Not on every config change, only when the appointment does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry, slot]);
 
   const next = () => setIndex(i => i + 1);
   const openCurrent = async () => {
+    const current = recheck(entry);
+    if (!current) return;
     setBusy(true);
     try {
-      if (await sendWhatsApp(entry.consultation, entry.client, { text, silent: true })) {
+      if (await sendWhatsApp(current.consultation, current.client, { text, silent: true })) {
         setOpened(n => n + 1);
         next();
       }
@@ -149,20 +178,28 @@ const WhatsAppQueueModal = ({ entries, onClose, sendWhatsApp, build = buildRemin
         <div className="space-y-4">
           <div className="flex items-baseline justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-sage-900 truncate">{entry.client.nombre}</p>
-              <p className="text-xs text-sage-500">{dayLabel(entry.start, t)} · {entry.consultation.hora || '—'}</p>
+              <p className="text-sm font-medium text-sage-900 truncate">{(live || entry).client.nombre}</p>
+              <p className="text-xs text-sage-500">{dayLabel((live || entry).start || (live || entry).end, t)} · {(live || entry).consultation.hora || '—'}</p>
             </div>
             <span className="text-xs text-sage-500 shrink-0" aria-live="polite">
               {t.reminders_wa_queue_progress.replace('{i}', index + 1).replace('{n}', entries.length)}
             </span>
           </div>
-          <Textarea rows={5} value={text} onChange={e => setText(e.target.value)} aria-label={t.reminders_message} />
-          <p className="text-xs text-sage-500">{t.reminders_wa_queue_help}</p>
+          {live ? (
+            <>
+              <Textarea rows={5} value={text} onChange={e => { setText(e.target.value); setEdited(true); }} aria-label={t.reminders_message} />
+              <p className="text-xs text-sage-500">{t.reminders_wa_queue_help}</p>
+            </>
+          ) : (
+            <p className="text-sm text-sage-700 bg-sage-50 rounded-button p-3" role="status">{t.reminders_wa_queue_gone}</p>
+          )}
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" icon={SkipForward} onClick={next} disabled={busy}>{t.reminders_wa_queue_skip}</Button>
-            <Button icon={busy ? Loader2 : MessageCircle} onClick={openCurrent} disabled={busy || !text.trim()} autoFocus>
-              {t.reminders_wa_queue_open}
-            </Button>
+            <Button variant="ghost" icon={SkipForward} onClick={next} disabled={busy} autoFocus={!live}>{t.reminders_wa_queue_skip}</Button>
+            {live && (
+              <Button icon={busy ? Loader2 : MessageCircle} onClick={openCurrent} disabled={busy || !text.trim()} autoFocus>
+                {t.reminders_wa_queue_open}
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -183,6 +220,7 @@ export const RemindersPanel = ({ onNavigate }) => {
   const rc = getReminderConfig(config);
   const autoEmail = rc.email.auto && !!config.smtp?.host;
   const horizonHours = Math.max(rc.email.leadHours, rc.whatsapp.leadHours) + 24;
+  const recheck = (e) => recheckEntry(e, getReminderCandidates, { horizonHours });
 
   const rows = useMemo(() => {
     const visible = filterVisibleConsultations(consultations, config.googleCalendar);
@@ -210,8 +248,10 @@ export const RemindersPanel = ({ onNavigate }) => {
 
   const sendAllEmails = () => run('all_email', async () => {
     for (const e of pendingEmails) {
+      // Read again: an earlier one, or the sync, may have changed it meanwhile
+      const fresh = recheck(e);
       // eslint-disable-next-line no-await-in-loop
-      await sendEmail(e.consultation, e.client);
+      if (fresh) await sendEmail(fresh.consultation, fresh.client);
     }
   });
 
@@ -293,7 +333,7 @@ export const RemindersPanel = ({ onNavigate }) => {
       )}
 
       {waQueue && (
-        <WhatsAppQueueModal entries={waQueue} onClose={() => setWaQueue(null)} sendWhatsApp={sendWhatsApp} t={t} />
+        <WhatsAppQueueModal entries={waQueue} onClose={() => setWaQueue(null)} sendWhatsApp={sendWhatsApp} recheck={recheck} t={t} />
       )}
     </Card>
   );
@@ -315,6 +355,7 @@ export const ReviewRequestsPanel = ({ onNavigate }) => {
 
   const rv = getReviewConfig(config);
   const autoEmail = rv.email.auto && !!config.smtp?.host;
+  const recheck = (e) => recheckEntry(e, getReviewCandidates);
   const locationName = (id) => config.locations?.find(l => l.id === id)?.name || '';
 
   const rows = useMemo(() => {
@@ -343,8 +384,9 @@ export const ReviewRequestsPanel = ({ onNavigate }) => {
 
   const sendAllEmails = () => run('all_email', async () => {
     for (const e of pendingEmails) {
+      const fresh = recheck(e);
       // eslint-disable-next-line no-await-in-loop
-      await sendReviewEmail(e.consultation, e.client);
+      if (fresh) await sendReviewEmail(fresh.consultation, fresh.client);
     }
   });
 
@@ -422,6 +464,7 @@ export const ReviewRequestsPanel = ({ onNavigate }) => {
           entries={waQueue}
           onClose={() => setWaQueue(null)}
           sendWhatsApp={sendReviewWhatsApp}
+          recheck={recheck}
           build={buildReviewWhatsApp}
           title={t.review_wa_queue_title}
           t={t}
