@@ -453,9 +453,13 @@ describe('agenda and clients without losing what happened', () => {
 
   it('keeps the data as it was before a new version migrates it', async () => {
     for (const k of Object.keys(saved)) delete saved[k];
-    saved['nutripolo-storage'] = JSON.stringify({ version: 16, state: { clients: [{ id: 'k1', nombre: 'Ana' }] } });
+    saved['nutripolo-storage'] = JSON.stringify({ version: 16, state: { clients: [{ id: 'k1', nombre: 'Ana' }],
+      config: { smtp: { host: 'smtp.example.com', password: 'secreta' }, googleCalendar: { refreshToken: 'rt', accessToken: 'at' } } } });
     await useStore.persist.rehydrate();
     const copy = JSON.parse(files['backup-safety']);
+    // Never the secrets an old file may still carry
+    expect(copy.data.config.smtp.password).toBe('');
+    expect(copy.data.config.googleCalendar.refreshToken).toBe('');
     expect(copy.version).toBe(16);
     expect(copy.data.clients[0].nombre).toBe('Ana');
     expect(JSON.parse(files['backup-safety-info']).reason).toBe('update');

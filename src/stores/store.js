@@ -161,7 +161,8 @@ function partWritten(name) {
 async function saveBeforeUpdate(state, version) {
   if (!Number.isInteger(version) || version >= STORE_VERSION || !state || !hasData(state)) return;
   try {
-    await invoke('save_data', { key: SAFETY_BACKUP_KEY, value: JSON.stringify({ version, date: new Date().toISOString(), data: state }) });
+    const data = { ...state, config: configForBackup(state.config) };
+    await invoke('save_data', { key: SAFETY_BACKUP_KEY, value: JSON.stringify({ version, date: new Date().toISOString(), data }) });
     await invoke('save_data', { key: SAFETY_INFO_KEY, value: JSON.stringify({ date: new Date().toISOString(), reason: 'update' }) });
   } catch { /* outside Tauri, or the disk: the load goes on */ }
 }
@@ -932,6 +933,16 @@ export function stripGoogleSecrets(config) {
   };
 }
 
+/**
+ * Config as it goes into any copy (automatic backups, safety copy, ZIP):
+ * without the Google tokens nor the SMTP password, which live in the OS
+ * keyring. A store file from an old version may still carry them.
+ */
+export function configForBackup(config) {
+  const c = stripGoogleSecrets(config);
+  return c?.smtp?.password ? { ...c, smtp: { ...c.smtp, password: '' } } : c;
+}
+
 // Restored backups must not replace the live Google connection.
 function mergeRestoredConfig(current, restored) {
   if (!restored) return current;
@@ -1179,7 +1190,7 @@ async function listAutoBackupDates() {
 }
 
 function backupSnapshot(s) {
-  return { version: STORE_VERSION, date: new Date().toISOString(), data: { config: stripGoogleSecrets(s.config), ...backupCollections(s) } };
+  return { version: STORE_VERSION, date: new Date().toISOString(), data: { config: configForBackup(s.config), ...backupCollections(s) } };
 }
 
 /** Save the current data as the safety copy (skipped when there is nothing to keep). Throws if it cannot. */
@@ -2324,7 +2335,7 @@ const useStore = create(
         const payload = {
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
+          data: { config: configForBackup(get().config), ...backupCollections(get()) },
         };
 
         const zip = new JSZip();
