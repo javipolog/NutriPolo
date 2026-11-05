@@ -315,7 +315,10 @@ export function collectOwnRecipes(plan, webRecipes = []) {
       add(dish, { receta: String(dish?.receta || '').trim() });
     }
   }
-  for (const k of OPTION_SECTIONS) for (const o of plan?.[k]?.opciones || []) add(o, { nota: o.nota || '' });
+  // An option's note is about this patient ("pan sin gluten, es celíaca"):
+  // it stays in this plan and never goes to the shared list, where it would
+  // show up in another patient's plan. A note already in the list is kept.
+  for (const k of OPTION_SECTIONS) for (const o of plan?.[k]?.opciones || []) add(o, {});
   return out;
 }
 

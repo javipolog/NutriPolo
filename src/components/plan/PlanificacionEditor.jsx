@@ -98,12 +98,13 @@ const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
   const setOpts = (o) => onChange({ ...value, opciones: o });
   const updateOpt = (id, data) => setOpts(opts.map(o => (o.id === id ? { ...o, ...data } : o)));
 
-  // Un títol ja conegut omple els aliments buits
+  // Un títol ja conegut omple els aliments buits. La nota no: pot ser d'un
+  // altre pacient i sortiria al seu PDF sense que ningú la triï.
   const autofill = (o) => {
     if (linesOf(o.alimentos).length) return;
     const hit = dishIndex.find(o.titulo);
     if (!hit) return;
-    updateOpt(o.id, { titulo: hit.titulo, alimentos: hit.alimentos, nota: o.nota || hit.nota || '' });
+    updateOpt(o.id, { titulo: hit.titulo, alimentos: hit.alimentos });
     toast.info((hit.web ? t.pf_web_filled : t.pf_autofilled).replace('{name}', hit.titulo));
   };
 

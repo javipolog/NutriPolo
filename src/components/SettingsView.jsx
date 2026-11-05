@@ -650,6 +650,18 @@ const GoogleCalendarSection = () => {
     };
   };
 
+  // Where the appointments of a calendar take place (a clinic's calendar is
+  // that clinic). It also fills the ones already imported without a location;
+  // a sync-type write, so nothing is pushed back to Google.
+  const handleCalendarLocation = (cal, locationId) => {
+    updateStoredCal(cal.id, { locationId: locationId || null });
+    if (!locationId) return;
+    const { consultations: all, updateConsultation } = useStore.getState();
+    for (const c of all) {
+      if (c.sourceCalendarId === cal.id && !c.locationId) updateConsultation(c.id, { locationId }, { sync: true });
+    }
+  };
+
   const handleCalendarSyncMode = (cal, newMode) => {
     const current = gcal.calendars || [];
     const exists = current.find(sc => sc.id === cal.id);
@@ -873,6 +885,20 @@ const GoogleCalendarSection = () => {
                         <option value="disabled">✗ {t.gcal_disabled}</option>
                       </select>
                     </div>
+                    {stored && syncMode !== 'disabled' && (purpose === 'primary' || purpose === 'external-clinic' || purpose === 'other') && (
+                      <div className="flex items-center gap-2 pl-5">
+                        <label htmlFor={`cal-location-${cal.id}`} className="text-[11px] text-sage-500 whitespace-nowrap">{t.gcal_calendar_location}:</label>
+                        <select
+                          id={`cal-location-${cal.id}`}
+                          value={stored.locationId || ''}
+                          onChange={e => handleCalendarLocation(cal, e.target.value)}
+                          className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 flex-1"
+                        >
+                          <option value="">{t.gcal_calendar_location_none}</option>
+                          {(config.locations || []).map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                        </select>
+                      </div>
+                    )}
 
                     {/* Mass-delete pending resolution panel */}
                     {stored?.massDeletePending && (
@@ -1049,6 +1075,29 @@ const GoogleCalendarSection = () => {
             <span
               className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
                 gcal.autoSync ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Client notes to Google (off: they are health data) */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-sage-700">{t.gcal_sync_notes}</p>
+            <p className="text-xs text-sage-500">{t.gcal_sync_notes_hint}</p>
+          </div>
+          <button
+            onClick={() => setGcal({ syncNotes: !gcal.syncNotes })}
+            role="switch"
+            aria-checked={!!gcal.syncNotes}
+            aria-label={t.gcal_sync_notes}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+              gcal.syncNotes ? 'bg-wellness-400' : 'bg-sage-200'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                gcal.syncNotes ? 'translate-x-4' : 'translate-x-0'
               }`}
             />
           </button>

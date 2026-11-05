@@ -26,9 +26,38 @@ describe('extractPatientName', () => {
     expect(extractPatientName('Marcos Prieto 35€')).toBe('Marcos Prieto');
   });
 
+  it('never takes the appointment type for the patient', () => {
+    for (const title of ['Nutrición - Laura Martín', 'Valoración: Laura Martín', 'Online - Laura Martín',
+      '1ª visita - Laura Martín', 'Consulta nutrición - Laura Martín', 'Laura Martín - 1ª visita online', '10:30 - Laura Martín']) {
+      expect(extractPatientName(title), title).toBe('Laura Martín');
+    }
+    expect(extractPatientName('Nutrición')).toBe('');
+    expect(extractPatientName('Valoración - Videollamada')).toBe('');
+  });
+
   it('keeps hyphenated surnames whole', () => {
     expect(extractPatientName('Irene Montalbán-Vidal')).toBe('Irene Montalbán-Vidal');
     expect(extractPatientName('Irene Montalbán-Vidal - revisión')).toBe('Irene Montalbán-Vidal');
+  });
+});
+
+describe('contact against the name in the title', () => {
+  it("does not link a different name booked with a client's phone", () => {
+    // A daughter booked with her mother's phone: someone else, maybe a new patient
+    const m = match({ summary: 'Consulta - Laura Pérez', description: 'Reserva su madre, tel 600 11 22 33' });
+    expect(m.result).toBe('review');
+    expect(m.candidates.map(c => c.clienteId)).toEqual(['c1']);
+  });
+
+  it('still links a first name only, or no name at all', () => {
+    expect(match({ summary: 'Lucía', description: 'tel 600112233' })).toMatchObject({ result: 'assign', clienteId: 'c1', via: 'phone' });
+    expect(match({ summary: 'Consulta', description: 'tel 600112233' })).toMatchObject({ result: 'assign', clienteId: 'c1' });
+  });
+
+  it('does not group different patients under the appointment type', () => {
+    const a = match({ summary: 'Nutrición - Laura Martín' });
+    const b = match({ summary: 'Nutrición - Sergio Vidal' });
+    expect(a.normalizedName).not.toBe(b.normalizedName);
   });
 });
 
