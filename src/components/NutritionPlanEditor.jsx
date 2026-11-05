@@ -438,7 +438,7 @@ const PlansList = () => {
     const ok = await confirm({ message: t.plan_confirm_delete.replace('{name}', plan.nombre), danger: true, confirmText: t.delete });
     if (!ok) return;
     deleteNutritionPlan(plan.id);
-    toast.success(t.plan_deleted);
+    toast.success(t.plan_deleted, 8000, { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_plan', plan.id) });
   };
 
   return (

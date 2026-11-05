@@ -119,7 +119,7 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
           <select
             value={filterType}
             onChange={e => setFilterType(e.target.value)}
-            className="text-xs border border-sage-200 rounded-button px-2 py-1.5 bg-white dark:bg-sage-800 dark:border-sage-600 dark:text-sage-200"
+            className="text-xs border border-sage-200 rounded-button px-2 py-1.5 bg-white"
           >
             <option value="all">{t.doc_filter_all}</option>
             {Object.entries(TYPE_LABEL_KEYS).map(([val, key]) => (
@@ -145,17 +145,17 @@ export const ClientDocuments = ({ clientId, client, onSendEmail }) => {
           {filtered.map(doc => (
             <div
               key={doc.id}
-              className="flex items-center gap-3 p-3 bg-white dark:bg-sage-800 border border-sage-200 dark:border-sage-700 rounded-soft hover:shadow-card transition-shadow"
+              className="flex items-center gap-3 p-3 bg-white border border-sage-200 rounded-soft hover:shadow-card transition-shadow"
             >
               {/* Icon */}
-              <div className="flex-shrink-0 w-9 h-9 rounded-soft bg-sage-50 dark:bg-sage-700 flex items-center justify-center">
+              <div className="flex-shrink-0 w-9 h-9 rounded-soft bg-sage-50 flex items-center justify-center">
                 <FileText size={18} className="text-sage-400" />
               </div>
 
               {/* Info */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-sage-800 dark:text-sage-100 truncate">
+                  <span className="text-sm font-medium text-sage-800 truncate">
                     {doc.nombre || doc.fileName}
                   </span>
                   <span className={`text-[11px] px-1.5 py-0.5 rounded-badge font-medium ${TYPE_COLORS[doc.tipo] || TYPE_COLORS.otro}`}>

@@ -2035,7 +2035,7 @@ export const SettingsView = () => {
             id="cfg-duration"
             type="number"
             value={config.defaultConsultationDuration || 45}
-            onChange={e => set('defaultConsultationDuration', parseInt(e.target.value))}
+            onChange={e => set('defaultConsultationDuration', parseInt(e.target.value, 10) || undefined)}
             className="w-32"
           />
         </div>

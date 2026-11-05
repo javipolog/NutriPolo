@@ -8,7 +8,7 @@ import {
     AlertTriangle, CheckCircle, CheckCircle2, Clock, ArrowRight,
     UserPlus, Activity, Bell
 } from 'lucide-react';
-import { Card, StatCard, Button, Badge, EmptyState, StatusBadge } from './UI';
+import { Card, StatCard, Button, Badge, EmptyState, StatusBadge, clickableProps } from './UI';
 import useStore, { formatCurrency, formatDate, formatDateShort, filterVisibleConsultations } from '../stores/store';
 import { RemindersPanel, ReviewRequestsPanel } from './RemindersPanel';
 import { useChartTheme } from '../hooks/useChartTheme';
@@ -128,7 +128,11 @@ const DashboardHeader = ({ nombre, onCreate }) => {
 
 const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expiringCount, pendingTotal, pendingCount, newClientsThisMonth, newClientsPrev }) => {
     const t = useT();
-    const nextConsultation = todayConsultations.find(c => c.estado === 'programada');
+    // Cancelled and no-shows are not today's work; "next" is one still to come
+    const now = new Date();
+    const nowHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const todayCount = todayConsultations.filter(c => c.estado === 'programada' || c.estado === 'completada').length;
+    const nextConsultation = todayConsultations.find(c => c.estado === 'programada' && (c.hora || '') >= nowHHMM);
     const clientTrend = newClientsPrev > 0
         ? t.dashboard_new_this_month.replace('{n}', `${newClientsThisMonth >= newClientsPrev ? '+' : ''}${newClientsThisMonth - newClientsPrev}`)
         : newClientsThisMonth > 0 ? t.dashboard_new_this_month.replace('{n}', `+${newClientsThisMonth}`) : null;
@@ -138,8 +142,8 @@ const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expirin
             <StatCard
                 icon={Calendar}
                 label={t.dashboard_consultations_today}
-                value={todayConsultations.length.toString()}
-                subValue={nextConsultation ? t.dashboard_next_at.replace('{time}', nextConsultation.hora || '—') : todayConsultations.length ? t.dashboard_all_completed : t.dashboard_no_consultations_today}
+                value={todayCount.toString()}
+                subValue={nextConsultation ? t.dashboard_next_at.replace('{time}', nextConsultation.hora || '—') : todayCount ? t.dashboard_all_completed : t.dashboard_no_consultations_today}
                 color="wellness"
             />
             <StatCard
@@ -174,6 +178,9 @@ const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expirin
    ============================================ */
 
 const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
+    const setSelectedClientId = useStore(s => s.setSelectedClientId);
+    // Between patients: a row opens that patient's record
+    const openClient = (id) => { setSelectedClientId(id); onNavigate('clients'); };
     const t = useT();
     const clientsById = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
     const locationsById = useMemo(
@@ -207,7 +214,12 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                         const location = locationsById.get(c.locationId);
                         const dotColor = CONSULTATION_STATUS_DOT[c.estado] || 'bg-sage-300';
                         return (
-                            <div key={c.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
+                            <div
+                                key={c.id}
+                                {...(client ? clickableProps(() => openClient(client.id)) : {})}
+                                title={client ? t.dashboard_open_record : undefined}
+                                className={`flex items-center gap-4 py-3 first:pt-0 last:pb-0 ${client ? 'cursor-pointer hover:bg-sage-50 -mx-2 px-2 rounded-button' : ''}`}
+                            >
                                 <span className="tabular-nums text-sm text-sage-900 font-semibold w-14 shrink-0">
                                     {c.hora || '—'}
                                 </span>

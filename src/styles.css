@@ -266,11 +266,6 @@ input[type="checkbox"] {
   to   { opacity: 1; }
 }
 
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
 @keyframes scaleIn {
   from { opacity: 0; transform: scale(0.97); }
   to   { opacity: 1; transform: scale(1); }
@@ -286,23 +281,15 @@ input[type="checkbox"] {
   50%       { opacity: 0.5; }
 }
 
-@keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-  20%, 40%, 60%, 80%       { transform: translateX(4px); }
-}
-
 @keyframes slideInRight {
   from { transform: translateX(100%); opacity: 0; }
   to   { transform: translateX(0);    opacity: 1; }
 }
 
 .animate-fadeIn    { animation: fadeIn    0.15s ease-out; }
-.animate-fadeInUp  { animation: fadeInUp  0.2s  ease-out; }
 .animate-scaleIn   { animation: scaleIn   0.15s ease-out; }
 .animate-slideIn   { animation: slideIn   0.15s ease-out; }
 .animate-pulse     { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-.animate-shake     { animation: shake     0.4s  ease-in-out; }
 .toast-enter       { animation: slideInRight 0.25s ease-out; }
 
 @media (prefers-reduced-motion: reduce) {
