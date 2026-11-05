@@ -114,7 +114,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     onClose();
     const { remote } = await googleCalendar.deleteConsultation(consultation.id);
     if (remote === 'pending') toast.info(t.consultation_deleted_gcal_pending);
-    else toast.success(t.consultation_deleted);
+    else toast.success(t.consultation_deleted, 8000, { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_consultation', consultation.id) });
   };
 
   const handleInlineConfirm = () => {

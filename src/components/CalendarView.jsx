@@ -62,16 +62,14 @@ const STATUS_TONE = { programada: 'primary', completada: 'success', cancelada: '
 
 const LOCATION_COLORS = ['border-l-wellness-400', 'border-l-terra-400', 'border-l-info', 'border-l-warning'];
 
-/** Return inline style object when a consultation has a Google Calendar color, or null. */
+/**
+ * The Google Calendar colour of a consultation's calendar, as its left border
+ * only: the background and text keep the status colours (a cancelled one
+ * still looks cancelled, and it reads in dark mode). Null without a colour.
+ */
 function calStyle(c, calColorMap) {
   const color = calColorMap[c.sourceCalendarId];
-  if (!color) return null;
-  return {
-    backgroundColor: color + '22',
-    borderColor: color + '66',
-    borderLeftColor: color,
-    color: '#1a1a1a',
-  };
+  return color ? { borderLeftColor: color } : null;
 }
 
 /**
@@ -254,7 +252,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
           matchVisual
             ? matchVisual.cls
             : cStyle
-              ? 'border'
+              ? STATUS_BG[c.estado] || STATUS_BG.programada
               : `${STATUS_BG[c.estado] || STATUS_BG.programada} ${locColor}`
         }`}
         style={(!matchVisual && cStyle) || undefined}
@@ -473,9 +471,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                       className={`text-[11px] px-1 rounded truncate cursor-pointer hover:opacity-80 ${
                         matchVisual
                           ? matchVisual.cls + ' border border-l-2'
-                          : cStyle
-                            ? 'border border-l-2'
-                            : STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'
+                          : `${STATUS_BG[c.estado] || 'bg-sage-100 text-sage-600'}${cStyle ? ' border-l-2' : ''}`
                       }`}
                       style={(!matchVisual && cStyle) || undefined}
                       title={matchVisual ? matchVisual.tooltip : undefined}

@@ -26,6 +26,16 @@ jobs:
 
       - run: npm ci
 
+      # Nothing is published if a test fails
+      - name: Frontend tests
+        run: npm test
+
+      - name: Rust tests
+        shell: bash
+        run: |
+          npm run build
+          cd src-tauri && cargo test
+
       # Catàleg de Mercadona (fora de git): es genera aquí perquè l'instal·lador el porti.
       # Si en surten menys de 250 aliments, la release s'atura en lloc de publicar-se sense.
       - name: Import Mercadona food catalog

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { clientMatcher, foldText } from '../services/search';
 import { Search, Home, Calendar, Users, ClipboardList, Apple, BookOpen, Receipt, Package, Settings, ArrowRight, Leaf, X, RefreshCw, Inbox } from 'lucide-react';
 import useStore, { formatCurrency, formatDateShort } from '../stores/store';
 import { googleCalendar, formatSyncStats, formatSyncErrors, shortGcalError } from '../services/googleCalendarService';
@@ -98,13 +99,8 @@ export const CommandPalette = ({ open, onClose }) => {
     }
 
     if (q.length >= 2) {
-      const matchedClients = clients
-        .filter(c =>
-          (c.nombre || '').toLowerCase().includes(q) ||
-          (c.email || '').toLowerCase().includes(q) ||
-          (c.telefono || '').toLowerCase().includes(q)
-        )
-        .slice(0, 5);
+      const matchesClient = clientMatcher(q);
+      const matchedClients = clients.filter(matchesClient).slice(0, 5);
       if (matchedClients.length > 0) {
         items.push({ type: 'group', label: t.nav_clients });
         matchedClients.forEach(c => items.push({
@@ -114,11 +110,10 @@ export const CommandPalette = ({ open, onClose }) => {
         }));
       }
 
+      const clientsById = new Map(clients.map(x => [x.id, x]));
+      const foldedQ = foldText(q);
       const matchedConsultations = consultations
-        .filter(c => {
-          const client = clients.find(x => x.id === c.clienteId);
-          return (client?.nombre || '').toLowerCase().includes(q) || (c.fecha || '').includes(q);
-        })
+        .filter(c => foldText(clientsById.get(c.clienteId)?.nombre).includes(foldedQ) || (c.fecha || '').includes(q))
         .slice(0, 3);
       if (matchedConsultations.length > 0) {
         items.push({ type: 'group', label: t.tab_consultations });

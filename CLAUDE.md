@@ -152,7 +152,7 @@ npm run dev
 # Compilar frontend
 npm run build
 
-# Tests unitaris (vitest)
+# Tests unitaris (vitest); el CI (.github/workflows/ci.yml) els passa a cada PR, amb el build, cargo test i clippy
 npm test
 
 # Compilar aplicacio completa (.exe)

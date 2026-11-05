@@ -322,11 +322,11 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                     key={p.id}
                     type="button"
                     onClick={() => setEditingPlan(p)}
-                    className="w-full text-left bg-white dark:bg-sage-800 border border-sage-200 dark:border-sage-700 rounded-soft p-4 hover:border-sage-300 hover:shadow-card transition-shadow"
+                    className="w-full text-left bg-white border border-sage-200 rounded-soft p-4 hover:border-sage-300 hover:shadow-card transition-shadow"
                   >
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="font-medium text-sage-800 dark:text-sage-100">{p.nombre}</p>
+                        <p className="font-medium text-sage-800">{p.nombre}</p>
                         <p className="text-xs text-sage-400 mt-0.5">{formatDate(p.fechaInicio)} — {formatDate(p.fechaFin)}</p>
                         {p.kcalObjetivo && <p className="text-xs text-wellness-500 mt-1">{p.kcalObjetivo} kcal/día</p>}
                       </div>
@@ -342,7 +342,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
             </div>
 
             {/* Separador */}
-            <div className="border-t border-sage-200 dark:border-sage-700" />
+            <div className="border-t border-sage-200" />
 
             {/* Documentos PDF vinculados */}
             <div className="space-y-3">

@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { clientMatcher } from '../services/search';
 import { Users, Plus, Edit2, Trash2, Search, MessageCircle, ChevronRight, Phone } from 'lucide-react';
 import { Button, Input, EmptyState, useToast, useConfirm } from './UI';
 import useStore, { formatDate, lastVisitByClient } from '../stores/store';
@@ -35,11 +36,9 @@ export const ClientsView = () => {
   const [editClient, setEditClient] = useState(null);
 
   const filtered = useMemo(() => {
-    const q = clientSearch.toLowerCase();
+    const matches = clientMatcher(clientSearch);
     return clients.filter(c => {
-      if (q && !(c.nombre || '').toLowerCase().includes(q) &&
-               !(c.email || '').toLowerCase().includes(q) &&
-               !(c.telefono || '').toLowerCase().includes(q)) return false;
+      if (!matches(c)) return false;
       if (clientFilters.estado !== 'all' && c.estado !== clientFilters.estado) return false;
       if (clientFilters.objetivo !== 'all' && !(c.objetivos || []).includes(clientFilters.objetivo)) return false;
       return true;
@@ -56,7 +55,7 @@ export const ClientsView = () => {
     if (!ok) return;
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);
-    toast.success(t.client_deleted);
+    toast.success(t.client_deleted, 8000, { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_client', client.id) });
   };
 
   const openWhatsApp = async (client) => {

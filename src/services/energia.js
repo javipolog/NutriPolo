@@ -13,8 +13,6 @@
  * Tot és pur (sense store ni Tauri).
  */
 
-export const FORMULAS = ['harris', 'mifflin', 'bascula'];
-
 // Factor d'activitat per nivell d'activitat del client (src/clientOptions.js)
 export const FACTORES_ACTIVIDAD = [
   ['sedentario', 1.2],

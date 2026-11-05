@@ -2106,6 +2106,14 @@ const useStore = create(
       _history: [],
       _future: [],
 
+      // "Undo" on the toast of a deletion: only if that deletion is still the
+      // last thing in the history (nothing else gets undone by mistake).
+      undoDeletion: (type, id) => {
+        const last = get()._history[0];
+        if (last?.type !== type || last.item?.id !== id) return { ok: false, reason: 'not_last' };
+        return get().undo();
+      },
+
       // Returns { ok: true } or { ok: false, reason } when undoing would break
       // data: the blocked entry is dropped so it doesn't stay stuck on top.
       undo: () => {
