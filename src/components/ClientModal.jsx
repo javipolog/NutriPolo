@@ -63,8 +63,11 @@ export const ClientModal = ({ client, onClose }) => {
     const e = {};
     if (!form.nombre.trim()) e.nombre = t.error_required;
     if (form.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = t.error_invalid_email;
+    // Something written that is not a valid height is an error, never a
+    // silent blank (that would delete the height already saved)
     const h = alturaCm(form.altura);
-    if (h != null && (h < 50 || h > 250)) e.altura = t.client_height_invalid;
+    const written = String(form.altura ?? '').trim() !== '';
+    if (written && (h == null || h < 50 || h > 250)) e.altura = t.client_height_invalid;
     return e;
   };
 
