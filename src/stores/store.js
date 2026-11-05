@@ -43,10 +43,14 @@ function flushWrite(name) {
   const value = typeof queued === 'string' ? queued : JSON.stringify(queued);
   if (!isTauri()) {
     try { localStorage.setItem(name, value); } catch {}
+    partWritten(name);
     return Promise.resolve();
   }
   return invoke('save_data', { key: name, value })
-    .then(() => { if (useStore.getState().saveError) reportSaveError(null); })
+    .then(() => {
+      partWritten(name);
+      if (useStore.getState().saveError) reportSaveError(null);
+    })
     .catch((err) => {
       // Keep the value queued (unless a newer one arrived) and retry.
       if (writeQueue[name] === undefined) writeQueue[name] = value;
@@ -73,28 +77,159 @@ async function loadRaw(name) {
   }
 }
 
+// ── Split storage ───────────────────────────────────────────────────────────
+// The store is saved in parts: each large collection in its own file, the
+// rest (config, sync state, preferences) in `nutripolo-storage`. A change
+// rewrites only the parts whose data changed, by reference: typing in a
+// client's interview writes the clients, not the appointments or the
+// product photos; changing view writes nothing.
+//
+// Migration from the single file is safe: until every part has been written
+// once, `nutripolo-storage` keeps the whole store (as before), so a crash
+// half-way leaves a complete file to load. Only then does it become the
+// small main part, marked `split`, and a load of it requires every part.
+const omit = (obj, key) => { const { [key]: _, ...rest } = obj || {}; return rest; };
+const entriesOf = (obj) => Object.keys(obj || {}).sort().flatMap(k => [k, obj[k]]);
+const STORE_PARTS = [
+  ['nutripolo-clients', 'clients'],
+  ['nutripolo-consultations', 'consultations'],
+  ['nutripolo-measurements', 'measurements'],
+  ['nutripolo-plans', 'nutritionPlans'],
+  ['nutripolo-invoices', 'invoices'],
+  ['nutripolo-documents', 'clientDocuments'],
+  ['nutripolo-suggestions', 'patientSuggestions'],
+  ['nutripolo-personal-events', 'personalEvents'],
+].map(([key, field]) => ({
+  key,
+  get: (st) => st[field],
+  put: (st, v) => { st[field] = v; },
+  deps: (st) => [st[field]],
+  field,
+})).concat([
+  // Product photos apart from the rest of the library: they are most of the bytes
+  {
+    key: 'nutripolo-library-products',
+    get: (st) => st.planLibrary?.productos,
+    put: (st, v) => { st.planLibrary = { ...(st.planLibrary || {}), productos: v }; },
+    deps: (st) => [st.planLibrary?.productos],
+  },
+  {
+    key: 'nutripolo-library',
+    get: (st) => omit(st.planLibrary, 'productos'),
+    put: (st, v) => { st.planLibrary = { ...(v || {}), ...(st.planLibrary?.productos ? { productos: st.planLibrary.productos } : {}) }; },
+    deps: (st) => entriesOf(omit(st.planLibrary, 'productos')),
+    field: 'planLibrary',
+  },
+]);
+const MAIN_KEY = 'nutripolo-storage';
+/** Every key the store is saved under (main part first). */
+export const STORE_KEYS = [MAIN_KEY, ...STORE_PARTS.map(p => p.key)];
+const PART_FIELDS = new Set(STORE_PARTS.map(p => p.field).filter(Boolean));
+const mainState = (st) => Object.fromEntries(Object.entries(st).filter(([k]) => !PART_FIELDS.has(k)));
+
+let storeLoaded = false;         // getItem has read the files (nothing is written before)
+let splitReady = false;          // the main file on disk is the small `split` one
+const lastDeps = {};             // per key: references of the data last queued
+const partsWritten = new Set();  // parts written at least once since loading
+let lastValue = null;            // last { state, version } from persist
+
+const sameDeps = (a, b) => !!a && a.length === b.length && a.every((v, i) => v === b[i]);
+
+function queueWrite(name, value) {
+  writeQueue[name] = value;
+  clearTimeout(writeTimers[name]);
+  writeTimers[name] = setTimeout(() => flushWrite(name), 300);
+}
+
+function partWritten(name) {
+  if (splitReady || name === MAIN_KEY) return;
+  partsWritten.add(name);
+  if (STORE_PARTS.every(p => partsWritten.has(p.key)) && lastValue) {
+    // Every part is on disk: the main file can become the small one
+    splitReady = true;
+    const { state, version } = lastValue;
+    queueWrite(MAIN_KEY, { version, state: mainState(state), split: true });
+  }
+}
+
 // Persist storage for zustand (objects in, objects out).
 const tauriStorage = {
   // A JSON parse error throws: the persist middleware reports it as a load failure.
   getItem: async (name) => {
+    storeLoaded = false;
+    // What is on disk becomes the state: writes queued from the state it
+    // replaces must not land on top of it.
+    for (const key of STORE_KEYS) { clearTimeout(writeTimers[key]); delete writeTimers[key]; delete writeQueue[key]; }
+    // Until every part is written again, the main file keeps the whole store
+    const startOver = () => {
+      splitReady = false;
+      partsWritten.clear();
+      for (const key of STORE_KEYS) delete lastDeps[key];
+      storeLoaded = true;
+    };
     const raw = await loadRaw(name);
-    return raw == null ? null : JSON.parse(raw);
+    if (raw == null) { startOver(); return null; }   // first launch (or loadFailure)
+    const main = JSON.parse(raw);
+    // Single file (before v1.19): the next change writes every part
+    if (!main?.split) { startOver(); return main; }
+    const state = { ...main.state };
+    for (const part of STORE_PARTS) {
+      const partRaw = await loadRaw(part.key);
+      if (partRaw == null) {
+        // A part the main file says exists is missing: never load without it
+        if (!loadFailure) loadFailure = { key: part.key, error: 'missing' };
+        startOver();
+        return null;
+      }
+      try {
+        part.put(state, JSON.parse(partRaw));
+      } catch (e) {
+        loadFailure = { key: part.key, error: String(e?.message || e) };
+        startOver();
+        return null;
+      }
+    }
+    splitReady = true;
+    for (const part of STORE_PARTS) lastDeps[part.key] = part.deps(state);
+    storeLoaded = true;
+    return { ...main, state };
   },
   // `value` is the persisted object ({ state, version }). Zustand calls this on
-  // every set(); the object is only turned into JSON when the debounced write
-  // runs, so bursts of updates (a sync, typing) cost one serialization.
+  // every set(); only the parts whose data changed are queued, and they are
+  // turned into JSON when the debounced write runs, so bursts of updates (a
+  // sync, typing) cost one serialization of what changed.
   setItem: (name, value) => {
-    if (loadFailure) return;
-    writeQueue[name] = value;
-    clearTimeout(writeTimers[name]);
-    writeTimers[name] = setTimeout(() => flushWrite(name), 300);
+    // Before the files are read the state is the empty default: writing it
+    // would replace the real data. And never while a file is unreadable.
+    if (!storeLoaded || loadFailure) return;
+    lastValue = value;
+    const { state, version } = value;
+    let changed = false;
+    for (const part of STORE_PARTS) {
+      const deps = part.deps(state);
+      if (sameDeps(lastDeps[part.key], deps)) continue;
+      lastDeps[part.key] = deps;
+      queueWrite(part.key, part.get(state));
+      changed = true;
+    }
+    const main = mainState(state);
+    const mainDeps = [version, ...entriesOf(main)];
+    // The small main file only when its own data changed; while it still holds
+    // the whole store (before every part is on disk), on any change
+    if (sameDeps(lastDeps[MAIN_KEY], mainDeps) && (splitReady || !changed)) return;
+    lastDeps[MAIN_KEY] = mainDeps;
+    // Until every part is on disk the main file keeps the whole store
+    queueWrite(name, splitReady ? { version, state: main, split: true } : value);
   },
-  removeItem: async (name) => {
-    clearTimeout(writeTimers[name]);
-    delete writeQueue[name];
-    delete writeTimers[name];
-    if (!isTauri()) { localStorage.removeItem(name); return; }
-    await invoke('delete_data', { key: name }).catch(() => {});
+  removeItem: async () => {
+    for (const key of STORE_KEYS) {
+      clearTimeout(writeTimers[key]);
+      delete writeQueue[key];
+      delete writeTimers[key];
+      delete lastDeps[key];
+      if (!isTauri()) { localStorage.removeItem(key); continue; }
+      await invoke('delete_data', { key }).catch(() => {});
+    }
   },
 };
 
@@ -1111,6 +1246,9 @@ export function undoBlockReason(s, entry) {
   }
   return null;
 }
+
+// Last config given to partialize and its stripped copy
+const safeConfigCache = { from: undefined, to: undefined };
 
 // ============================================
 // STORE
@@ -2266,13 +2404,19 @@ const useStore = create(
         // NEVER persist the SMTP password — it lives only in the OS
         // credential store (see store_smtp_password / get_smtp_password).
         // Strip it defensively before Zustand serializes the config.
-        let safeConfig = s.config
-          ? { ...s.config, smtp: s.config.smtp ? { ...s.config.smtp, password: '' } : s.config.smtp }
-          : s.config;
-        // Google secrets live in the keyring (see syncGoogleSecrets).
-        if (isTauri()) safeConfig = stripGoogleSecrets(safeConfig);
+        // The stripped copy is reused while the config is the same object, so
+        // the storage sees it unchanged (see setItem) and does not rewrite it.
+        if (s.config !== safeConfigCache.from) {
+          let safeConfig = s.config
+            ? { ...s.config, smtp: s.config.smtp ? { ...s.config.smtp, password: '' } : s.config.smtp }
+            : s.config;
+          // Google secrets live in the keyring (see syncGoogleSecrets).
+          if (isTauri()) safeConfig = stripGoogleSecrets(safeConfig);
+          safeConfigCache.from = s.config;
+          safeConfigCache.to = safeConfig;
+        }
         return {
-          config: safeConfig,
+          config: safeConfigCache.to,
           clients: s.clients,
           measurements: s.measurements,
           consultations: s.consultations,

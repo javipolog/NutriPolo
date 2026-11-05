@@ -112,7 +112,7 @@ Quitando los solapes, quedan unos 140 problemas distintos. Abajo están agrupado
 - Ubicación de las citas importadas y estado cancelado en calendarios de solo lectura.
 - Aviso antes de subir notas a Google; no guardar las notas de las opciones en "Mis recetas"; borrado y exportación completos por paciente.
 
-**Fase 4 — Rendimiento (M)**
+**Fase 4 — Rendimiento (M)** — ✅ hecha salvo el PDF en un worker y el sync por lotes (rama `claude/auditoria-fase4`)
 - Guardar cada entidad por separado en lugar del store entero; sacar las fotos del JSON a ficheros; vista previa del PDF en un worker, con debounce más largo; sync por lotes.
 
 **Fase 5 — UX y mantenimiento (continuo)**

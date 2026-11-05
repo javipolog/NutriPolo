@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { AlertTriangle, History, RotateCcw, FilePlus, Loader2 } from 'lucide-react';
-import useStore, { clearLoadFailure, flushAllPending } from '../stores/store';
+import useStore, { clearLoadFailure, flushAllPending, STORE_KEYS } from '../stores/store';
 import { useConfirm } from './UI';
 
 const BACKUP_ERRORS = {
@@ -50,7 +50,9 @@ export const LoadErrorScreen = ({ failure, onResolved }) => {
     setError('');
     try {
       const backup = restoreKey ? await loadAutoBackup(restoreKey) : null;
-      await invoke('quarantine_data', { key: failure.key });
+      // The store is saved in parts: all of them are set aside (renamed, not
+      // deleted), so the restored data never mixes with what was there.
+      for (const key of STORE_KEYS) await invoke('quarantine_data', { key });
       clearLoadFailure();
       if (backup) await applyBackup(backup, { safety: false });
       else useStore.setState({});   // persist the empty state
