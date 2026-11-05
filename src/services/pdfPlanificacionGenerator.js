@@ -3,7 +3,7 @@
  * =================================
  * PDF de la planificació setmanal (substitueix el disseny de Canva):
  * portada amb índex, opcions d'esmorzar / mig matí / berenar, guia de
- * quantitats, menú setmanal en horitzontal (amb enllaços a receptes) i
+ * quantitats, menú setmanal (amb enllaços a receptes) i
  * productes. Vectorial amb pdf-lib + fontkit (Onest via pdfFonts.js,
  * icones de Lucide, ISC).
  */
@@ -18,9 +18,7 @@ import { ONEST_FILES, fetchFont } from './pdfFonts';
 
 // ── Pàgina ─────────────────────────────────────────────────────────────────
 const PORTRAIT = [595.28, 841.89];
-const LANDSCAPE = [841.89, 595.28];
 const MARGIN = 48;
-const MARGIN_L = 32;
 const BOTTOM = 58;
 
 const hex = (h) => {
@@ -431,7 +429,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   /** Capçalera corrent. Retorna la y de sota. */
   function runningHead(page) {
     const { width: W, height: H } = page.getSize();
-    const m = W > H ? MARGIN_L : MARGIN;
+    const m = MARGIN;
     const bl = H - 32;
     drawLogo(page, m, bl + 10, 15);
     text(page, 'NutriPolo', m + 21, bl, F.bold, 8.4, C.ink);
@@ -477,7 +475,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   function sectionPage(size, key, { continued = false } = {}) {
     const page = newPage(size);
     const { width: W, height: H } = page.getSize();
-    const m = W > H ? MARGIN_L : MARGIN;
+    const m = MARGIN;
     const y = sectionHero(page, key, runningHead(page), { continued });
     return { page, y, m, W, H };
   }
@@ -747,32 +745,53 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     }
   }
 
-  // ── 4. Menú setmanal (A4 horitzontal) ───────────────────────────────────
-  // Una sola pàgina si el text hi cap a mida llegible; si no, comidas i
-  // cenas van en pàgines separades, i en últim cas una fila (A o B) per
-  // pàgina. Totes les pàgines del menú fan servir la mateixa escala.
+  // ── 4. Menú setmanal (A4 vertical) ─────────────────────────────────────
+  // Un dia per fila i les columnes Comida A/B · Cena A/B. Una sola pàgina si
+  // el text hi cap a mida llegible; si no, comidas i cenas van en pàgines
+  // separades, i en últim cas cada àpat es parteix en dues meitats de la
+  // setmana. Totes les pàgines del menú fan servir la mateixa escala.
   if (sections.includes('menu')) {
-    const [W, H] = LANDSCAPE;
-    const m = MARGIN_L;
+    const [W, H] = PORTRAIT;
+    const m = MARGIN;
     const labelW = 22;
     const gap = 4;
-    const colW = (W - m * 2 - labelW - gap * 7) / 7;
+    const groupGap = 10;
     const headH = 22;
     const cellPad = 7;
-    const innerW = colW - cellPad * 2;
+    const cellPadY = 5;
     // A escala 1 el text és de 8,4 / 7,5 pt; minK el manté per sobre de 7 pt
     const MENU = { ts: 8.4, is: 7.5, minK: 0.94, maxK: 1.15 };
-    const gridTop = H - 46 - 52;
+    const gridTop = H - 46 - 48;
 
+    // Notes en una o dues columnes, la que ocupi menys alçada
     const notas = linesOf(p.menu.notas);
     const NS = T.small;
-    const noteColW = (W - m * 2 - 96) / 2;
-    const noteLines = notas.map(nt => wrap(nt, F.reg, NS, noteColW - 20));
-    const half = Math.ceil(notas.length / 2);
+    const notesX = 96;
     const colLines = (a) => a.reduce((s, ls) => s + ls.length, 0);
-    const notesH = notas.length ? Math.max(colLines(noteLines.slice(0, half)), colLines(noteLines.slice(half))) * lh(NS, 1.42) + 24 : 0;
+    const notesLayout = [1, 2].map(n => {
+      const colW = (W - m * 2 - notesX - 12) / n;
+      const lines = notas.map(nt => wrap(nt, F.reg, NS, colW - 20));
+      const per = Math.ceil(lines.length / n);
+      const cols = [...Array(n)].map((_, i) => lines.slice(i * per, (i + 1) * per));
+      return { colW, cols, h: Math.max(...cols.map(colLines)) * lh(NS, 1.42) + 24 };
+    }).reduce((a, b) => (b.h < a.h ? b : a));
+    const notesH = notas.length ? notesLayout.h : 0;
 
-    const layoutCell = (dish, k) => {
+    // Columnes (franja × variant) amb algun plat: una columna buida no s'imprimeix
+    const allCols = MENU_SLOTS.flatMap(s => MENU_VARIANTS.map(v => ({ s, v })))
+      .filter(({ s, v }) => p.menu.dias.some(d => !isDishEmpty(d[s][v])));
+    const hasB = allCols.some(c => c.v === 'b');
+
+    // Posició de les columnes; entre àpats, una mica més d'aire
+    const columnsAt = (cols) => {
+      const gaps = cols.slice(1).map((c, i) => (c.s === cols[i].s ? gap : groupGap));
+      const colW = (W - m * 2 - labelW - gap - gaps.reduce((a, b) => a + b, 0)) / cols.length;
+      const x = [m + labelW + gap];
+      gaps.forEach(g => x.push(x[x.length - 1] + colW + g));
+      return { colW, x };
+    };
+
+    const layoutCell = (dish, k, innerW) => {
       const ts = MENU.ts * k;
       const is = MENU.is * k;
       const chip = 12 * k;
@@ -786,55 +805,56 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
       const h = title.length * lh(ts, 1.28) + (n ? 4 + n * lh(is, 1.34) : 0);
       return { title, ings, ind, ts, is, chip, h: Math.max(h, chip), url: safeUrl(dish.receta) };
     };
-
-    // Files (franja × variant) amb algun plat: una fila buida no s'imprimeix
-    const allRows = MENU_SLOTS.flatMap(s => MENU_VARIANTS.map(v => ({ s, v })))
-      .filter(({ s, v }) => p.menu.dias.some(d => !isDishEmpty(d[s][v])));
-    const hasB = allRows.some(r => r.v === 'b');
-
-    const availFor = (rows, withNotes) => gridTop - headH - gap - (BOTTOM - 14) - (withNotes && notesH ? notesH + 10 : 0) - gap * (rows - 1);
-    const layoutAt = (rowsDef, k) => {
-      const cells = rowsDef.map(({ s, v }) => p.menu.dias.map(d => layoutCell(d[s][v], k)));
-      const rowH = cells.map(row => Math.max(...row.map(c => c.h)) + cellPad * 2);
+    // Una pàgina del menú: { cols, dias }
+    const availFor = (g, withNotes) => gridTop - headH - gap - (BOTTOM - 14) - (withNotes && notesH ? notesH + 8 : 0) - gap * (g.dias.length - 1);
+    const layoutAt = (g, k) => {
+      const { colW } = columnsAt(g.cols);
+      const cells = g.dias.map(d => g.cols.map(({ s, v }) => layoutCell(d[s][v], k, colW - cellPad * 2)));
+      const rowH = cells.map(row => Math.max(...row.map(c => c.h)) + cellPadY * 2);
       return { cells, rowH };
     };
-    const fits = (rowsDef, withNotes, k) =>
-      layoutAt(rowsDef, k).rowH.reduce((a, b) => a + b, 0) <= availFor(rowsDef.length, withNotes);
+    const fits = (g, withNotes, k) =>
+      layoutAt(g, k).rowH.reduce((a, b) => a + b, 0) <= availFor(g, withNotes);
     // Escala més gran (entre lo i maxK) amb què les files hi caben, per bisecció
-    const bestK = (rowsDef, withNotes, lo) => {
-      if (fits(rowsDef, withNotes, MENU.maxK)) return MENU.maxK;
+    const bestK = (g, withNotes, lo) => {
+      if (fits(g, withNotes, MENU.maxK)) return MENU.maxK;
       let hi = MENU.maxK;
       while (hi - lo > 0.01) {
         const mid = (lo + hi) / 2;
-        if (fits(rowsDef, withNotes, mid)) lo = mid; else hi = mid;
+        if (fits(g, withNotes, mid)) lo = mid; else hi = mid;
       }
       return lo;
     };
 
     // Les notes van a l'última pàgina del menú
-    const bySlot = MENU_SLOTS.map(s => allRows.filter(r => r.s === s)).filter(g => g.length);
-    const levels = [[allRows], bySlot, allRows.map(r => [r])];
+    const dias = p.menu.dias;
+    const halves = [dias.slice(0, Math.ceil(dias.length / 2)), dias.slice(Math.ceil(dias.length / 2))];
+    const bySlot = MENU_SLOTS.map(s => allCols.filter(c => c.s === s)).filter(cols => cols.length);
+    const levels = [
+      [{ cols: allCols, dias }],
+      bySlot.map(cols => ({ cols, dias })),
+      bySlot.flatMap(cols => halves.map(h => ({ cols, dias: h }))),
+    ];
     const allFit = (groups) => groups.every((g, i) => fits(g, i === groups.length - 1, MENU.minK));
     const fitting = levels.find(allFit);
-    const groups = allRows.length ? fitting || levels[levels.length - 1] : [];
-    // Només si ni una fila per pàgina hi cap a 7 pt es redueix més (millor petit que tallat)
+    const groups = allCols.length ? fitting || levels[levels.length - 1] : [];
+    // Només si ni mitja setmana per pàgina hi cap a 7 pt es redueix més (millor petit que tallat)
     const lo = fitting ? MENU.minK : 0.6;
     const k = Math.min(...groups.map((g, i) => bestK(g, i === groups.length - 1, lo)));
     const partName = (g) => {
       if (groups.length === 1) return '';
-      const name = g[0].s === 'comida' ? L.lunches : L.dinners;
-      const split = g.length === 1 && allRows.filter(r => r.s === g[0].s).length > 1;
-      return split ? `${name} ${g[0].v.toUpperCase()}` : name;
+      return g.cols[0].s === 'comida' ? L.lunches : L.dinners;
     };
 
-    for (const [gi, rowsDef] of groups.entries()) {
+    for (const [gi, g] of groups.entries()) {
+      const { cols } = g;
       const withNotes = gi === groups.length - 1;
-      const page = newPage(LANDSCAPE);
+      const page = newPage(PORTRAIT);
       const top = runningHead(page);
-      const { cells, rowH: natural } = layoutAt(rowsDef, k);
+      const { colW, x: colX } = columnsAt(cols);
+      const { cells, rowH: natural } = layoutAt(g, k);
       // L'espai que sobra es reparteix perquè la graella ompli la pàgina
-      const avail = availFor(rowsDef.length, withNotes);
-      const extra = Math.max(0, avail - natural.reduce((a, b) => a + b, 0)) / rowsDef.length;
+      const extra = Math.max(0, availFor(g, withNotes) - natural.reduce((a, b) => a + b, 0)) / natural.length;
       const rowH = natural.map(h => h + extra);
 
       // Títol compacte (kicker i títol com a les altres seccions) + llegenda A/B
@@ -845,7 +865,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
       const midY = (kBL + T.label * 0.72 + tBL) / 2;
       iconDisc(page, SECTION_ICON.menu, m + r, midY, r, { k: 0.95 });
       label(page, `${secNum('menu')}  ·  ${L.sections.menu.index}`, m + r * 2 + 12, kBL);
-      const part = partName(rowsDef);
+      const part = partName(g);
       text(page, part ? `${L.sections.menu.title} · ${part}` : L.sections.menu.title, m + r * 2 + 11.5, tBL, F.display, tSize, C.ink);
       if (hasB) {
         let lx = W - m;
@@ -858,35 +878,34 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
         }
       }
 
-      const x0 = m + labelW + gap;
-      const colX = (i) => x0 + i * (colW + gap);
-      p.menu.dias.forEach((d, i) => {
-        box(page, colX(i), gridTop, colW, headH, { r: 8, fill: C.sage });
-        label(page, L.days[d.id], colX(i) + colW / 2, gridTop - headH / 2 - T.label * 0.36, { color: C.ink, align: 'center' });
+      // Capçalera: una franja per àpat (Comida / Cena) sobre les seves columnes
+      cols.forEach(({ s }, ci) => {
+        if (ci > 0 && cols[ci - 1].s === s) return;
+        let last = ci;
+        while (last + 1 < cols.length && cols[last + 1].s === s) last++;
+        const w = colX[last] + colW - colX[ci];
+        box(page, colX[ci], gridTop, w, headH, { r: 8, fill: C.olive });
+        label(page, s === 'comida' ? L.lunch : L.dinner, colX[ci] + w / 2, gridTop - headH / 2 - T.label * 0.36, { color: C.white, sp: 1.6, align: 'center' });
       });
 
       let y = gridTop - headH - gap;
-      rowsDef.forEach(({ s, v }, ri) => {
-        const h = rowH[ri];
-        // Franja (Comida / Cena) que abraça les seves files consecutives
-        if (ri === 0 || rowsDef[ri - 1].s !== s) {
-          let gh = h;
-          for (let j = ri + 1; j < rowsDef.length && rowsDef[j].s === s; j++) gh += gap + rowH[j];
-          box(page, m, y, labelW, gh, { r: 8, fill: C.olive });
-          const t = (s === 'comida' ? L.lunch : L.dinner).toUpperCase();
-          const sz = T.label;
-          const lw = spacedWidth(t, F.bold, sz, 1.6);
-          let cy = y - gh / 2 - lw / 2;
-          for (const ch of clean(F.bold, t)) {
-            page.drawText(ch, { x: m + labelW / 2 + sz * 0.36, y: cy, font: F.bold, size: sz, color: C.white, rotate: degrees(90) });
-            cy += F.bold.widthOfTextAtSize(ch, sz) + 1.6;
-          }
+      g.dias.forEach((d, di) => {
+        const h = rowH[di];
+        box(page, m, y, labelW, h, { r: 8, fill: C.sage });
+        const t = L.days[d.id].toUpperCase();
+        const sz = T.label;
+        const lw = spacedWidth(t, F.bold, sz, 1);
+        let cy = y - h / 2 - lw / 2;
+        for (const ch of clean(F.bold, t)) {
+          page.drawText(ch, { x: m + labelW / 2 + sz * 0.36, y: cy, font: F.bold, size: sz, color: C.ink, rotate: degrees(90) });
+          cy += F.bold.widthOfTextAtSize(ch, sz) + 1;
         }
-        cells[ri].forEach((c, di) => {
-          const x = colX(di);
+        cells[di].forEach((c, ci) => {
+          const { v } = cols[ci];
+          const x = colX[ci];
           box(page, x, y, colW, h, v === 'a' ? { r: 8, fill: C.white, stroke: C.rule } : { r: 8, fill: C.surface });
           const ix = x + cellPad;
-          const ty = y - cellPad;
+          const ty = y - cellPadY;
           const cr = c.chip / 2;
           page.drawCircle({ x: ix + cr, y: ty - cr, size: cr, color: v === 'a' ? C.orange : C.sage });
           textCenter(page, v.toUpperCase(), ix + cr, ty - cr - cr * 0.6, F.bold, cr * 1.2, C.ink);
@@ -916,14 +935,14 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
       });
 
       if (withNotes && notesH) {
-        const ntop = y - 6;
+        const ntop = y - 4;
         const w = W - m * 2;
         box(page, m, ntop, w, notesH, { r: 12, fill: C.surface });
         iconDisc(page, 'info', m + 22, ntop - notesH / 2, 10, { fill: C.white, color: C.orangeInk, k: 1.1 });
         label(page, L.notes, m + 40, ntop - notesH / 2 - T.label * 0.36, { color: C.orangeInk });
-        [noteLines.slice(0, half), noteLines.slice(half)].forEach((list, col) => {
+        notesLayout.cols.forEach((list, col) => {
           let ny = ntop - 12 - NS * 0.76;
-          const nx = m + 96 + col * noteColW;
+          const nx = m + notesX + col * notesLayout.colW;
           for (const ls of list) {
             bullet(page, nx, ny, NS);
             ls.forEach((ln, j) => text(page, ln, nx + 9, ny - j * lh(NS, 1.42), F.reg, NS, C.ink));
@@ -963,8 +982,8 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   const n = pages.length;
   pages.forEach((page, i) => {
     if (i === 0) return;
-    const { width: W, height: H } = page.getSize();
-    const m = W > H ? MARGIN_L : MARGIN;
+    const { width: W } = page.getSize();
+    const m = MARGIN;
     const bl = 24;
     text(page, [prof.name, prof.col].filter(Boolean).join('   ·   '), m, bl, F.med, T.meta, C.soft);
     if (config?.web) textCenter(page, config.web, W / 2, bl, F.med, T.meta, C.soft);
