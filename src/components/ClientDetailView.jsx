@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ArrowLeft, Edit2, MessageCircle, Phone, Mail, Leaf, FileText, Calendar, ClipboardList, Receipt, ClipboardEdit, Unlink } from 'lucide-react';
-import { Button, StatusBadge, useToast, useConfirm } from './UI';
+import { Button, StatusBadge, useToast, useConfirm, clickableProps } from './UI';
 import useStore, { formatDate, formatCurrency, calcIMC } from '../stores/store';
 import { useT, useLocale } from '../i18n';
 import { GOALS, DIET_RESTRICTIONS, ACTIVITY_LEVELS, optionLabel } from '../clientOptions';
@@ -67,6 +67,8 @@ export const ClientDetailView = ({ clientId, onBack }) => {
   const [showEdit, setShowEdit] = useState(false);
   const [emailDoc, setEmailDoc] = useState(null);
   const [creating, setCreating] = useState(null); // 'consultation' | 'plan' | 'invoice'
+  const [openConsultation, setOpenConsultation] = useState(null);
+  const [openInvoice, setOpenInvoice] = useState(null);
   const [editingPlan, setEditingPlan] = useState(null);
   const locale = useLocale();
   const { sendWhatsApp } = useReminderActions();
@@ -264,13 +266,15 @@ export const ClientDetailView = ({ clientId, onBack }) => {
             ) : (
               [...consultations].sort((a, b) => b.fecha.localeCompare(a.fecha)).map(c => (
                 <div key={c.id} className="bg-white border border-sage-200 rounded-soft p-4 flex items-start gap-4">
-                  <div className="text-center w-14 shrink-0">
-                    <p className="text-xs font-bold text-wellness-500">{formatDate(c.fecha)}</p>
-                    <p className="text-xs text-sage-400">{c.hora}</p>
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-sage-800">{c.tipo}</p>
-                    {c.notasCliente && <p className="text-xs text-sage-500 mt-1">{c.notasCliente}</p>}
+                  <div {...clickableProps(() => setOpenConsultation(c))} title={t.edit} className="flex-1 flex items-start gap-4 cursor-pointer rounded-button hover:bg-sage-50 -m-1 p-1">
+                    <div className="text-center w-14 shrink-0">
+                      <p className="text-xs font-bold text-wellness-500">{formatDate(c.fecha)}</p>
+                      <p className="text-xs text-sage-500">{c.allDay ? '' : c.hora}</p>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-sage-800">{c.tipo || t.consultation_default}</p>
+                      {c.notasCliente && <p className="text-xs text-sage-500 mt-1">{c.notasCliente}</p>}
+                    </div>
                   </div>
                   {c.matchedBy === 'system' && c.matchStatus === 'exact' && (
                     <button
@@ -299,7 +303,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                     c.estado === 'completada' ? 'bg-success-light text-success' :
                     c.estado === 'cancelada' ? 'bg-danger-light text-danger' :
                     'bg-wellness-50 text-wellness-500'
-                  }`}>{c.estado}</span>
+                  }`}>{{ programada: t.status_pending, completada: t.status_completed, cancelada: t.status_cancelled, no_show: t.status_no_show }[c.estado] || c.estado}</span>
                 </div>
               ))
             )}
@@ -361,9 +365,9 @@ export const ClientDetailView = ({ clientId, onBack }) => {
               <p className="text-center text-sage-400 py-12">{t.no_invoices}</p>
             ) : (
               [...invoices].sort((a, b) => b.fecha.localeCompare(a.fecha)).map(inv => (
-                <div key={inv.id} className="bg-white border border-sage-200 rounded-soft p-4 flex items-center gap-4">
+                <div key={inv.id} {...clickableProps(() => setOpenInvoice(inv))} className="bg-white border border-sage-200 rounded-soft p-4 flex items-center gap-4 cursor-pointer hover:bg-sage-50">
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-sage-800">{inv.numero}</p>
+                    <p className="text-sm font-medium text-sage-800">{inv.numero || t.invoice_status_draft}</p>
                     <p className="text-xs text-sage-400">
                       {formatDate(inv.fecha)} · {inv.items?.[0]?.descripcion || inv.concepto || '—'}
                       {inv.items?.length > 1 && ` +${inv.items.length - 1}`}
@@ -371,7 +375,7 @@ export const ClientDetailView = ({ clientId, onBack }) => {
                   </div>
                   <p className="tabular-nums font-semibold text-sage-800">{formatCurrency(inv.total ?? inv.importe ?? 0)}</p>
                   {/* StatusBadge calls a pending invoice "emitida" */}
-                  <StatusBadge status={inv.estado === 'pendiente' ? 'emitida' : inv.estado} />
+                  <StatusBadge status={!inv.emitidaAt ? 'borrador' : inv.estado === 'pendiente' ? 'emitida' : inv.estado} />
                 </div>
               ))
             )}
@@ -384,6 +388,8 @@ export const ClientDetailView = ({ clientId, onBack }) => {
       {creating === 'plan' && <PlanEditorModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
       {editingPlan && <PlanEditorModal plan={editingPlan} onClose={() => setEditingPlan(null)} />}
       {creating === 'invoice' && <InvoiceModal defaultClientId={client.id} onClose={() => setCreating(null)} />}
+      {openConsultation && <ConsultationModal consultation={openConsultation} onClose={() => setOpenConsultation(null)} />}
+      {openInvoice && <InvoiceModal invoice={openInvoice} onClose={() => setOpenInvoice(null)} />}
       {emailDoc && (
         <SendEmailModal
           mode="document"

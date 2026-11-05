@@ -108,7 +108,7 @@ export const LoadErrorScreen = ({ failure, onResolved }) => {
                 <History size={13} /> Restaurar una copia automática
               </p>
               {backups.map(date => backupButton(date, `Copia del ${formatDay(date)}`))}
-              {safety && backupButton('safety', `Copia anterior a la última restauración (${formatDay(safety.date)})`)}
+              {safety && backupButton('safety', `Copia previa a la última restauración, actualización o cambio (${formatDay(safety.date)})`)}
             </div>
           )}
 

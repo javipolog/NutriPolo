@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import useStore, { filterVisibleConsultations } from '../stores/store';
-import { googleCalendar } from '../services/googleCalendarService';
+import { googleCalendar, shortGcalError } from '../services/googleCalendarService';
 import { getReminderCandidates, getReminderConfig, isAutoSendable, isQuietTime, reminderState } from '../services/reminderService';
 import { getReviewCandidates, getReviewConfig, isReviewAutoSendable, reviewState } from '../services/reviewRequestService';
 import { deliverEmailReminder, deliverReviewEmail } from './useReminderActions';
@@ -181,6 +181,9 @@ export function useBackgroundJobs({ toast }) {
         try {
           const stats = await googleCalendar.syncAll();
           failedIds = (stats.errorDetails || []).filter(d => d.failed).map(d => d.calendarId);
+          // Shown in the Agenda until a sync works for every calendar
+          const failed = (stats.errorDetails || []).filter(d => d.failed);
+          useStore.getState().setSyncAudit({ lastError: failed.length ? failed.map(d => `${d.calendar}: ${d.message}`).join(' · ') : null });
           reauthNotified = false;
           if (!cancelled && stats.conflicts > 0) {
             toastRef.current.info(tRef.current.gcal_bg_conflicts.replace('{n}', stats.conflicts));
@@ -188,6 +191,7 @@ export function useBackgroundJobs({ toast }) {
           if (!cancelled && stats.suggested > 0) notifySuggestions(toastRef.current, tRef.current, stats.suggested);
         } catch (e) {
           syncFailed = true;
+          useStore.getState().setSyncAudit({ lastError: shortGcalError(e) });
           if (cancelled) return;
           if (useStore.getState().config.googleCalendar?.needsReauth) {
             // Once per session: the sync stops until the user reconnects.

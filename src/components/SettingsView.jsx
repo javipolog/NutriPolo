@@ -756,9 +756,14 @@ const GoogleCalendarSection = () => {
   };
 
   // Migration dialog resolvers
-  const handleMigrationConvert = () => {
+  const handleMigrationConvert = async () => {
     if (!migrationPrompt) return;
     const { cal, count } = migrationPrompt;
+    // The appointments' clinical notes do not survive the conversion: a copy first
+    try { await useStore.getState().saveSafetyBackup(); } catch (e) {
+      toast.error(t.backup_auto_failed.replace('{error}', errMsg(e)));
+      return;
+    }
     convertConsultationsToPersonal(cal.id);
     applyPurposeChange(cal, 'personal');
     setMigrationPrompt(null);

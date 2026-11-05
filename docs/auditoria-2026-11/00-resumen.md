@@ -120,3 +120,6 @@ Quitando los solapes, quedan unos 140 problemas distintos. Abajo están agrupado
 - CI con tests antes de cada release, ESLint, partir los ficheros grandes, limpiar el código muerto, poner al día `CLAUDE.md` y `README.md`.
 
 **Fase 6 — Hallazgos medios con más impacto** — ✅ hecha (rama `claude/auditoria-fase6`): rutas de documentos con `:`, `envPrefix`, IMC con la altura actual y altura en metros, miles en kcal, energía del último pesaje con peso, ficha nueva sin nivel de actividad y saltando al error, plantillas sin «—», citas importadas sin valores por defecto ni tipo técnico, aviso honesto de adjunto sin SMTP, errores de email legibles, enviar la planificación por email desde su editor.
+
+**Fase 7 — Más hallazgos medios** — ✅ hecha (rama `claude/auditoria-fase7`): copia previa antes de una actualización de datos, de reiniciar la agenda y de convertir citas en personales; lo ya enviado se recuerda tras reiniciar la agenda; notas fuera de las citas de un cliente borrado; eventos de día completo sin hora inventada ni recordatorios, y sin convertirse en eventos con hora; fallos del sync en segundo plano visibles en la Agenda y última sync con fecha; consultas y facturas que se abren desde la ficha, con estados traducidos; «Clientes» del menú vuelve a la lista.
+

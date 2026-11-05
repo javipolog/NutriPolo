@@ -207,6 +207,7 @@ export function getReviewCandidates({ consultations, history = consultations, cl
   const entries = [];
   for (const consultation of consultations || []) {
     if (consultation.estado !== 'completada' && consultation.estado !== 'programada') continue;
+    if (consultation.allDay) continue;   // no real time: not a visit to ask about
     const client = consultation.clienteId ? clientsById.get(consultation.clienteId) : null;
     if (!client) continue;
     const end = consultationEnd(consultation, config);

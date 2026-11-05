@@ -90,6 +90,11 @@ describe('client preferences and contact data', () => {
 });
 
 describe('getReminderCandidates', () => {
+  it('has no reminders for all-day events (their 09:00 is not a real time)', () => {
+    const entries = getReminderCandidates({ consultations: [consult({ allDay: true })], clients: [client], config, now: NOW });
+    expect(entries).toEqual([]);
+  });
+
   it('skips non-programmed and past consultations, flags unlinked ones', () => {
     const entries = getReminderCandidates({
       consultations: [

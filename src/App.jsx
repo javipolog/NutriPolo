@@ -481,7 +481,11 @@ function AppContent() {
       if (e.ctrlKey || e.metaKey) {
         const views = ['dashboard', 'agenda', 'clients', 'plans', 'invoices', 'services', 'settings'];
         const idx = parseInt(e.key, 10) - 1;
-        if (idx >= 0 && idx < views.length) { e.preventDefault(); setCurrentView(views[idx]); }
+        if (idx >= 0 && idx < views.length) {
+          e.preventDefault();
+          if (views[idx] === 'clients') useStore.getState().setSelectedClientId(null);
+          setCurrentView(views[idx]);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyboard);
@@ -526,7 +530,11 @@ function AppContent() {
               {navItems.map(item => (
                 <li key={item.id}>
                   <button
-                    onClick={() => setCurrentView(item.id)}
+                    onClick={() => {
+                      // "Clients" in the menu is the list, not the last record opened
+                      if (item.id === 'clients') useStore.getState().setSelectedClientId(null);
+                      setCurrentView(item.id);
+                    }}
                     aria-current={currentView === item.id ? 'page' : undefined}
                     aria-label={sidebarCollapsed ? item.label : undefined}
                     className={`relative w-full flex items-center gap-3 rounded-button transition-colors duration-150 group ${

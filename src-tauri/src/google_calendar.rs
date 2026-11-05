@@ -81,6 +81,10 @@ pub struct CalendarEvent {
     /// notes are not shared with Google, see the JS `notesGoToGoogle`).
     #[serde(default)]
     pub keep_remote_description: bool,
+    /// Write only: leave the event's start and end in Google as they are (an
+    /// all-day event must not become a timed one on any other edit).
+    #[serde(default)]
+    pub keep_remote_times: bool,
     /// The organizer is the account itself (read only).
     #[serde(default)]
     pub organizer_self: bool,
@@ -302,6 +306,7 @@ fn map_google_event(event: &serde_json::Value) -> CalendarEvent {
         organizer,
         organizer_self,
         keep_remote_description: false,
+        keep_remote_times: false,
     }
 }
 
@@ -319,9 +324,13 @@ fn build_event_body(event: &CalendarEvent) -> serde_json::Value {
         "end":   { "dateTime": event.end_datetime,   "timeZone": tz, "date": null },
     });
 
-    if event.keep_remote_description {
-        if let Some(obj) = body.as_object_mut() {
+    if let Some(obj) = body.as_object_mut() {
+        if event.keep_remote_description {
             obj.remove("description");
+        }
+        if event.keep_remote_times {
+            obj.remove("start");
+            obj.remove("end");
         }
     }
     if let Some(ref loc) = event.location {
@@ -836,6 +845,7 @@ mod tests {
             organizer: Some("guest@example.com".to_string()),
             organizer_self: false,
             keep_remote_description: false,
+            keep_remote_times: false,
         }
     }
 
@@ -858,6 +868,14 @@ mod tests {
     fn event_body_can_leave_the_description_alone() {
         let event = CalendarEvent { description: Some("nota".to_string()), keep_remote_description: true, ..sample_event() };
         assert!(build_event_body(&event).get("description").is_none());
+    }
+
+    #[test]
+    fn event_body_can_leave_the_dates_alone() {
+        let event = CalendarEvent { keep_remote_times: true, ..sample_event() };
+        let body = build_event_body(&event);
+        assert!(body.get("start").is_none() && body.get("end").is_none());
+        assert_eq!(body["summary"], "Consulta - Ana");
     }
 
     #[test]
