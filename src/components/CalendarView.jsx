@@ -619,8 +619,15 @@ export const CalendarView = () => {
   const [editConsultation, setEditConsultation] = useState(null);
   const [syncing, setSyncing] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const locale = useLocale();
   const lastFullSyncAt = useStore(s => s.syncAudit?.lastFullSyncAt);
   const lastSyncTime = lastFullSyncAt ? new Date(lastFullSyncAt) : null;
+  // Failure of the background sync (useBackgroundJobs), shown until one works
+  const backgroundSyncError = useStore(s => s.syncAudit?.lastError);
+  // "14:05" today, "3 nov 14:05" another day (an old sync must not look recent)
+  const lastSyncLabel = lastSyncTime && (lastSyncTime.toDateString() === new Date().toDateString()
+    ? lastSyncTime.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+    : lastSyncTime.toLocaleString(locale, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }));
   const [syncError, setSyncError] = useState(null);
   const [showPersonalEvents, setShowPersonalEvents] = useState(true);
 
@@ -658,6 +665,8 @@ export const CalendarView = () => {
 
     setResetting(true);
     try {
+      // It cannot be undone: a copy first ("previous copy" in Settings)
+      await useStore.getState().saveSafetyBackup();
       resetAgenda();
       toast.success(t.calendar_reset_done.replace('{n}', total));
     } catch (e) {
@@ -774,11 +783,13 @@ export const CalendarView = () => {
                   <Trash2 size={15} />
                 </button>
               </div>
-              {syncError ? (
-                <p className="text-[11px] text-danger leading-tight">{t.calendar_sync_failed}</p>
-              ) : lastSyncTime ? (
-                <p className="text-[11px] text-sage-400 leading-tight">
-                  {t.calendar_last_sync.replace('{time}', `${lastSyncTime.getHours().toString().padStart(2, '0')}:${lastSyncTime.getMinutes().toString().padStart(2, '0')}`)}
+              {syncError || backgroundSyncError ? (
+                <p className="text-[11px] text-danger leading-tight" title={backgroundSyncError || undefined}>
+                  {t.calendar_sync_failed}{lastSyncLabel ? ` · ${t.calendar_last_sync.replace('{time}', lastSyncLabel)}` : ''}
+                </p>
+              ) : lastSyncLabel ? (
+                <p className="text-[11px] text-sage-500 leading-tight">
+                  {t.calendar_last_sync.replace('{time}', lastSyncLabel)}
                 </p>
               ) : null}
             </div>

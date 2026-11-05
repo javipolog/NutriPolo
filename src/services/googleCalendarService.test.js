@@ -682,6 +682,25 @@ describe('patient matching', () => {
     expect(byEvent('x3').estado).toBe('cancelada');
   });
 
+  it('marks all-day events, and a new date or time makes them timed', async () => {
+    cal(CAL).set('ad', { id: 'ad', summary: 'Marcos Prieto', start_datetime: '2026-10-22', end_datetime: '2026-10-23', updated: stamp(), organizer_self: true });
+    await sync();
+    expect(byEvent('ad').allDay).toBe(true);
+    useStore.getState().updateConsultation(byEvent('ad').id, { notasPrivadas: 'nota' });
+    expect(byEvent('ad').allDay).toBe(true);
+    useStore.getState().updateConsultation(byEvent('ad').id, { hora: '11:00' });
+    expect(byEvent('ad').allDay).toBe(false);
+  });
+
+  it('does not send again what was sent before the agenda was reset', async () => {
+    remote('r1', 'Marcos Prieto');
+    await sync();
+    useStore.getState().updateConsultation(byEvent('r1').id, { reminders: { email: { status: 'sent', slot: 'x' } } }, { sync: true });
+    useStore.getState().resetAgenda();
+    await sync();
+    expect(byEvent('r1').reminders.email.status).toBe('sent');
+  });
+
   it('gives imported appointments the location of their calendar', async () => {
     connect({
       calendars: [

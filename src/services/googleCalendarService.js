@@ -378,6 +378,9 @@ export const googleCalendar = {
       googleEventId: event.id,
       googleSummary: event.summary || '',
       estado: event.status === 'cancelled' ? 'cancelada' : 'programada',
+      // All day in Google: no real time (09:00 is a placeholder), so no
+      // reminders, and a push leaves its dates alone
+      allDay: !!timing.allDay,
       notasCliente: event.description || '',
       lastSyncedAt: nowISO(),
       sourceCalendarId: sourceCalendarId || null,
@@ -533,6 +536,8 @@ export const googleCalendar = {
   async _pushOne(token, calId, c) {
     const pushedAt = nowISO();
     const event = this.consultationToEvent(c, useStore.getState().clients);
+    // An all-day event keeps its all-day dates in Google (PATCH without start/end)
+    if (c.allDay) event.keep_remote_times = true;
     if (!notesGoToGoogle(useStore.getState().config.googleCalendar, calId)) {
       // Not shared: Google keeps the description it has (PATCH without it)
       event.description = null;
@@ -996,9 +1001,12 @@ export const googleCalendar = {
     // Created by NutriPolo (another device or a lost response): its patient is
     // already in the title, never guessed again.
     const match = ev.nutripolo_id ? null : this._resolvePatient(ev, ctx, partial);
+    // Imported again after "reset agenda": what was already sent stays sent
+    const sent = useStore.getState().takeSentStatus?.(ev.id);
     const newC = useStore.getState().addConsultation({
       ...partial,
       clienteId: null,
+      ...(sent || {}),
       ...extra,
       remoteUpdated: ev.updated || nowISO(),
       ...(match?.fields || {}),

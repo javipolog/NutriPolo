@@ -152,6 +152,20 @@ function partWritten(name) {
   }
 }
 
+/**
+ * Before a new version migrates the data, keep it as it was in the safety
+ * copy ("previous copy" in Settings and on the load error screen): a
+ * migration with a mistake would otherwise be saved over it, and the daily
+ * backups would go through the same migration on restore.
+ */
+async function saveBeforeUpdate(state, version) {
+  if (!Number.isInteger(version) || version >= STORE_VERSION || !state || !hasData(state)) return;
+  try {
+    await invoke('save_data', { key: SAFETY_BACKUP_KEY, value: JSON.stringify({ version, date: new Date().toISOString(), data: state }) });
+    await invoke('save_data', { key: SAFETY_INFO_KEY, value: JSON.stringify({ date: new Date().toISOString(), reason: 'update' }) });
+  } catch { /* outside Tauri, or the disk: the load goes on */ }
+}
+
 // Persist storage for zustand (objects in, objects out).
 const tauriStorage = {
   // A JSON parse error throws: the persist middleware reports it as a load failure.
@@ -171,7 +185,7 @@ const tauriStorage = {
     if (raw == null) { startOver(); return null; }   // first launch (or loadFailure)
     const main = JSON.parse(raw);
     // Single file (before v1.19): the next change writes every part
-    if (!main?.split) { startOver(); return main; }
+    if (!main?.split) { startOver(); await saveBeforeUpdate(main?.state, main?.version); return main; }
     const state = { ...main.state };
     for (const part of STORE_PARTS) {
       const partRaw = await loadRaw(part.key);
@@ -191,6 +205,7 @@ const tauriStorage = {
     }
     splitReady = true;
     for (const part of STORE_PARTS) lastDeps[part.key] = part.deps(state);
+    await saveBeforeUpdate(state, main.version);
     storeLoaded = true;
     return { ...main, state };
   },
@@ -1063,8 +1078,11 @@ function buildClientDeletion(s, id) {
   const consultations = s.consultations.flatMap(c => {
     if (c.clienteId === id) {
       if (!c.googleEventId) return [];
+      // Kept so the next pull does not import it again, but without the
+      // patient's notes (undo brings them back from the snapshot).
       // matchedBy 'user': the sync must not propose the deleted patient again.
-      return [{ ...c, clienteId: null, matchStatus: 'unknown', matchedBy: 'user', suggestedClienteId: undefined, matchScore: undefined }];
+      return [{ ...c, clienteId: null, matchStatus: 'unknown', matchedBy: 'user', suggestedClienteId: undefined, matchScore: undefined,
+        notasPrivadas: '', notasCliente: '' }];
     }
     if (c.suggestedClienteId === id) {
       return [{ ...c, suggestedClienteId: undefined, matchScore: undefined, matchStatus: 'suggested' }];
@@ -1472,6 +1490,11 @@ const useStore = create(
         const isSyncOp = sync;
         const data = isSyncOp ? input : withoutSyncFields(input);
         const extra = isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() };
+        // An all-day event the user gives a date or time becomes a timed appointment
+        const before = get().consultations.find(c => c.id === id);
+        if (!isSyncOp && before?.allDay && ((data.hora && data.hora !== before.hora) || (data.fecha && data.fecha !== before.fecha))) {
+          extra.allDay = false;
+        }
 
         // Hook: if a user manually changes clienteId on a consultation matched by
         // the sync (pending review, or linked automatically), flip matchStatus to
@@ -1504,13 +1527,34 @@ const useStore = create(
           }));
         }
       },
-      resetAgenda: (onlyGoogleSynced = false) => set(s => ({
-        consultations: onlyGoogleSynced
-          ? s.consultations.filter(c => !c.googleEventId)
-          : [],
-        _history: [],
-        _future: [],
-      })),
+      // Reminders and review requests already sent are remembered by Google
+      // event, so the next sync does not import those appointments as if
+      // nothing had been sent (see takeSentStatus).
+      resetAgenda: (onlyGoogleSynced = false) => set(s => {
+        const sent = { ...(s.sentByEvent || {}) };
+        for (const c of s.consultations) {
+          if (c.googleEventId && (c.reminders || c.reviewRequest)) {
+            sent[c.googleEventId] = { reminders: c.reminders, reviewRequest: c.reviewRequest };
+          }
+        }
+        return {
+          consultations: onlyGoogleSynced ? s.consultations.filter(c => !c.googleEventId) : [],
+          sentByEvent: sent,
+          _history: [],
+          _future: [],
+        };
+      }),
+      sentByEvent: {},
+      // The sent status remembered for a Google event, once (it is dropped).
+      takeSentStatus: (googleEventId) => {
+        const status = get().sentByEvent?.[googleEventId];
+        if (!status) return null;
+        set(s => ({ sentByEvent: omit(s.sentByEvent, googleEventId) }));
+        return status;
+      },
+      // Copy of the current data before something that cannot be undone
+      // (reset the agenda, turn a calendar's appointments into personal events)
+      saveSafetyBackup: () => saveSafetyBackup(get()),
 
       removeConsultationsForCalendar: (calendarId) => set(s => ({
         consultations: s.consultations.filter(c => c.sourceCalendarId !== calendarId),
@@ -2439,6 +2483,7 @@ const useStore = create(
           emailTemplates: s.emailTemplates,
           planLibrary: s.planLibrary,
           lastBackupDate: s.lastBackupDate,
+          sentByEvent: s.sentByEvent,
           sidebarCollapsed: s.sidebarCollapsed,
           appTheme: s.appTheme,
           clientFilters: s.clientFilters,

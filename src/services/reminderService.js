@@ -155,6 +155,8 @@ export function getReminderCandidates({ consultations, clients, config, now = Da
   const entries = [];
   for (const consultation of consultations || []) {
     if (consultation.estado !== 'programada') continue;
+    // All day in Google: its 09:00 is a placeholder, not an appointment time
+    if (consultation.allDay) continue;
     const start = consultationStart(consultation);
     if (!start) continue;
     const ms = start.getTime() - now;
