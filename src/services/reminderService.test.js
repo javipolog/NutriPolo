@@ -161,4 +161,14 @@ describe('resolveTemplate', () => {
     });
     expect(out).toBe('jueves|C/ Mayor 1|45 min');
   });
+  it('leaves out what it has nothing to say about, instead of a "—"', () => {
+    const noLocation = consult({ locationId: undefined });
+    const out = resolveTemplate('Tu cita es a las {{citaHora}} en {{citaUbicacio}}.\n📍 Lugar: {{citaUbicacio}}\n🗂 Tipo: {{citaTipus}}\nHasta pronto', {
+      consultation: noLocation, config, lang: 'es',
+    });
+    expect(out).toBe('Tu cita es a las 09:30.\nHasta pronto');
+    // With a location everything stays
+    expect(resolveTemplate('en {{citaUbicacio}}.\nLugar: {{citaUbicacio}}', { consultation: consult(), config }))
+      .toBe('en Centro.\nLugar: Centro');
+  });
 });

@@ -118,3 +118,5 @@ Quitando los solapes, quedan unos 140 problemas distintos. Abajo están agrupado
 **Fase 5 — UX y mantenimiento (continuo)** — ✅ primera tanda (rama `claude/auditoria-fase5`): top 10 de UX salvo enviar desde el editor de planificación, CI con tests, limpieza de restos
 - Las 10 mejoras de más impacto por esfuerzo del informe 06: acceso directo a la ficha desde la agenda, modo oscuro, búsqueda sin acentos, WhatsApp "abierto" en vez de "enviado"…
 - CI con tests antes de cada release, ESLint, partir los ficheros grandes, limpiar el código muerto, poner al día `CLAUDE.md` y `README.md`.
+
+**Fase 6 — Hallazgos medios con más impacto** — ✅ hecha (rama `claude/auditoria-fase6`): rutas de documentos con `:`, `envPrefix`, IMC con la altura actual y altura en metros, miles en kcal, energía del último pesaje con peso, ficha nueva sin nivel de actividad y saltando al error, plantillas sin «—», citas importadas sin valores por defecto ni tipo técnico, aviso honesto de adjunto sin SMTP, errores de email legibles, enviar la planificación por email desde su editor.

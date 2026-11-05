@@ -514,7 +514,8 @@ describe('patient matching', () => {
   it('assigns a unique exact name', async () => {
     remote('e1', 'Consulta - Marcos Prieto');
     await sync();
-    expect(byEvent('e1')).toMatchObject({ clienteId: 'marcos', matchedVia: 'name', tipo: 'Google Calendar' });
+    expect(byEvent('e1')).toMatchObject({ clienteId: 'marcos', matchedVia: 'name' });
+    expect(byEvent('e1').tipo).toBeFalsy();
   });
 
   it('does not assign a name shared by two clients: asks instead', async () => {

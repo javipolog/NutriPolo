@@ -8,6 +8,7 @@ import {
   sendPlanEmail, sendAppointmentReminder, sendEmailSMTP, openMailClient, buildSmtpConfig,
 } from '../services/emailService';
 import { getReminderConfig, clientLanguage } from '../services/reminderService';
+import { reminderErrorText } from '../hooks/useReminderActions';
 import { useT } from '../i18n';
 
 const MODES = [
@@ -157,7 +158,7 @@ export const SendEmailModal = ({
         onSent?.({ mode, manual: !useSmtp });
         onClose();
       } else {
-        toast.error(result?.error || t.email_send_error);
+        toast.error(result?.error ? reminderErrorText(result.error, t) : t.email_send_error);
       }
     } catch (e) {
       toast.error(errMsg(e) || t.error_unknown);
@@ -290,11 +291,16 @@ export const SendEmailModal = ({
           </label>
         </div>
 
-        {(pdfBytes || docPdfBytes) && (
+        {(pdfBytes || docPdfBytes) && (useSmtp ? (
           <p className="text-xs text-wellness-600 bg-wellness-50 px-3 py-1.5 rounded-button">
             {t.email_pdf_ready} {docRecord?.fileName ? `(${docRecord.fileName})` : ''}
           </p>
-        )}
+        ) : (
+          // Without SMTP the mail client opens from a link, which cannot carry a file
+          <p className="text-xs text-warning bg-warning-light px-3 py-1.5 rounded-button">
+            {t.email_pdf_manual}
+          </p>
+        ))}
       </div>
     </Modal>
   );
