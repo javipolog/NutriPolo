@@ -90,6 +90,7 @@ nutripolo-app/
 │   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
 │   │   ├── fuzzyMatcher.js           # Quin pacient es cada cita importada (pur, amb tests)
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
+│   │   ├── invoicing.js              # Factures: esborrany → emesa, rectificatives, llibre d'ingressos (pur, amb tests)
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
 │   │   ├── pdfPlanificacionGenerator.js # PDF de la planificació (substitueix Canva; Onest + icones Lucide)
@@ -257,6 +258,14 @@ fn cancel_quit()                                      // el JS es queda obert (c
 - Email automatic per SMTP des de `useBackgroundJobs` (cada 5 min, nomes amb l'app en marxa); WhatsApp semiautomatic via wa.me
 - Ressenya de Google despres de la consulta: `config.reviewRequests` (defectes a `DEFAULT_REVIEW_CONFIG`): primera visita / seguiment (per historial del client), enllac i interruptor per ubicacio (`locations[id]`, si no `defaultUrl`), `delayHours` despres del final. Estat a `consultation.reviewRequest.{email|whatsapp}`; nomes un cop per client (`already_asked`); opt-out a `client.recordatorios.review`
 - Segon pla: en tancar la finestra l'app queda a la safata (`config.closeToTray`) i pot arrencar amb Windows amagada (`--hidden`); instancia unica (tauri-plugin-single-instance). Amb xifratge cal desbloquejar abans que s'envii res
+
+### Facturació
+- Regles a `services/invoicing.js` (pures, amb tests). Una factura és **esborrany** (sense número, editable i esborrable) fins que s'**emet** (`issueInvoice`): llavors pren el número següent de la seva sèrie i any (`NP-AAAA-NNN`, rectificatives `R-AAAA-NNN`) i desa les dades de l'emissora i de la clienta tal com són aquell dia (`emisor`, `destinatario`). El PDF d'una emesa surt sempre d'aquestes dades, encara que la fitxa canviï o s'esborri
+- Una emesa no s'edita ni s'esborra: només `PAYMENT_FIELDS` (estat de cobrament, `fechaCobro`, forma de pagament). Per corregir-la: «Rectificar» (`createCorrectiveDraft`, línies en negatiu i `motivoRectificacion`); si l'anul·la sencera, l'original passa a `anulada` i allibera les seves consultes (`billedConsultationIds`)
+- Abans d'emetre (`issueProblems`): NIF propi; amb IRPF, NIF i adreça de la clienta; data no anterior a l'última de la sèrie; motiu a les rectificatives
+- IVA 0 % → menció d'exempció al PDF (`config.textoExencionIva`, si és buit `DEFAULT_VAT_EXEMPTION_TEXT`). IBAN a Ajustos (`isValidIban`), surt amb transferència
+- Llibre d'ingressos en CSV (`incomeBookCsv`: `;`, coma decimal, BOM) i xifres del període per any/trimestre (`periodTotals`; les anul·lades a mà d'abans de la v17 no compten). La migració v17 dona per emeses les factures anteriors amb les dades d'aquell moment
+- Pendent de decidir amb el gestor: VeriFactu, mòdul de despeses, bons/packs vinculats a consultes, model 347
 
 ### Planificacions (dietes setmanals)
 - Format nou: `nutritionPlans` amb `formato: 'planificacion'` (model a `planificacion.js`); els plans sense `formato` són els antics per àpats i conserven el seu editor i PDF

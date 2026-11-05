@@ -15,6 +15,7 @@ import { useChartTheme } from '../hooks/useChartTheme';
 import { ConsultationModal } from './ConsultationModal';
 import { ClientModal } from './ClientModal';
 import { InvoiceModal } from './InvoiceModal';
+import { billedConsultationIds } from '../services/invoicing';
 import { PlanEditorModal } from './NutritionPlanEditor';
 import { useT, useLocale, plural } from '../i18n';
 
@@ -631,13 +632,13 @@ export const Dashboard = () => {
         };
     }, [clients]);
 
-    // Unbilled consultations (exclude pending-confirm — not yet assigned to a client)
+    // Unbilled consultations: only those with a client (the ones an invoice can
+    // take), and a cancelled invoice frees its consultations (billedConsultationIds)
     const unbilledCount = useMemo(() => {
-        const billedIds = new Set(
-            invoices.flatMap(inv => (inv.items || []).map(item => item.consultationId).filter(Boolean))
-        );
+        const billedIds = billedConsultationIds(invoices);
         return consultations.filter(c =>
           c.estado === 'completada' &&
+          c.clienteId &&
           !billedIds.has(c.id) &&
           c.matchStatus !== 'auto-pending-review'
         ).length;
@@ -671,8 +672,9 @@ export const Dashboard = () => {
     const revenueChart = useMemo(() =>
         last6.map(({ year, month, label }) => {
             const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+            // "Collected": counted in the month it was paid (fechaCobro), not issued
             const total = invoices
-                .filter(i => i.estado === 'pagada' && i.fecha?.startsWith(prefix))
+                .filter(i => i.estado === 'pagada' && (i.fechaCobro || i.fecha)?.startsWith(prefix))
                 .reduce((s, i) => s + (i.total || i.importe || 0), 0);
             return { label, value: total };
         })

@@ -6,6 +6,10 @@ import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderServi
 import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes, replaceSeedRecipes } from '../services/planificacion.js';
 import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
 import RECETAS_V15_A_NUEVAS from '../data/recetasPlanificacionesV15.json';
+import {
+  isIssued, isCorrective, issuerSnapshot, recipientSnapshot, nextInvoiceNumber, issueProblems, issueFields,
+  correctiveDraft, cancelsInFull, billedConsultationIds, PAYMENT_FIELDS, SERIES,
+} from '../services/invoicing.js';
 
 // ============================================
 // TAURI STORAGE — Write queue amb debounce
@@ -260,26 +264,25 @@ export function computeInvoiceTotals(items = [], ivaPct = 0, irpfPct = 0) {
 // ============================================
 // INVOICE NUMBERING
 // ============================================
-const INVOICE_SERIES_RE = /^(NP-\d{4}-)(\d+)$/;
-
-/** Sequence number of `numero` within the series `prefix` (NP-YYYY-), or 0. */
-function invoiceSeq(numero, prefix) {
-  const m = INVOICE_SERIES_RE.exec(numero || '');
-  return m && m[1] === prefix ? parseInt(m[2], 10) : 0;
-}
-
 /**
- * Invoice numbers must stay correlative, without gaps: only the last invoice
- * of its series can be deleted (its number is then reused). Any other one is
- * cancelled (`anulada`) instead. Numbers outside the NP-YYYY-NNN series are
- * free to delete.
+ * Only a draft can be deleted: it has no number yet, so no gap is left.
+ * An issued invoice is corrected with a corrective invoice instead
+ * (see services/invoicing.js).
  */
 export function canDeleteInvoice(invoices, invoice) {
-  const m = INVOICE_SERIES_RE.exec(invoice?.numero || '');
-  if (!m) return true;
-  const seq = parseInt(m[2], 10);
-  return !(invoices || []).some(i => i.id !== invoice.id && invoiceSeq(i.numero, m[1]) > seq);
+  return !!invoice && !isIssued(invoice);
 }
+
+const invoiceTotalsFields = (inv) => {
+  const items = inv.items || [];
+  const totals = computeInvoiceTotals(items, inv.ivaPct ?? 0, inv.irpfPct ?? 0);
+  return {
+    ...totals,
+    // backward-compat fields
+    concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
+    importe: totals.total,
+  };
+};
 
 // ============================================
 // DEFAULT DATA
@@ -304,7 +307,7 @@ export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [], alimentos: {} };
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 16;
+const STORE_VERSION = 17;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -332,6 +335,19 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 17 && Array.isArray(s.invoices)) {
+    // v16 → v17: draft → issued. Every invoice so far was handed out when it
+    // was created, so it counts as issued, with the issuer's and client's
+    // data as they are now (the closest there is to the day it was issued).
+    const clientsById = new Map((s.clients || []).map(c => [c.id, c]));
+    const emisor = issuerSnapshot(s.config || {});
+    s.invoices = s.invoices.map(inv => (inv.emitidaAt ? inv : {
+      ...inv,
+      emitidaAt: inv.fecha ? `${inv.fecha}T12:00:00.000Z` : new Date().toISOString(),
+      emisor,
+      destinatario: recipientSnapshot(clientsById.get(inv.clienteId) || {}),
+    }));
+  }
   if (version === 15 && Array.isArray(s.planLibrary?.recetas)) {
     // v15 → v16: les receptes de Canva que va sembrar la v1.18.0 i que no
     // s'han tocat passen a la versió neta (errates, unitats, duplicats fusionats).
@@ -1106,6 +1122,9 @@ const useStore = create(
       config: {
         nombre: 'Raquel Polo García',
         nif: '',
+        iban: '',
+        // Wording of the VAT exemption on invoices ('' = DEFAULT_VAT_EXEMPTION_TEXT)
+        textoExencionIva: '',
         numColegiada: 'CV01944',
         email: 'nutripoloraquel@gmail.com',
         telefono: '+34 622 573 834',
@@ -1834,77 +1853,79 @@ const useStore = create(
       // ---- INVOICES ----
       invoices: [],
 
-      // Next number of the series of the invoice date's year (NP-YYYY-NNN),
-      // derived from the invoices list. Self-healing: tolerates imports and
-      // year rollovers without a persisted counter to keep in sync.
-      generateInvoiceNumber: (fecha) => {
-        const year = /^\d{4}/.test(fecha || '') ? fecha.slice(0, 4) : String(new Date().getFullYear());
-        const prefix = `NP-${year}-`;
-        const maxSeq = (get().invoices || []).reduce((max, inv) => {
-          const n = invoiceSeq(inv?.numero, prefix);
-          return n > max ? n : max;
-        }, 0);
-        return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+      // Next number of a series for the year of `fecha` (NP-YYYY-NNN, R-YYYY-NNN).
+      generateInvoiceNumber: (fecha, serie = SERIES.ordinaria) => nextInvoiceNumber(get().invoices || [], fecha, serie),
+
+      // Create (no id) or update a draft. A draft has no number: it gets one
+      // when it is issued. Returns the saved draft.
+      saveInvoiceDraft: (data, id = null) => {
+        const existing = id ? get().invoices.find(i => i.id === id) : null;
+        if (existing && isIssued(existing)) return existing;
+        const { numero, emitidaAt, emisor, destinatario, ...fields } = data;
+        const draft = {
+          ...(existing || {}),
+          ...fields,
+          id: existing?.id || generateId(),
+          estado: fields.estado || existing?.estado || 'pendiente',
+          items: fields.items || existing?.items || [],
+          ivaPct: fields.ivaPct ?? existing?.ivaPct ?? 0,
+          irpfPct: fields.irpfPct ?? existing?.irpfPct ?? 0,
+        };
+        const saved = { ...draft, ...invoiceTotalsFields(draft) };
+        set(s => ({ invoices: existing ? s.invoices.map(i => (i.id === saved.id ? saved : i)) : [...s.invoices, saved] }));
+        return saved;
       },
 
-      addInvoice: (invoice) => {
-        let numero = invoice.numero || get().generateInvoiceNumber(invoice.fecha);
-        // Defensive: if the caller supplied a number that collides with an
-        // existing invoice (e.g. manual edit), regenerate to avoid duplicates.
-        if (get().invoices.some(i => i.numero === numero)) {
-          console.warn(`[addInvoice] Duplicate invoice number "${numero}" detected, regenerating`);
-          numero = get().generateInvoiceNumber(invoice.fecha);
-        }
-        const items = invoice.items || [];
-        const ivaPct = invoice.ivaPct ?? 0;
-        const irpfPct = invoice.irpfPct ?? 0;
-        const totals = computeInvoiceTotals(items, ivaPct, irpfPct);
-        const newI = {
-          ...invoice,
-          id: generateId(),
-          numero,
-          estado: invoice.estado || 'pendiente',
-          items,
-          ivaPct,
-          irpfPct,
-          ...totals,
-          // backward-compat fields
-          concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
-          importe: totals.total,
-        };
-        set(s => ({ invoices: [...s.invoices, newI] }));
-        return newI;
+      // Issue a draft: next number of its series, the issuer's and client's
+      // data frozen, and no more edits. Returns { ok, invoice } or
+      // { ok: false, problems } (see issueProblems).
+      issueInvoice: (id) => {
+        const s = get();
+        const draft = s.invoices.find(i => i.id === id);
+        if (!draft) return { ok: false, problems: [{ code: 'not_found' }] };
+        if (isIssued(draft)) return { ok: true, invoice: draft };
+        const client = s.clients.find(c => c.id === draft.clienteId);
+        const problems = issueProblems(draft, client, s.config, s.invoices);
+        if (problems.length) return { ok: false, problems };
+        const invoice = { ...draft, ...issueFields(draft, client, s.config, s.invoices, new Date().toISOString()) };
+        const original = isCorrective(invoice) ? s.invoices.find(i => i.id === invoice.rectificaA) : null;
+        set(st => ({
+          invoices: st.invoices.map(i => {
+            if (i.id === invoice.id) return invoice;
+            if (original && i.id === original.id) {
+              return {
+                ...i,
+                rectificadaPor: [...(i.rectificadaPor || []), invoice.id],
+                // Cancelled in full: its consultations can be billed again
+                ...(cancelsInFull(invoice, i) ? { estado: 'anulada' } : {}),
+              };
+            }
+            return i;
+          }),
+        }));
+        return { ok: true, invoice };
       },
+
+      // Draft of a corrective invoice for an issued one (full cancellation
+      // to start with; its lines can be edited). Returns the draft.
+      createCorrectiveDraft: (id) => {
+        const original = get().invoices.find(i => i.id === id);
+        if (!original || !isIssued(original) || isCorrective(original)) return null;
+        return get().saveInvoiceDraft(correctiveDraft(original, { fecha: todayISO(), generateId }));
+      },
+
+      // A draft takes any change; an issued invoice only how and when it was
+      // paid (PAYMENT_FIELDS), and is never set to "anulada" by hand.
       updateInvoice: (id, data) => {
         const existing = get().invoices.find(i => i.id === id);
         if (!existing) return;
-        // Duplicate numero check: reject a change that would collide
-        // with another invoice's number (fiscal audit integrity).
-        let safeData = data;
-        if (data.numero && data.numero !== existing.numero) {
-          const dup = get().invoices.some(i => i.id !== id && i.numero === data.numero);
-          if (dup) {
-            if (import.meta.env.DEV) {
-              console.warn(`[updateInvoice] Duplicate numero "${data.numero}" — keeping previous "${existing.numero}"`);
-            }
-            safeData = { ...data, numero: existing.numero };
-          }
-        }
-        const merged = { ...existing, ...safeData };
-        const items = merged.items || [];
-        const ivaPct = merged.ivaPct ?? 0;
-        const irpfPct = merged.irpfPct ?? 0;
-        const totals = computeInvoiceTotals(items, ivaPct, irpfPct);
-        const updated = {
-          ...merged,
-          ...totals,
-          concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
-          importe: totals.total,
-        };
-        set(s => ({ invoices: s.invoices.map(i => i.id === id ? updated : i) }));
+        if (!isIssued(existing)) { get().saveInvoiceDraft(data, id); return; }
+        const allowed = Object.fromEntries(Object.entries(data).filter(([k]) => PAYMENT_FIELDS.includes(k)));
+        if (allowed.estado === 'anulada' && existing.estado !== 'anulada') delete allowed.estado;
+        set(s => ({ invoices: s.invoices.map(i => (i.id === id ? { ...i, ...allowed } : i)) }));
       },
-      // Only the last invoice of a series can be deleted (see canDeleteInvoice).
-      // Returns whether it was deleted.
+
+      // Only drafts can be deleted (see canDeleteInvoice). Returns whether it was deleted.
       deleteInvoice: (id) => {
         const item = get().invoices.find(i => i.id === id);
         if (!item || !canDeleteInvoice(get().invoices, item)) return false;
@@ -1918,9 +1939,7 @@ const useStore = create(
 
       getUnbilledConsultations: (clienteId) => {
         const { consultations, invoices } = get();
-        const billedIds = new Set(
-          invoices.flatMap(inv => (inv.items || []).map(item => item.consultationId).filter(Boolean))
-        );
+        const billedIds = billedConsultationIds(invoices);
         return consultations.filter(c =>
           c.clienteId === clienteId &&
           c.estado === 'completada' &&

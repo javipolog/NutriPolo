@@ -13,6 +13,7 @@ import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar, formatSyncStats, formatSyncErrors } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { RemindersSection } from './settings/RemindersSection';
+import { isValidIban, formatIban, DEFAULT_VAT_EXEMPTION_TEXT } from '../services/invoicing';
 import { invoke } from '@tauri-apps/api/tauri';
 
 // ── Locations CRUD ─────────────────────────────────────────────────────────
@@ -1942,6 +1943,30 @@ export const SettingsView = () => {
         <div>
           <label htmlFor="cfg-direccion" className="block text-xs font-medium text-sage-600 mb-1">{t.client_street}</label>
           <Textarea id="cfg-direccion" value={config.direccion || ''} onChange={e => set('direccion', e.target.value)} rows={2} />
+        </div>
+        <div>
+          <label htmlFor="cfg-iban" className="block text-xs font-medium text-sage-600 mb-1">IBAN</label>
+          <Input
+            id="cfg-iban"
+            value={config.iban || ''}
+            onChange={e => set('iban', e.target.value.toUpperCase())}
+            onBlur={e => { if (isValidIban(e.target.value)) set('iban', formatIban(e.target.value)); }}
+            placeholder="ES00 0000 0000 0000 0000 0000"
+            error={config.iban && !isValidIban(config.iban) ? t.settings_iban_invalid : undefined}
+            className="font-mono"
+          />
+          <p className="text-[11px] text-sage-500 mt-1">{t.settings_iban_hint}</p>
+        </div>
+        <div>
+          <label htmlFor="cfg-exencion" className="block text-xs font-medium text-sage-600 mb-1">{t.settings_vat_exemption}</label>
+          <Textarea
+            id="cfg-exencion"
+            value={config.textoExencionIva || ''}
+            onChange={e => set('textoExencionIva', e.target.value)}
+            rows={2}
+            placeholder={DEFAULT_VAT_EXEMPTION_TEXT}
+          />
+          <p className="text-[11px] text-sage-500 mt-1">{t.settings_vat_exemption_hint}</p>
         </div>
       </Section>
 
