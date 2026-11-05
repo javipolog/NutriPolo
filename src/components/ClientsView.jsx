@@ -53,9 +53,13 @@ export const ClientsView = () => {
   const handleDelete = async (client) => {
     const ok = await confirm({ message: t.client_confirm_delete.replace('{name}', client.nombre), danger: true, confirmText: t.delete });
     if (!ok) return;
+    // Its PDFs are deleted from disk for good: "Undo" would bring back the
+    // record without them, so it is only offered to a client without documents
+    const hadDocuments = (useStore.getState().clientDocuments || []).some(d => d.clienteId === client.id);
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);
-    toast.success(t.client_deleted, 8000, { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_client', client.id) });
+    toast.success(t.client_deleted, 8000, hadDocuments ? undefined
+      : { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_client', client.id) });
   };
 
   const openWhatsApp = async (client) => {
