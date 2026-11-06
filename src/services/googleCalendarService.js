@@ -1115,7 +1115,12 @@ export const googleCalendar = {
       }
     }
 
+    // An event that is still a consultation here (e.g. restored from the copy
+    // taken before converting this calendar) is not mirrored a second time.
+    const asConsultation = new Set(store.consultations.map(c => c.googleEventId).filter(Boolean));
+
     for (const ev of [...fetched.active, ...moved]) {
+      if (asConsultation.has(ev.id)) continue;
       const partial = this.eventToPersonalEvent(ev, calId);
       if (!partial) continue;
       const existing = existingByGoogleId[ev.id];

@@ -83,6 +83,15 @@ describe('parseRecipePage', () => {
     expect(p.ingredientes).toEqual(['Arroz', 'Pollo']);
   });
 
+  it('accepts headings that start with "Ingredientes"', () => {
+    const page = (h) => `<main><h1>X</h1><h2 class="t"><span>${h}</span></h2><ul><li>Arroz</li></ul><h2>Preparación</h2><ul><li>Cocer</li></ul></main>`;
+    expect(parseRecipePage(page('Ingredientes (4 personas)')).ingredientes).toEqual(['Arroz']);
+    expect(parseRecipePage(page('Ingredientes para la masa:')).ingredientes).toEqual(['Arroz']);
+    expect(parseRecipePage(page('Ingredientes (4 personas)')).preparacion).toEqual(['Cocer']);
+    // Another word that only starts the same is not the section
+    expect(parseRecipePage(page('Ingredientesx')).ingredientes).toEqual([]);
+  });
+
   it('returns empty data for an unknown layout', () => {
     expect(parseRecipePage('<main><p>Hola</p></main>')).toEqual({ ingredientes: [], preparacion: [], minutos: null, descripcion: '', etiquetas: [] });
   });
@@ -113,6 +122,13 @@ describe('isStale', () => {
     const syncedAt = new Date(now - 1000).toISOString();
     expect(isStale({ syncedAt, items: [{ ingredientes: ['x'] }, { ingredientes: [] }] }, now)).toBe(true);
     expect(isStale({ syncedAt, items: [{ ingredientes: ['x'] }] }, now)).toBe(false);
+  });
+
+  it('a recipe read without ingredients is not pending, so it is not downloaded at every sync', () => {
+    const now = Date.parse('2026-10-29T12:00:00Z');
+    const syncedAt = new Date(now - 1000).toISOString();
+    expect(isDetailPending({ ingredientes: [], leida: true })).toBe(false);
+    expect(isStale({ syncedAt, items: [{ ingredientes: [], leida: true }] }, now)).toBe(false);
   });
 });
 

@@ -165,7 +165,7 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
     const push = (fecha, item) => { (map[fecha] ||= []).push(item); };
     consultations.forEach(c => {
       const start = toMinutes(c.hora);
-      if (Number.isNaN(start)) return;
+      if (c.allDay || Number.isNaN(start)) return;
       push(c.fecha, { kind: 'consultation', id: c.id, data: c, start, end: start + (Number(c.duracion) || defaultDuration) });
     });
     (personalEvents || []).forEach(e => {
@@ -177,12 +177,14 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
     return map;
   }, [consultations, personalEvents, defaultDuration]);
 
-  // All-day personal events (birthdays, holidays...) get their own row
+  // All-day events (birthdays, holidays, an all-day appointment from Google)
+  // get their own row: their 09:00 is a placeholder, not a time
   const allDayByDay = useMemo(() => {
     const map = {};
+    consultations.forEach(c => { if (c.allDay) (map[c.fecha] ||= []).push({ ...c, __kind: 'consultation' }); });
     (personalEvents || []).forEach(e => { if (e.allDay) (map[e.fecha] ||= []).push(e); });
     return map;
-  }, [personalEvents]);
+  }, [consultations, personalEvents]);
   const hasAllDay = days.some(d => allDayByDay[toISO(d)]?.length);
 
   // 8–20 by default, widened so early/late appointments are never hidden.
@@ -256,10 +258,10 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
               : `${STATUS_BG[c.estado] || STATUS_BG.programada} ${locColor}`
         }`}
         style={(!matchVisual && cStyle) || undefined}
-        title={[matchVisual ? matchVisual.tooltip : `${c.hora} · ${name}${c.tipo ? ` — ${c.tipo}` : ''} · ${t[`status_${c.estado}`] || c.estado}`, sync?.tooltip].filter(Boolean).join('\n')}
+        title={[matchVisual ? matchVisual.tooltip : `${c.allDay ? t.calendar_all_day : c.hora} · ${name}${c.tipo ? ` — ${c.tipo}` : ''} · ${t[`status_${c.estado}`] || c.estado}`, sync?.tooltip].filter(Boolean).join('\n')}
       >
         <p className="truncate">
-          <span className="font-semibold tabular-nums">{c.hora}</span>{' '}
+          {!c.allDay && <><span className="font-semibold tabular-nums">{c.hora}</span>{' '}</>}
           {MatchIcon && <MatchIcon size={10} className="inline -mt-0.5 mr-0.5" aria-hidden="true" />}
           <span className="font-medium">{name}</span>
           {c.estado === 'completada' && <Check size={10} className="inline -mt-0.5 ml-1" aria-label={t.status_completada} />}
@@ -304,7 +306,9 @@ const WeekView = ({ weekStart, consultations, personalEvents, clients, config, c
               <div className="text-[11px] text-sage-500 text-right pr-2 py-1 self-center">{t.calendar_all_day}</div>
               {days.map(d => (
                 <div key={toISO(d)} className="border-l border-t border-sage-200 p-0.5 space-y-0.5 min-w-0">
-                  {(allDayByDay[toISO(d)] || []).map(e => (
+                  {(allDayByDay[toISO(d)] || []).map(e => e.__kind === 'consultation' ? (
+                    <div key={e.id} className="h-5">{renderConsultation({ data: e, start: 0, end: 0 })}</div>
+                  ) : (
                     <p key={e.id} className="truncate rounded-[4px] px-1.5 text-[11px] bg-sage-200/60 text-sage-700 italic" title={`[${t.personal_event_prefix}] ${e.title}`}>
                       {e.title}
                     </p>
@@ -476,7 +480,7 @@ const MonthView = ({ monthStart, consultations, personalEvents, clients, calColo
                       style={(!matchVisual && cStyle) || undefined}
                       title={matchVisual ? matchVisual.tooltip : undefined}
                     >
-                      {c.hora && <span className="font-medium mr-0.5">{c.hora}</span>}
+                      {c.hora && !c.allDay && <span className="font-medium mr-0.5">{c.hora}</span>}
                       {matchVisual
                         ? <>{MatchIcon && <MatchIcon size={8} className="inline mb-0.5 mr-0.5" />}{c.googleSummary?.replace(/^Consulta\s*-\s*/i, '')?.split(' ')[0] || '?'}</>
                         : (client?.nombre?.split(' ')[0] || c.googleSummary || '?')
@@ -531,10 +535,10 @@ const ListView = ({ consultations, clients, config, calColorMap, onEdit }) => {
                 >
                   {c.hora && (
                     <div className="text-center w-14 shrink-0">
-                      <p className="text-sm font-bold" style={cColor ? { color: cColor } : undefined}>
-                        {c.hora}
+                      <p className={c.allDay ? 'text-[11px] font-semibold leading-tight' : 'text-sm font-bold'} style={cColor ? { color: cColor } : undefined}>
+                        {c.allDay ? t.calendar_all_day : c.hora}
                       </p>
-                      {c.duracion && <p className="text-[11px] text-sage-400">{c.duracion}m</p>}
+                      {c.duracion && !c.allDay && <p className="text-[11px] text-sage-400">{c.duracion}m</p>}
                     </div>
                   )}
                   <div className="flex-1 min-w-0">

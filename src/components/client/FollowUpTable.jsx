@@ -136,10 +136,11 @@ export const FollowUpTable = ({ client, measurements }) => {
         data-select="all"
         value={m?.[row.key]}
         locale={locale}
-        placeholder={suggestion != null ? formatNumber(suggestion, locale, 1) : ''}
+        // "≈" and italics: a calculated hint, not a saved value
+        placeholder={suggestion != null ? `≈ ${formatNumber(suggestion, locale, 1)}` : ''}
         title={suggestion != null ? t.seg_suggestion : undefined}
         onCommit={v => commit(col, row.key, v)}
-        className={CELL_CLASS}
+        className={`${CELL_CLASS} placeholder:italic`}
       />
     );
   };

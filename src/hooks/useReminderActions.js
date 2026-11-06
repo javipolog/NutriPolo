@@ -12,6 +12,7 @@ export function reminderErrorText(code, t) {
   const c = String(code || '');
   if (c.includes('no_phone')) return t.whatsapp_no_phone;
   if (c.includes('smtp_password')) return t.reminders_err_smtp_password;
+  if (c.includes('timeout')) return t.reminders_err_smtp_unsure;
   if (c.includes('smtp')) return `${t.reminders_send_failed} (SMTP: ${c})`;
   return `${t.reminders_send_failed}${c ? ` (${c})` : ''}`;
 }

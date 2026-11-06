@@ -70,9 +70,12 @@ export function parseRecipeList(json) {
 /** Text de cada <li> d'un tros d'HTML. */
 const listItems = (html) => [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map(m => textOf(m[1])).filter(Boolean);
 
-/** Bloc d'HTML des de l'encapçalament `name` fins al següent encapçalament. */
+/**
+ * Bloc d'HTML des de l'encapçalament que comença per `name` («Ingredientes»,
+ * «Ingredientes (4 personas)», «Ingredientes para la masa») fins al següent.
+ */
 function sectionAfter(html, name) {
-  const re = new RegExp(`<h[1-6][^>]*>\\s*${name}\\s*:?\\s*</h[1-6]>`, 'i');
+  const re = new RegExp(`<h([1-6])[^>]*>(?:\\s|<[^>]+>)*${name}(?![a-zà-ÿ])[\\s\\S]*?</h\\1>`, 'i');
   const m = re.exec(html);
   if (!m) return '';
   const rest = html.slice(m.index + m[0].length);
@@ -140,11 +143,16 @@ async function mapLimit(items, limit, fn) {
 
 /** Baixa i llegeix la pàgina d'una recepta de la llista. */
 export async function fetchWebRecipeDetail(r, { fetch = fetchText } = {}) {
-  return { ...r, ...parseRecipePage(await fetch(recipePath(r.url))) };
+  // `leida`: the page was read, even if no ingredients came out of it (so it
+  // is not taken as pending and downloaded again at every sync)
+  return { ...r, ...parseRecipePage(await fetch(recipePath(r.url))), leida: true };
 }
 
-/** Recepta de la llista amb els ingredients encara per baixar (o que va fallar). */
-export const isDetailPending = (r) => !r.ingredientes?.length;
+/**
+ * Recepta de la llista amb els ingredients encara per baixar (o que va fallar).
+ * Una sense ingredients d'abans de `leida` es torna a llegir un cop.
+ */
+export const isDetailPending = (r) => r.ingredientes == null || (!r.ingredientes.length && !r.leida);
 
 /**
  * Sincronitza amb la web. Reaprofita les receptes de `cache` que no han

@@ -300,6 +300,22 @@ describe('pull', () => {
     expect(google.calls).not.toContain('gcal_update_event'); // no echo back to Google
   });
 
+  it('a personal calendar does not mirror an event that is a consultation here', async () => {
+    const PERSONAL = 'personal-cal';
+    connect({ calendars: [
+      { id: CAL, name: 'NutriPolo', syncMode: 'bidirectional', purpose: 'primary' },
+      { id: PERSONAL, name: 'Personal', syncMode: 'readonly', purpose: 'personal' },
+    ] });
+    const event = (id, summary) => ({ id, summary, start_datetime: '2026-10-22T08:00:00Z', end_datetime: '2026-10-22T09:00:00Z', updated: stamp() });
+    cal(PERSONAL).set('g1', event('g1', 'Ana López'));
+    cal(PERSONAL).set('g2', event('g2', 'Ballet'));
+    // g1 came back as a consultation with a restored copy
+    useStore.setState({ consultations: [{ id: 'c1', clienteId: 'ana', googleEventId: 'g1', sourceCalendarId: PERSONAL, fecha: '2026-10-22', hora: '10:00', estado: 'programada' }], personalEvents: [] });
+    tick();
+    await googleCalendar.syncAll();
+    expect(useStore.getState().personalEvents.map(e => e.googleEventId)).toEqual(['g2']);
+  });
+
   it('follows an event moved outside the sync window', async () => {
     const c = newConsultation();
     await googleCalendar.pushConsultation(c.id);

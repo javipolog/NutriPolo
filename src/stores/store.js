@@ -1203,9 +1203,9 @@ async function saveSafetyBackup(s) {
 /** Collections included in backups and exports (config is added stripped). */
 function backupCollections(s) {
   const { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
-    emailTemplates, planLibrary, patientSuggestions } = s;
+    emailTemplates, planLibrary, patientSuggestions, sentByEvent } = s;
   return { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
-    emailTemplates, planLibrary, patientSuggestions };
+    emailTemplates, planLibrary, patientSuggestions, sentByEvent };
 }
 
 /**
@@ -1215,7 +1215,11 @@ function backupCollections(s) {
  *  - invoices issued after the backup (dropping them would hand their
  *    numbers out again), counted in `keptInvoices`;
  *  - the reminder / review-request status of each consultation (or the
- *    next tick would send them again).
+ *    next tick would send them again), and the one kept for events waiting
+ *    to be imported again after an agenda reset (`sentByEvent`).
+ * Personal events are a mirror of Google: one that is a consultation again
+ * in the backup (a copy from before converting its calendar) is dropped, so
+ * the appointment does not show twice.
  * The undo history belongs to the replaced data, so it is cleared.
  */
 export function restoredState(d, current) {
@@ -1234,7 +1238,10 @@ export function restoredState(d, current) {
   };
 }
 
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
 function restoredPatch(d, current, { invoices, consultations }) {
+  const consultationEvents = new Set(consultations.map(c => c.googleEventId).filter(Boolean));
   return {
     clients:        d.clients        || [],
     measurements:   d.measurements   || [],
@@ -1247,6 +1254,8 @@ function restoredPatch(d, current, { invoices, consultations }) {
     planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
     // Older backups did not include the inbox; the sync rebuilds missing suggestions.
     patientSuggestions: Array.isArray(d.patientSuggestions) ? d.patientSuggestions : current.patientSuggestions,
+    personalEvents: (current.personalEvents || []).filter(e => !e.googleEventId || !consultationEvents.has(e.googleEventId)),
+    sentByEvent: { ...(isPlainObject(d.sentByEvent) ? d.sentByEvent : {}), ...(current.sentByEvent || {}) },
     config: mergeRestoredConfig(current.config, d.config),
     selectedClientId: null,
     _history: [],
@@ -1609,7 +1618,7 @@ const useStore = create(
           fecha: c.fecha,
           hora: c.hora,
           duracion: c.duracion,
-          allDay: false,
+          allDay: !!c.allDay,
           lastSyncedAt: c.lastSyncedAt || null,
           remoteUpdated: c.remoteUpdated || null,
           cancelled: c.estado === 'cancelada',

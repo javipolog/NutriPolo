@@ -177,11 +177,20 @@ export function getReminderCandidates({ consultations, clients, config, now = Da
   return entries.sort((a, b) => a.start - b.start);
 }
 
+/**
+ * A failed send that may have reached the patient anyway: the app was closed
+ * or reloaded while it was `sending`, or the server timed out after taking
+ * the message. Not retried on its own (it would be a duplicate); the panel
+ * offers it to send by hand.
+ */
+export const mayHaveBeenSent = (record) =>
+  record?.status === 'sending' || String(record?.error || '').includes('timeout');
+
 /** Whether automatic sending should pick this email entry up. */
 export function isAutoSendable(entry) {
   if (entry.channel !== 'email') return false;
   if (entry.state === 'due') return true;
-  return entry.state === 'error' && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
+  return entry.state === 'error' && !mayHaveBeenSent(entry.record) && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
 }
 
 export function buildReminderEmail({ consultation, client, config }) {
