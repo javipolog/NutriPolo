@@ -141,7 +141,6 @@ const WhatsAppQueueModal = ({ entries, onClose, sendWhatsApp, recheck, build = b
   const [edited, setEdited] = useState(false);
   const slot = live ? `${live.consultation.fecha}T${live.consultation.hora}` : '';
 
-  useEffect(() => { setEdited(false); }, [entry]);
   useEffect(() => {
     // A new patient, or the same one moved by the sync before the text was touched
     if (live && !edited) setText(build({ consultation: live.consultation, client: live.client, config }).text || '');
@@ -149,7 +148,9 @@ const WhatsAppQueueModal = ({ entries, onClose, sendWhatsApp, recheck, build = b
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry, slot]);
 
-  const next = () => setIndex(i => i + 1);
+  // The edit flag is cleared in the same render that moves on: if it were
+  // cleared afterwards, the next patient would get the previous text.
+  const next = () => { setEdited(false); setText(''); setIndex(i => i + 1); };
   const openCurrent = async () => {
     const current = recheck(entry);
     if (!current) return;
