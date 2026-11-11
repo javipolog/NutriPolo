@@ -926,6 +926,12 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
+    whats_new_sport_title:         'Planificaciones de nutrición deportiva',
+    whats_new_sport_desc:          'En Datos generales de la planificación elige «Deportiva». Cada opción puede llevar el aumento de los días de entreno, hay tomas antes y después de entrenar con su pauta (hidratos y proteína por kg, calculados con el peso), la guía de cantidades marca en naranja la ración de entreno y puedes añadir un plan de competición: día previo, desayuno, cafeína, durante la prueba y recuperación.',
+    whats_new_order_title:         'Ordena las secciones del PDF',
+    whats_new_order_desc:          'En el editor de la planificación, arrastra las secciones del menú lateral para cambiar su orden: el índice de la portada y el PDF lo siguen. «Orden por defecto» lo deja como siempre.',
+    whats_new_invoicing_title:     'Facturas como manda la ley, y más fiabilidad',
+    whats_new_invoicing_desc:      'Una factura es un borrador hasta que la emites: entonces coge su número y ya no se puede cambiar ni borrar; para corregirla, «Rectificar». Puedes descargar el libro de ingresos y ver los totales por trimestre. Además, esta versión revisa a fondo el guardado, las copias de seguridad, los recordatorios y la sincronización con Google Calendar.',
     whats_new_canva_recipes_title: 'Tus recetas de las planificaciones de Canva',
     whats_new_canva_recipes_desc:  'En «Mis recetas» ya tienes los platos y las opciones de desayuno, almuerzo y merienda de las planificaciones que hacías con Canva (unas 1.260, revisadas y sin duplicados, con su enlace a la receta cuando lo tenían). Salen al elegir una receta para un plato y al escribir su nombre, con los ingredientes ya puestos. Las cantidades son las que ponías a cada paciente: revísalas. Las que ya tenías no han cambiado y las que no quieras se borran con la papelera.',
     whats_new_gcal_patients_title: 'Las citas de Google Calendar, con su paciente',
@@ -2491,6 +2497,12 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
+    whats_new_sport_title:         'Planificacions de nutrició esportiva',
+    whats_new_sport_desc:          'A Dades generals de la planificació tria «Esportiva». Cada opció pot portar l\'augment dels dies d\'entrenament, hi ha preses abans i després d\'entrenar amb la seva pauta (hidrats i proteïna per kg, calculats amb el pes), la guia de quantitats marca en taronja la ració d\'entrenament i pots afegir un pla de competició: dia previ, esmorzar, cafeïna, durant la prova i recuperació.',
+    whats_new_order_title:         'Ordena les seccions del PDF',
+    whats_new_order_desc:          'A l\'editor de la planificació, arrossega les seccions del menú lateral per canviar-ne l\'ordre: l\'índex de la portada i el PDF el segueixen. «Ordre per defecte» el deixa com sempre.',
+    whats_new_invoicing_title:     'Factures com mana la llei, i més fiabilitat',
+    whats_new_invoicing_desc:      'Una factura és un esborrany fins que l\'emets: llavors pren el seu número i ja no es pot canviar ni esborrar; per corregir-la, «Rectificar». Pots baixar el llibre d\'ingressos i veure els totals per trimestre. A més, aquesta versió revisa a fons el desat, les còpies de seguretat, els recordatoris i la sincronització amb Google Calendar.',
     whats_new_canva_recipes_title: 'Les teves receptes de les planificacions de Canva',
     whats_new_canva_recipes_desc:  'A «Les meves receptes» ja tens els plats i les opcions d\'esmorzar, mig matí i berenar de les planificacions que feies amb Canva (unes 1.260, revisades i sense duplicats, amb l\'enllaç a la recepta quan en tenien). Surten en triar una recepta per a un plat i en escriure\'n el nom, amb els ingredients ja posats. Les quantitats són les que posaves a cada pacient: revisa-les. Les que ja tenies no han canviat i les que no vulguis s\'esborren amb la paperera.',
     whats_new_gcal_patients_title: 'Les cites de Google Calendar, amb el seu pacient',
@@ -4058,6 +4070,12 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
+    whats_new_sport_title:         'Sports nutrition plans',
+    whats_new_sport_desc:          'In the plan\'s General section choose "Sports". Each option can carry the training-day increase, there are snacks before and after training with their guidance (carbohydrates and protein per kg, worked out from the weight), the portion guide shows the training portion in orange, and you can add a competition plan: the day before, breakfast, caffeine, during the event and recovery.',
+    whats_new_order_title:         'Reorder the PDF sections',
+    whats_new_order_desc:          'In the plan editor, drag the sections in the side menu to change their order: the cover index and the PDF follow it. "Default order" puts it back as it was.',
+    whats_new_invoicing_title:     'Invoices by the book, and more reliability',
+    whats_new_invoicing_desc:      'An invoice is a draft until you issue it: then it takes its number and can no longer be changed or deleted; to correct it, use "Correct". You can download the income book and see totals by quarter. This version also thoroughly reviews saving, backups, reminders and Google Calendar sync.',
     whats_new_canva_recipes_title: 'Your recipes from the Canva meal plans',
     whats_new_canva_recipes_desc:  'My recipes now holds the dishes and the breakfast, mid-morning and snack options from the meal plans you made in Canva (about 1,260, checked and without duplicates, with their recipe link when they had one). They show up when you pick a recipe for a dish and as you type its name, with the ingredients already filled in. The quantities are the ones you gave each client, so check them. The recipes you already had are unchanged, and the ones you do not want can be deleted with the bin.',
     whats_new_gcal_patients_title: 'Google Calendar appointments, with their client',
