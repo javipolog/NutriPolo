@@ -61,6 +61,8 @@ nutripolo-app/
 │   │   ├── NutritionPlanEditor.jsx   # Vista Planes (pestanyes Planes / Alimentos / Recetas) + editor antic (per àpats)
 │   │   ├── plan/FoodsView.jsx        # Pestanya Alimentos: catàleg d'aliments bàsics (Mercadona + nutrició)
 │   │   ├── plan/PlanificacionEditor.jsx # Editor a pantalla completa de la planificació setmanal
+│   │   ├── plan/SportEditors.jsx     # Parts esportives de l'editor (tipus i pes, preses d'entrenament, pla de competició)
+│   │   ├── plan/editorParts.jsx      # Estils i botons compartits pels editors de planificació
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
 │   │   ├── plan/WebRecipePicker.jsx  # Llista de receptes de nutripoloraquel.com (WebRecipeList: selector i pestanya Recetas)
 │   │   ├── plan/FoodCatalogPicker.jsx # Selector del catàleg d'aliments amb foto
@@ -95,6 +97,7 @@ nutripolo-app/
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
 │   │   ├── pdfPlanificacionGenerator.js # PDF de la planificació (substitueix Canva; Onest + icones Lucide)
 │   │   ├── planificacion.js          # Model de la planificació (pur, amb tests)
+│   │   ├── deportiva.js              # Planificació esportiva: g/kg, preses d'entrenament, competició (pur, amb tests)
 │   │   ├── planPdf.js                # Tria generador segons format + imatges de productes
 │   │   ├── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
 │   │   ├── webRecipes.js             # Receptari de la web: API REST + parseig HTML (pur, amb tests)
@@ -274,6 +277,7 @@ fn cancel_quit()                                      // el JS es queda obert (c
 ### Planificacions (dietes setmanals)
 - Format nou: `nutritionPlans` amb `formato: 'planificacion'` (model a `planificacion.js`); els plans sense `formato` són els antics per àpats i conserven el seu editor i PDF
 - Seccions: `desayunos` / `mediaManana` / `merienda` (opcions), `cantidades`, `menu.dias[]` (7 dies × `comida`/`cena` × `a`/`b`, amb `receta` enllaçada al PDF) i `productos` (ids)
+- Ordre de les seccions: `plan.orden` (`normalizeOrder`: les que falten van darrere de la que les precedeix a `SECTION_ORDER`). Es tria arrossegant les seccions al menú lateral de l'editor (esdeveniments de punter, `moveSectionTo`: l'arrossegament HTML5 no va a Tauri/Windows) o amb Alt+↑/↓ (`moveSection`, que salta les amagades) i mana a l'índex de la portada i al PDF, on cada secció és una funció (`renderOptions`, `renderCantidades`…) cridada en aquest ordre
 - Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
 - Secció Productos: un aliment de la planificació que es diu igual que un de la biblioteca d'aliments (`foodMatcher`: primer els genèrics, després el bàsic de Mercadona sense parèntesi) agafa la foto amb un clic; el botó "Biblioteca de alimentos" (`FoodCatalogPicker`) tria de tota la biblioteca. La foto es copia a `planLibrary.productos` (`foodPhotoDataUrl`)
 - Una planificació nova copia el contingut de l'última del client; els títols de "Mis recetas" i de la web autocompleten ingredients (`buildDishIndex`)
@@ -285,6 +289,14 @@ fn cancel_quit()                                      // el JS es queda obert (c
 - El menú va en una pàgina horitzontal si el text hi cap a mida llegible; si no, es parteix en comidas i cenas
 - Receptes de la web (`webRecipes.js`): llista per l'API REST de WordPress (tipus `receta`) i ingredients/temps/etiquetes llegits de l'HTML de cada recepta (camps ACF que l'API no exposa). Memòria cau a `planLibrary.recetasWeb` (`{ items, syncedAt }`); es resincronitza en obrir l'editor si té més de 6 h i només es baixen les receptes amb `modified` nou. El servidor atén les peticions en sèrie (~6 s cadascuna): les pàgines es baixen d'una en una, la llista es mostra de seguida amb `ingredientes: null` per a les pendents, i una recepta pendent es baixa a l'acte si es tria (`loadWebRecipeNow`). Triar-ne una omple títol, enllaç (`receta`) i només els ingredients clau (`summarizeIngredients`: sense quantitats, rebost, espècies ni opcionals, i les verdures de sofrit en una línia), o la versió retocada si n'hi ha una a "Mis recetas"; també surten a l'autocompletat de títols (`buildDishIndex`, per darrere de "Mis recetas")
 - Les imatges de la web porten `referrerPolicy="no-referrer"`: el servidor talla la connexió si rep un Referer d'un altre lloc
+
+### Nutrició esportiva (planificació `tipo: 'deportiva'`)
+- El mateix format `planificacion`, amb `tipo: 'deportiva'` (sense `tipo` = general). Model a `deportiva.js`; replica l'estructura dels plans d'esportistes de la Raquel
+- `deporte.peso` (tal com s'escriu) és el pes de totes les xifres per kg: en crear-la o passar a esportiva es posa el de l'últim pesatge; no es copia d'una altra planificació. `perKg` arrodoneix de 5 en 5 g (mg de 10 en 10)
+- Opcions d'esmorzar / mig matí / berenar: `entreno` = el que canvia els dies d'entrenament ("Cornflakes: 60 g → 90 g"). Guia de quantitats: la ració d'entrenament va després d'una fletxa (`splitTraining`) i surt en taronja; en passar a esportiva, la guia de la plantilla es canvia per `DEFAULT_CANTIDADES_DEPORTE`
+- Preses d'entrenament (`sesiones`, secció `entrenos`): nom, presa, moment (`pre`/`post`), opcions i pauta (objectiu, hidrats i proteïna amb rang en g/kg, greixos, fibra, volum, quan). Cada presa és una secció del PDF; si la presa és una secció d'opcions (`sessionOptionSection`), aquesta surt com la dels dies de descans (`restSections`)
+- Pla de competició (`competicion`, null fins que s'afegeix): prova, data, durada i blocs `previa`, `desayuno`, `cafeina`, `durante`, `recuperacion` (cadascun amb `activo`). "Durant": el text i els hidrats/hora escrits o, si són buits, `duringRecommendation` segons la durada
+- Tornar a general no esborra res: les seccions esportives només s'amaguen
 
 ### Catàleg d'aliments (pestanya Alimentos de Planes)
 - Planes té tres pestanyes (`plansSection` al store, no es desa): Planes, Alimentos i Recetas (receptari de la web; en prémer una recepta s'obre al navegador). La paleta (Ctrl+K) porta directament a cada pestanya

@@ -481,7 +481,12 @@ const PlansList = () => {
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sage-900">{plan.nombre}</p>
+                  <p className="font-medium text-sage-900 flex items-center gap-2">
+                    {plan.nombre}
+                    {isPlanificacion && plan.tipo === 'deportiva' && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-badge font-medium bg-terra-50 text-terra-700">{t.sp_badge}</span>
+                    )}
+                  </p>
                   <p className="text-xs text-sage-500 mt-0.5">{client?.nombre || '—'}</p>
                   <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-sage-400">
                     {plan.fechaInicio && <span>{formatDate(plan.fechaInicio)}{plan.fechaFin ? ` → ${formatDate(plan.fechaFin)}` : ''}</span>}
