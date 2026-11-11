@@ -340,6 +340,37 @@ describe('restoring a backup', () => {
     expect(useStore.getState().patientSuggestions.map(sg => sg.id)).toEqual(['live']);
   });
 
+  it("does not show an appointment twice after restoring the copy from before converting its calendar", async () => {
+    useStore.setState({
+      consultations: [],
+      personalEvents: [
+        { id: 'p1', googleEventId: 'g1', sourceCalendarId: 'cal', title: 'Ana', fecha: '2026-02-03', hora: '10:00' },
+        { id: 'p2', googleEventId: 'g2', sourceCalendarId: 'cal', title: 'Ballet', fecha: '2026-02-04', hora: '18:00' },
+      ],
+    });
+    files['backup-2026-02-01'] = JSON.stringify({ version: 17, data: {
+      clients: [{ id: 'k1', nombre: 'Ana' }],
+      consultations: [{ id: 'c1', clienteId: 'k1', googleEventId: 'g1', sourceCalendarId: 'cal', fecha: '2026-02-03', hora: '10:00' }],
+    } });
+    await useStore.getState().restoreFromAutoBackup('2026-02-01');
+    const s = useStore.getState();
+    expect(s.consultations.map(c => c.id)).toEqual(['c1']);
+    expect(s.personalEvents.map(e => e.id)).toEqual(['p2']);
+  });
+
+  it('keeps what was already sent for events waiting to be imported again', async () => {
+    const sent = { email: { status: 'sent', slot: '2026-02-03T10:00' } };
+    useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana' }], sentByEvent: { g1: { reminders: sent } }, lastBackupDate: null });
+    await useStore.getState().runAutoBackup();
+    const key = Object.keys(files).find(k => /^backup-\d/.test(k));
+    expect(JSON.parse(files[key]).data.sentByEvent).toEqual({ g1: { reminders: sent } });
+
+    // Restored on another installation that has nothing pending
+    useStore.setState({ sentByEvent: {} });
+    await useStore.getState().restoreFromAutoBackup(key.slice('backup-'.length));
+    expect(useStore.getState().sentByEvent).toEqual({ g1: { reminders: sent } });
+  });
+
   it('includes the patient inbox in new backups', async () => {
     useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana' }], patientSuggestions: [{ id: 'sg9', status: 'pending' }], lastBackupDate: null });
     const { invoke } = await import('@tauri-apps/api/tauri');

@@ -38,11 +38,17 @@ export const WebRecipeList = ({ onPick, onPickOwn, needsDetail = true, autoFocus
 
   const manualRefresh = () => refresh().then(r => setFailed(r.failed)).catch(() => {});
 
+  // A recipe whose page had no ingredients that could be read still fills the
+  // title and link, but says so: the dish would otherwise go out empty
+  const pickLoaded = (r) => {
+    if (needsDetail && !r.ingredientes?.length) toast.warning(t.pf_web_no_ingredients.replace('{name}', r.titulo));
+    onPick(r);
+  };
   const pick = async (r) => {
-    if (!needsDetail || !isDetailPending(r)) { onPick(r); return; }
+    if (!needsDetail || !isDetailPending(r)) { pickLoaded(r); return; }
     setLoadingId(r.id);
     try {
-      onPick(await loadWebRecipeNow(r));
+      pickLoaded(await loadWebRecipeNow(r));
     } catch {
       toast.error(t.pf_web_detail_error.replace('{name}', r.titulo));
     } finally {
@@ -187,8 +193,10 @@ export const WebRecipeList = ({ onPick, onPickOwn, needsDetail = true, autoFocus
                         <span className="flex items-center gap-2 text-xs text-sage-500"><Spinner size="sm" />{t.pf_web_loading_one}</span>
                       ) : isDetailPending(r) ? (
                         <span className="block text-xs text-sage-400 italic">{t.pf_web_pending}</span>
-                      ) : r.ingredientes.length > 0 && (
+                      ) : r.ingredientes.length > 0 ? (
                         <span className="text-xs text-sage-500 line-clamp-2">{summarizeIngredients(r.ingredientes).join(' · ')}</span>
+                      ) : (
+                        <span className="block text-xs text-sage-500 italic">{t.pf_web_no_ingredients_short}</span>
                       )}
                     </span>
                   </button>

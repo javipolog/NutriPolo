@@ -69,6 +69,14 @@ describe('reminder records', () => {
     expect(state(c, { ...client, recordatorios: { email: false } })).toBe('opted_out');
     expect(state(c, { ...client, email: '' })).toBe('no_contact');
   });
+  it('does not retry on its own a send that may have gone out', () => {
+    // Closed or reloaded while sending
+    expect(isAutoSendable({ channel: 'email', state: 'error', record: { status: 'sending', attempts: 1 } })).toBe(false);
+    // The server timed out after taking the message
+    expect(isAutoSendable({ channel: 'email', state: 'error', record: { status: 'error', attempts: 1, error: 'smtp_send_timeout' } })).toBe(false);
+    // A failure before sending is retried
+    expect(isAutoSendable({ channel: 'email', state: 'error', record: { status: 'error', attempts: 1, error: 'smtp_connection_failed' } })).toBe(true);
+  });
   it('stops automatic retries after MAX_AUTO_ATTEMPTS', () => {
     const entry = { channel: 'email', state: 'error', record: { attempts: MAX_AUTO_ATTEMPTS } };
     expect(isAutoSendable(entry)).toBe(false);
