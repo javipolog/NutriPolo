@@ -40,12 +40,19 @@ function runSync() {
   if (!inFlight) {
     const { setWebRecipes } = useStore.getState();
     useSyncState.setState({ syncing: true, done: 0, total: 0, error: null });
+    // Es desa a mesura que arriba (si es tanca l'app no es perd el que ja s'ha
+    // baixat), però com a molt cada 20 receptes o 30 s: cada desada reescriu
+    // la biblioteca i refà l'índex de plats de l'editor obert
+    let savedAt = Date.now();
+    let sinceSave = 0;
     inFlight = syncWebRecipes(cacheNow(), {
       loadDetail,
-      // Es desa a mesura que arriba: si es tanca l'app, no es perd el que ja s'ha baixat
       onProgress: ({ items, done, total }) => {
-        setWebRecipes({ items: withLoaded(items), syncedAt: cacheNow().syncedAt });
         useSyncState.setState({ done, total });
+        if (++sinceSave < 20 && Date.now() - savedAt < 30000) return;
+        setWebRecipes({ items: withLoaded(items), syncedAt: cacheNow().syncedAt });
+        savedAt = Date.now();
+        sinceSave = 0;
       },
     })
       .then(res => { setWebRecipes({ items: withLoaded(res.items), syncedAt: res.syncedAt }); return res; })

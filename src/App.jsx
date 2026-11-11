@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, ClipboardEdit, Settings, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
-import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, useToast } from './components/UI';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, BookOpen, Settings, Dumbbell, GripVertical, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
+import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, ConfirmModal, useToast, useConfirm, useDialogA11y, hasOpenDialog, hasUnsavedWork } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
 import { LoadErrorScreen } from './components/LoadErrorScreen';
@@ -15,7 +15,7 @@ import { countPendingReminders } from './components/RemindersPanel';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.16.0';
+const APP_VERSION = '1.19.0';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -36,13 +36,19 @@ const WhatsNewModal = () => {
   return (
     <Modal open={open} onClose={handleClose} title={t.whats_new_title.replace('{version}', APP_VERSION)} size="sm">
       <div className="space-y-4">
-        <div className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
-          <ClipboardEdit size={20} className="text-wellness-500 mt-0.5 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-sage-800">{t.whats_new_interview_title}</p>
-            <p className="text-xs text-sage-600 mt-1">{t.whats_new_interview_desc}</p>
+        {[
+          [Dumbbell, 'whats_new_sport'],
+          [GripVertical, 'whats_new_order'],
+          [Receipt, 'whats_new_invoicing'],
+        ].map(([Icon, key]) => (
+          <div key={key} className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
+            <Icon size={20} className="text-wellness-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-sage-800">{t[`${key}_title`]}</p>
+              <p className="text-xs text-sage-600 mt-1">{t[`${key}_desc`]}</p>
+            </div>
           </div>
-        </div>
+        ))}
 
         <div className="flex justify-end">
           <Button onClick={handleClose}>{t.got_it}</Button>
@@ -61,6 +67,7 @@ const UpdateChecker = () => {
   const [dismissed, setDismissed] = useState(false);
   const toast = useToast();
   const t = useT();
+  const { confirm, ConfirmDialog } = useConfirm();
 
   const check = useCallback(async () => {
     try {
@@ -83,12 +90,19 @@ const UpdateChecker = () => {
   }, [check]);
 
   const handleInstall = async () => {
+    // The installer closes the app: an open form or editor would be lost.
+    if (hasUnsavedWork() && !(await confirm({
+      title: t.quit_unsaved_title, message: t.update_unsaved_msg, danger: true, confirmText: t.update_install_anyway,
+    }))) return;
     setInstalling(true);
     try {
       const { installUpdate } = await import('@tauri-apps/api/updater');
       const { relaunch } = await import('@tauri-apps/api/process');
-      // The installer closes the app: save pending changes first.
-      await flushAllPending();
+      if (!(await flushAllPending())) {
+        toast.error(t.update_save_failed, 10000);
+        setInstalling(false);
+        return;
+      }
       await installUpdate();
       await relaunch();
     } catch (e) {
@@ -102,6 +116,7 @@ const UpdateChecker = () => {
   return (
     // Top-right so it never overlaps the toast stack in the bottom-right corner
     <div role="status" className="fixed top-4 right-4 z-50 max-w-sm animate-slideIn">
+      {ConfirmDialog}
       <div className="bg-white border border-wellness-300 rounded-soft shadow-lg p-4 space-y-3">
         <div className="flex items-start gap-3">
           <Download size={20} className="text-wellness-500 mt-0.5 shrink-0" />
@@ -276,6 +291,24 @@ function usePendingReminders(now) {
 // ============================================
 // MAIN APP
 // ============================================
+/**
+ * Idle lock that keeps the session: the unlock screen covers everything
+ * without reloading, so an open form or changes not yet on disk survive.
+ * Used when a full lock (key wiped + reload) would lose them. The key stays
+ * in memory so those changes can still be saved; nothing is visible until
+ * the password is typed again.
+ */
+function ScreenLock({ onUnlocked }) {
+  const ref = useRef(null);
+  // Topmost dialog: the modals behind it ignore keys and cannot take the focus.
+  useDialogA11y(true, () => {}, ref);
+  return (
+    <div ref={ref} role="dialog" aria-modal="true" aria-label="NutriPolo" tabIndex={-1} className="fixed inset-0 z-[200] overflow-auto focus:outline-none">
+      <UnlockScreen onUnlocked={onUnlocked} />
+    </div>
+  );
+}
+
 function AppContent() {
   const currentView = useStore(s => s.currentView);
   const setCurrentView = useStore(s => s.setCurrentView);
@@ -292,7 +325,6 @@ function AppContent() {
   const redo = useStore(s => s.redo);
   const _history = useStore(s => s._history);
   const _future = useStore(s => s._future);
-  const runAutoBackup = useStore(s => s.runAutoBackup);
   const validateDataIntegrity = useStore(s => s.validateDataIntegrity);
   const pendingTotal = useStore(s =>
     (s.patientSuggestions || []).filter(sg =>
@@ -300,6 +332,7 @@ function AppContent() {
     ).length
   );
   const now = useNow(60000);
+  const [screenLocked, setScreenLocked] = useState(false);
   const pendingReminders = usePendingReminders(now);
 
   const toast = useToast();
@@ -336,19 +369,15 @@ function AppContent() {
   }, [appTheme]);
 
 
-  // Post-hydration: backup + integrity check
+  // Post-hydration integrity check (the daily backup runs in useBackgroundJobs)
   useEffect(() => {
-    const run = async () => {
-      await runAutoBackup();
-      validateDataIntegrity();
-    };
     if (useStore.persist?.hasHydrated?.()) {
-      run();
+      validateDataIntegrity();
     } else {
-      const unsub = useStore.persist?.onFinishHydration?.(() => run());
+      const unsub = useStore.persist?.onFinishHydration?.(() => validateDataIntegrity());
       return () => unsub?.();
     }
-  }, [runAutoBackup, validateDataIntegrity]);
+  }, [validateDataIntegrity]);
 
   // Auto-lock on inactivity. Only active when at-rest encryption is enabled.
   // Timeout is configurable in Settings via `config.autoLockMinutes`:
@@ -371,11 +400,14 @@ function AppContent() {
       const resetTimer = () => {
         clearTimeout(timer);
         timer = setTimeout(async () => {
-          try {
-            // Write pending changes while the key is still available.
-            await flushAllPending();
-            await invoke('encryption_lock');
-          } catch {}
+          // A full lock reloads the window. With an open form or editor
+          // holding unsaved changes, or changes not yet on disk, that would
+          // lose them: cover the screen instead (ScreenLock) and keep them.
+          if (hasUnsavedWork()) { setScreenLocked(true); return; }
+          // Write pending changes while the key is still available.
+          const saved = await flushAllPending().catch(() => false);
+          if (!saved) { setScreenLocked(true); return; }
+          try { await invoke('encryption_lock'); } catch {}
           window.location.reload();
         }, minutes * 60 * 1000);
       };
@@ -420,16 +452,30 @@ function AppContent() {
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyboard = (e) => {
+      // F5 / Ctrl+R would reload the window and drop open forms: not in the installed app.
+      if (!import.meta.env.DEV && (e.key === 'F5' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r'))) {
+        e.preventDefault();
+        return;
+      }
+      // With a modal or the full-screen editor open, changing view or undoing
+      // behind it would throw away what is being typed.
+      if (hasOpenDialog()) return;
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setShowCommandPalette(true);
         return;
       }
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+      const tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
       const key = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) {
         e.preventDefault();
-        if (histRef.current.length > 0) { undo(); toastRef.current.info(tRef.current.undo_done, 3000); }
+        if (histRef.current.length > 0) {
+          const res = undo();
+          if (res?.ok) toastRef.current.info(tRef.current.undo_done, 3000);
+          else if (res?.reason === 'invoice_number_taken') toastRef.current.warning(tRef.current.undo_blocked_invoice, 6000);
+          else if (res?.reason === 'client_in_use') toastRef.current.warning(tRef.current.undo_blocked_client, 6000);
+        }
         return;
       }
       // With Shift held the key arrives as 'Z'.
@@ -441,7 +487,11 @@ function AppContent() {
       if (e.ctrlKey || e.metaKey) {
         const views = ['dashboard', 'agenda', 'clients', 'plans', 'invoices', 'services', 'settings'];
         const idx = parseInt(e.key, 10) - 1;
-        if (idx >= 0 && idx < views.length) { e.preventDefault(); setCurrentView(views[idx]); }
+        if (idx >= 0 && idx < views.length) {
+          e.preventDefault();
+          if (views[idx] === 'clients') useStore.getState().setSelectedClientId(null);
+          setCurrentView(views[idx]);
+        }
       }
     };
     window.addEventListener('keydown', handleKeyboard);
@@ -486,7 +536,11 @@ function AppContent() {
               {navItems.map(item => (
                 <li key={item.id}>
                   <button
-                    onClick={() => setCurrentView(item.id)}
+                    onClick={() => {
+                      // "Clients" in the menu is the list, not the last record opened
+                      if (item.id === 'clients') useStore.getState().setSelectedClientId(null);
+                      setCurrentView(item.id);
+                    }}
                     aria-current={currentView === item.id ? 'page' : undefined}
                     aria-label={sidebarCollapsed ? item.label : undefined}
                     className={`relative w-full flex items-center gap-3 rounded-button transition-colors duration-150 group ${
@@ -584,6 +638,7 @@ function AppContent() {
       />
       <WhatsNewModal />
       <UpdateChecker />
+      {screenLocked && <ScreenLock onUnlocked={() => setScreenLocked(false)} />}
     </div>
   );
 }
@@ -672,19 +727,47 @@ function EncryptionGate() {
   return <AppContent />;
 }
 
-export default function App() {
-  // "Quit" in the tray menu: write pending changes before the process exits.
+/**
+ * "Quit" in the tray menu (or closing the window without close-to-tray):
+ * write pending changes, then exit. If a write failed or a form has unsaved
+ * changes, stay open (`cancel_quit` also shows the window) and ask.
+ */
+function QuitGuard() {
+  const t = useT();
+  const [reason, setReason] = useState(null);   // 'save_failed' | 'unsaved'
   useEffect(() => {
     let unlisten;
     listen('tray-quit', async () => {
-      try { await flushAllPending(); } finally { invoke('quit_app').catch(() => {}); }
+      const saved = await flushAllPending().catch(() => false);
+      if (saved && !hasUnsavedWork()) {
+        invoke('quit_app').catch(() => {});
+        return;
+      }
+      await invoke('cancel_quit').catch(() => {});
+      setReason(saved ? 'unsaved' : 'save_failed');
     }).then(u => { unlisten = u; }).catch(() => {});
     return () => unlisten?.();
   }, []);
 
   return (
+    <ConfirmModal
+      open={!!reason}
+      onClose={() => setReason(null)}
+      onConfirm={() => invoke('quit_app').catch(() => {})}
+      title={reason === 'save_failed' ? t.quit_save_failed_title : t.quit_unsaved_title}
+      message={reason === 'save_failed' ? t.quit_save_failed_msg : t.quit_unsaved_msg}
+      confirmText={t.quit_anyway}
+      cancelText={t.quit_stay}
+      danger
+    />
+  );
+}
+
+export default function App() {
+  return (
     <ToastProvider>
       <EncryptionGate />
+      <QuitGuard />
     </ToastProvider>
   );
 }

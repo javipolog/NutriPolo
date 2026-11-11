@@ -45,7 +45,8 @@ export const ClientModal = ({ client, onClose }) => {
     calle: '', codigoPostal: '', ciudad: '', provincia: '',
     fechaNacimiento: '', genero: '',
     altura: '', medicacion: '',
-    nivelActividad: 'moderado', ejercicio: '',
+    // Not chosen yet: it feeds the activity factor of the energy needs
+    nivelActividad: '', ejercicio: '',
     notas: '', estado: 'activo',
     alergias: [], intolerancias: [], patologias: [],
     objetivos: [], restriccionesDieteticas: [],
@@ -62,13 +63,31 @@ export const ClientModal = ({ client, onClose }) => {
     const e = {};
     if (!form.nombre.trim()) e.nombre = t.error_required;
     if (form.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) e.email = t.error_invalid_email;
+    // Something written that is not a valid height is an error, never a
+    // silent blank (that would delete the height already saved)
+    const h = alturaCm(form.altura);
+    const written = String(form.altura ?? '').trim() !== '';
+    if (written && (h == null || h < 50 || h > 250)) e.altura = t.client_height_invalid;
     return e;
+  };
+
+  // Height in cm; one written in metres (1,65) is converted
+  const alturaCm = (v) => {
+    const n = parseFloat(String(v ?? '').replace(',', '.'));
+    if (!Number.isFinite(n) || n <= 0) return null;
+    return n < 3 ? Math.round(n * 100) : n;
   };
 
   const handleSave = () => {
     const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    const data = { ...form, altura: form.altura ? parseFloat(form.altura) : null };
+    if (Object.keys(e).length) {
+      setErrors(e);
+      // The error may be on another tab: show it
+      setSection(e.nombre || e.email ? 'personal' : 'health');
+      toast.error(t.client_fix_errors);
+      return;
+    }
+    const data = { ...form, altura: alturaCm(form.altura) };
     if (isEdit) {
       updateClient(client.id, data);
       toast.success(t.client_updated);
@@ -89,6 +108,7 @@ export const ClientModal = ({ client, onClose }) => {
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? `${t.edit} — ${client.nombre}` : t.new_client}
       size="lg"
@@ -225,7 +245,7 @@ export const ClientModal = ({ client, onClose }) => {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_height}</label>
-              <Input value={form.altura} onChange={e => set('altura', e.target.value)} type="number" placeholder="170" />
+              <Input value={form.altura} onChange={e => set('altura', e.target.value)} type="number" placeholder="170" error={errors.altura} />
             </div>
             <div>
               <label className="block text-xs font-medium text-sage-600 mb-1">{t.client_activity}</label>
@@ -234,6 +254,7 @@ export const ClientModal = ({ client, onClose }) => {
                 onChange={e => set('nivelActividad', e.target.value)}
                 className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
               >
+                <option value="">{t.not_specified}</option>
                 <option value="sedentario">{t.activity_sedentary}</option>
                 <option value="ligero">{t.activity_light}</option>
                 <option value="moderado">{t.activity_moderate}</option>

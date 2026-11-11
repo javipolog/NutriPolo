@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { clientMatcher } from '../services/search';
 import { Users, Plus, Edit2, Trash2, Search, MessageCircle, ChevronRight, Phone } from 'lucide-react';
 import { Button, Input, EmptyState, useToast, useConfirm } from './UI';
 import useStore, { formatDate, lastVisitByClient } from '../stores/store';
@@ -35,11 +36,9 @@ export const ClientsView = () => {
   const [editClient, setEditClient] = useState(null);
 
   const filtered = useMemo(() => {
-    const q = clientSearch.toLowerCase();
+    const matches = clientMatcher(clientSearch);
     return clients.filter(c => {
-      if (q && !(c.nombre || '').toLowerCase().includes(q) &&
-               !(c.email || '').toLowerCase().includes(q) &&
-               !(c.telefono || '').toLowerCase().includes(q)) return false;
+      if (!matches(c)) return false;
       if (clientFilters.estado !== 'all' && c.estado !== clientFilters.estado) return false;
       if (clientFilters.objetivo !== 'all' && !(c.objetivos || []).includes(clientFilters.objetivo)) return false;
       return true;
@@ -52,11 +51,15 @@ export const ClientsView = () => {
   }
 
   const handleDelete = async (client) => {
-    const ok = await confirm(t.client_confirm_delete.replace('{name}', client.nombre));
+    const ok = await confirm({ message: t.client_confirm_delete.replace('{name}', client.nombre), danger: true, confirmText: t.delete });
     if (!ok) return;
+    // Its PDFs are deleted from disk for good: "Undo" would bring back the
+    // record without them, so it is only offered to a client without documents
+    const hadDocuments = (useStore.getState().clientDocuments || []).some(d => d.clienteId === client.id);
     deleteClientDocumentsDir(client.id).catch(() => { /* Best-effort cleanup */ });
     deleteClient(client.id);
-    toast.success(t.client_deleted);
+    toast.success(t.client_deleted, 8000, hadDocuments ? undefined
+      : { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_client', client.id) });
   };
 
   const openWhatsApp = async (client) => {

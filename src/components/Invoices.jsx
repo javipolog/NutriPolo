@@ -1,13 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { Plus, Trash2, Edit2, Receipt, Search, FileDown } from 'lucide-react';
+import { Plus, Trash2, Edit2, Receipt, Search, FileDown, Mail, FileSpreadsheet } from 'lucide-react';
 import { Button, EmptyState, StatusBadge, useToast, useConfirm } from './UI';
-import useStore, { formatCurrency, formatDate, canDeleteInvoice } from '../stores/store';
+import useStore, { formatCurrency, formatDate, canDeleteInvoice, errMsg } from '../stores/store';
 import { useT, plural } from '../i18n';
-import { InvoiceModal } from './InvoiceModal';
-import { generateInvoicePDF } from '../services/pdfInvoiceGenerator';
+import { InvoiceModal, downloadInvoicePdf } from './InvoiceModal';
+import { SendEmailModal } from './SendEmailModal';
+import {
+  isIssued, isCorrective, invoiceClientName, issuedInPeriod, periodTotals, incomeBookCsv, quarterOf, countsInTotals,
+} from '../services/invoicing';
 import { save } from '@tauri-apps/api/dialog';
-import { writeBinaryFile } from '@tauri-apps/api/fs';
-import { invoke } from '@tauri-apps/api/tauri';
+import { writeTextFile } from '@tauri-apps/api/fs';
+
+const QUARTERS = [1, 2, 3, 4];
 
 export const Invoices = () => {
   const invoices = useStore(s => s.invoices);
@@ -19,91 +23,109 @@ export const Invoices = () => {
   const { confirm, ConfirmDialog } = useConfirm();
   const [showModal, setShowModal] = useState(false);
   const [editInvoice, setEditInvoice] = useState(null);
+  const [emailing, setEmailing] = useState(null);   // { invoice, client, pdfBytes }
   const [search, setSearch] = useState('');
-  const [filterYear, setFilterYear] = useState('all');
+  const [filterYear, setFilterYear] = useState(() => String(new Date().getFullYear()));
+  const [filterQuarter, setFilterQuarter] = useState(0);
   const [filterEstado, setFilterEstado] = useState('all');
 
   const years = useMemo(() => {
-    const ys = [...new Set(invoices.map(i => i.fecha?.slice(0, 4)).filter(Boolean))].sort().reverse();
-    return ys;
+    const ys = new Set(invoices.map(i => i.fecha?.slice(0, 4)).filter(Boolean));
+    ys.add(String(new Date().getFullYear()));
+    return [...ys].sort().reverse();
   }, [invoices]);
+
+  const statusOf = (inv) => (!isIssued(inv) ? 'borrador' : inv.estado === 'pendiente' ? 'emitida' : inv.estado);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return invoices.filter(inv => {
       if (filterYear !== 'all' && inv.fecha?.slice(0, 4) !== filterYear) return false;
-      if (filterEstado !== 'all' && inv.estado !== filterEstado) return false;
+      if (filterYear !== 'all' && filterQuarter && quarterOf(inv.fecha) !== filterQuarter) return false;
+      if (filterEstado !== 'all' && statusOf(inv) !== filterEstado) return false;
       if (q) {
-        const client = clients.find(c => c.id === inv.clienteId);
-        const clientName = client?.nombre?.toLowerCase() || '';
-        if (!inv.numero?.toLowerCase().includes(q) && !clientName.includes(q) && !inv.concepto?.toLowerCase().includes(q)) return false;
+        const name = invoiceClientName(inv, clients).toLowerCase();
+        if (!inv.numero?.toLowerCase().includes(q) && !name.includes(q) && !inv.concepto?.toLowerCase().includes(q)) return false;
       }
       return true;
-    }).sort((a, b) => (b.numero || '').localeCompare(a.numero || '', undefined, { numeric: true }));
-  }, [invoices, clients, search, filterYear, filterEstado]);
+    }).sort((a, b) => {
+      // Drafts first, then by number (newest first)
+      if (isIssued(a) !== isIssued(b)) return isIssued(a) ? 1 : -1;
+      return (b.numero || '').localeCompare(a.numero || '', undefined, { numeric: true });
+    });
+  }, [invoices, clients, search, filterYear, filterQuarter, filterEstado]);
 
-  // Cancelled (anulada) invoices count neither as billed nor as pending.
-  const total = filtered.filter(i => i.estado !== 'anulada').reduce((s, i) => s + (i.total || i.importe || 0), 0);
-  const totalPagado = filtered.filter(i => i.estado === 'pagada').reduce((s, i) => s + (i.total || i.importe || 0), 0);
+  // Figures of the period: issued invoices only (drafts are not income yet)
+  const totals = useMemo(() => periodTotals(filtered.filter(isIssued)), [filtered]);
+  const drafts = filtered.filter(i => !isIssued(i)).length;
 
   const handleDelete = async (inv) => {
     if (!canDeleteInvoice(invoices, inv)) {
-      toast.info(t.invoice_delete_not_last);
+      toast.info(t.invoice_delete_issued);
       return;
     }
-    const ok = await confirm(t.invoice_confirm_delete.replace('{number}', inv.numero));
+    const ok = await confirm({ message: t.invoice_confirm_delete_draft, danger: true, confirmText: t.delete });
     if (!ok) return;
     if (deleteInvoice(inv.id)) toast.success(t.invoice_deleted);
   };
 
   const handleDownloadPDF = async (inv) => {
     try {
-      const client = clients.find(c => c.id === inv.clienteId);
-      const config = useStore.getState().config;
-      const pdfBytes = await generateInvoicePDF(inv, client, config);
-
-      const filePath = await save({
-        defaultPath: `${inv.numero}.pdf`,
-        filters: [{ name: 'PDF', extensions: ['pdf'] }],
-      });
-
-      if (filePath) {
-        await writeBinaryFile(filePath, pdfBytes);
-        try { await invoke('open_file', { path: filePath }); } catch (_) { /* optional */ }
-        toast.success(t.pdf_saved);
-      }
+      if (await downloadInvoicePdf(inv)) toast.success(t.pdf_saved);
     } catch (err) {
-      if (import.meta.env.DEV) console.error('PDF download failed:', err);
-      toast.error?.(t.pdf_error_generic);
+      toast.error(t.pdf_error.replace('{error}', errMsg(err) || t.error_unknown));
     }
   };
 
+  const handleEmail = async (inv) => {
+    const record = clients.find(c => c.id === inv.clienteId);
+    // The client record may be gone: write to the address frozen on the invoice
+    const client = record || { id: inv.clienteId, nombre: inv.destinatario?.nombre, email: inv.destinatario?.email };
+    if (!client.email) { toast.error(t.email_client_no_email); return; }
+    try {
+      const { generateInvoicePDF } = await import('../services/pdfInvoiceGenerator');
+      const pdfBytes = await generateInvoicePDF(inv, record, useStore.getState().config);
+      setEmailing({ invoice: inv, client, pdfBytes });
+    } catch (err) {
+      toast.error(t.pdf_error.replace('{error}', errMsg(err) || t.error_unknown));
+    }
+  };
+
+  const handleExportBook = async () => {
+    if (filterYear === 'all') return;
+    const period = `${filterYear}${filterQuarter ? `-T${filterQuarter}` : ''}`;
+    const rows = issuedInPeriod(invoices, filterYear, filterQuarter);
+    try {
+      const path = await save({ defaultPath: `libro-ingresos-${period}.csv`, filters: [{ name: 'CSV', extensions: ['csv'] }] });
+      if (!path) return;
+      await writeTextFile(path, incomeBookCsv(rows));
+      toast.success(plural(t, 'invoice_book_exported', rows.length));
+    } catch (err) {
+      toast.error(t.invoice_book_error.replace('{error}', errMsg(err)));
+    }
+  };
+
+  const iconBtn = 'p-1.5 rounded-button text-sage-400 transition-colors';
+
   return (
     <div className="space-y-5 animate-fadeIn">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h1 className="font-serif text-title text-sage-900">{t.invoices_title}</h1>
-        <Button variant="primary" icon={Plus} onClick={() => { setEditInvoice(null); setShowModal(true); }}>
-          {t.new_invoice}
-        </Button>
-      </div>
-
-      {/* Summary */}
-      {filtered.length > 0 && (
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white border border-sage-200 rounded-soft p-3 text-center shadow-card">
-            <p className="text-xs text-sage-400">{t.invoices_total}</p>
-            <p className="text-lg font-bold text-sage-800">{formatCurrency(total)}</p>
-          </div>
-          <div className="bg-white border border-sage-200 rounded-soft p-3 text-center shadow-card">
-            <p className="text-xs text-sage-400">{t.invoices_paid}</p>
-            <p className="text-lg font-bold text-success">{formatCurrency(totalPagado)}</p>
-          </div>
-          <div className="bg-white border border-sage-200 rounded-soft p-3 text-center shadow-card">
-            <p className="text-xs text-sage-400">{t.invoices_pending}</p>
-            <p className="text-lg font-bold text-warning">{formatCurrency(total - totalPagado)}</p>
-          </div>
+        <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            icon={FileSpreadsheet}
+            onClick={handleExportBook}
+            disabled={filterYear === 'all'}
+            title={filterYear === 'all' ? t.invoice_book_pick_year : t.invoice_book_hint}
+          >
+            {t.invoice_book_export}
+          </Button>
+          <Button variant="primary" icon={Plus} onClick={() => { setEditInvoice(null); setShowModal(true); }}>
+            {t.new_invoice}
+          </Button>
         </div>
-      )}
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2">
@@ -113,36 +135,70 @@ export const Invoices = () => {
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder={t.search_placeholder}
+            aria-label={t.search_placeholder}
             className="w-full pl-8 pr-3 py-1.5 text-sm border border-sage-300 rounded-button bg-white focus:outline-none focus:border-wellness-400"
           />
         </div>
         <select
           value={filterYear}
-          onChange={e => setFilterYear(e.target.value)}
+          onChange={e => { setFilterYear(e.target.value); if (e.target.value === 'all') setFilterQuarter(0); }}
+          aria-label={t.invoices_year}
           className="px-3 py-1.5 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
         >
           <option value="all">{t.invoices_all_years}</option>
           {years.map(y => <option key={y} value={y}>{y}</option>)}
         </select>
         <select
+          value={filterQuarter}
+          onChange={e => setFilterQuarter(Number(e.target.value))}
+          disabled={filterYear === 'all'}
+          aria-label={t.invoices_quarter}
+          className="px-3 py-1.5 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 disabled:opacity-50"
+        >
+          <option value={0}>{t.invoices_whole_year}</option>
+          {QUARTERS.map(q => <option key={q} value={q}>{t.invoices_quarter_n.replace('{n}', q)}</option>)}
+        </select>
+        <select
           value={filterEstado}
           onChange={e => setFilterEstado(e.target.value)}
+          aria-label={t.invoice_status}
           className="px-3 py-1.5 text-xs border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400"
         >
           <option value="all">{t.invoices_all_statuses}</option>
-          <option value="pendiente">{t.invoice_status_pending}</option>
+          <option value="borrador">{t.invoice_status_draft}</option>
+          <option value="emitida">{t.invoice_status_pending}</option>
           <option value="pagada">{t.invoice_status_paid}</option>
           <option value="anulada">{t.invoice_status_cancelled}</option>
         </select>
       </div>
 
-      <p className="text-xs text-sage-500">{plural(t, 'invoices_count', filtered.length)}</p>
+      {/* Period figures (issued invoices; a corrective one subtracts) */}
+      {filtered.some(isIssued) && (
+        <div className="grid grid-cols-4 gap-3">
+          {[
+            { label: t.invoices_base, value: totals.base, hint: t.invoices_base_hint },
+            { label: t.invoices_irpf_withheld, value: totals.irpf, hint: t.invoices_irpf_hint },
+            { label: t.invoices_paid, value: totals.cobrado, tone: 'text-success' },
+            { label: t.invoices_pending, value: totals.total - totals.cobrado, tone: 'text-warning' },
+          ].map(card => (
+            <div key={card.label} title={card.hint} className="bg-white border border-sage-200 rounded-soft p-3 text-center shadow-card">
+              <p className="text-xs text-sage-500">{card.label}</p>
+              <p className={`text-lg font-bold tabular-nums ${card.tone || 'text-sage-800'}`}>{formatCurrency(card.value)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <p className="text-xs text-sage-500">
+        {plural(t, 'invoices_count', filtered.length)}
+        {drafts > 0 && ` · ${plural(t, 'invoices_drafts', drafts)}`}
+      </p>
 
       {filtered.length === 0 ? (
         <EmptyState
           icon={Receipt}
           title={t.no_invoices}
-          action={{ label: t.new_invoice, onClick: () => setShowModal(true) }}
+          action={{ label: t.new_invoice, onClick: () => { setEditInvoice(null); setShowModal(true); } }}
         />
       ) : (
         <div className="bg-white border border-sage-200 rounded-soft shadow-card overflow-hidden">
@@ -155,19 +211,23 @@ export const Invoices = () => {
                 <th className="text-left px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_concept}</th>
                 <th className="text-right px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_amount}</th>
                 <th className="text-center px-4 py-2.5 text-xs font-medium text-sage-500">{t.invoice_status}</th>
-                <th className="px-4 py-2.5"></th>
+                <th className="px-4 py-2.5"><span className="sr-only">{t.actions}</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-sage-100">
               {filtered.map(inv => {
-                const client = clients.find(c => c.id === inv.clienteId);
+                const issued = isIssued(inv);
                 const loc = inv.locationId ? locations.find(l => l.id === inv.locationId) : null;
+                const label = inv.numero || t.invoice_status_draft;
                 return (
-                  <tr key={inv.id} className="hover:bg-sage-50 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-sage-600">{inv.numero}</td>
+                  <tr key={inv.id} className={`hover:bg-sage-50 transition-colors ${countsInTotals(inv) ? '' : 'opacity-60'}`}>
+                    <td className="px-4 py-3 font-mono text-xs text-sage-600">
+                      {inv.numero || '—'}
+                      {isCorrective(inv) && <span className="block font-sans text-[11px] text-sage-500">{t.invoice_corrects.replace('{number}', inv.rectificaNumero)}</span>}
+                    </td>
                     <td className="px-4 py-3">
-                      <span className="font-medium text-sage-900">{client?.nombre || '—'}</span>
-                      {loc && <span className="block text-[11px] text-sage-400">{loc.name}</span>}
+                      <span className="font-medium text-sage-900">{invoiceClientName(inv, clients) || '—'}</span>
+                      {loc && <span className="block text-[11px] text-sage-500">{loc.name}</span>}
                     </td>
                     <td className="px-4 py-3 text-xs text-sage-500">{formatDate(inv.fecha)}</td>
                     <td className="px-4 py-3 text-xs text-sage-600 max-w-xs truncate">
@@ -176,37 +236,28 @@ export const Invoices = () => {
                         <span className="ml-1.5 text-[11px] bg-sage-100 text-sage-500 px-1.5 py-0.5 rounded-badge">+{inv.items.length - 1}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-sage-800">{formatCurrency(inv.total || inv.importe)}</td>
-                    <td className="px-4 py-3 text-center">
-                      {/* StatusBadge calls a pending invoice "emitida" */}
-                      <StatusBadge status={inv.estado === 'pendiente' ? 'emitida' : inv.estado} />
-                    </td>
+                    <td className="px-4 py-3 text-right tabular-nums font-semibold text-sage-800">{formatCurrency(inv.total ?? inv.importe)}</td>
+                    <td className="px-4 py-3 text-center"><StatusBadge status={statusOf(inv)} /></td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleDownloadPDF(inv)}
-                          title={t.download_pdf}
-                          aria-label={`${t.download_pdf}: ${inv.numero}`}
-                          className="p-1.5 rounded-button text-sage-400 hover:text-wellness-600 hover:bg-wellness-50 transition-colors"
-                        >
-                          <FileDown size={13} />
-                        </button>
-                        <button
-                          onClick={() => { setEditInvoice(inv); setShowModal(true); }}
-                          title={t.edit}
-                          aria-label={`${t.edit}: ${inv.numero}`}
-                          className="p-1.5 rounded-button text-sage-400 hover:text-sage-700 hover:bg-sage-100 transition-colors"
-                        >
+                        {issued && (
+                          <>
+                            <button onClick={() => handleDownloadPDF(inv)} title={t.download_pdf} aria-label={`${t.download_pdf}: ${label}`} className={`${iconBtn} hover:text-wellness-600 hover:bg-wellness-50`}>
+                              <FileDown size={13} />
+                            </button>
+                            <button onClick={() => handleEmail(inv)} title={t.invoice_send_email} aria-label={`${t.invoice_send_email}: ${label}`} className={`${iconBtn} hover:text-wellness-600 hover:bg-wellness-50`}>
+                              <Mail size={13} />
+                            </button>
+                          </>
+                        )}
+                        <button onClick={() => { setEditInvoice(inv); setShowModal(true); }} title={issued ? t.invoice_open : t.edit} aria-label={`${issued ? t.invoice_open : t.edit}: ${label}`} className={`${iconBtn} hover:text-sage-700 hover:bg-sage-100`}>
                           <Edit2 size={13} />
                         </button>
-                        <button
-                          onClick={() => handleDelete(inv)}
-                          title={canDeleteInvoice(invoices, inv) ? t.delete : t.invoice_delete_not_last}
-                          aria-label={`${t.delete}: ${inv.numero}`}
-                          className="p-1.5 rounded-button text-sage-400 hover:text-danger hover:bg-danger-light transition-colors"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        {!issued && (
+                          <button onClick={() => handleDelete(inv)} title={t.delete} aria-label={`${t.delete}: ${label}`} className={`${iconBtn} hover:text-danger hover:bg-danger-light`}>
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -221,6 +272,15 @@ export const Invoices = () => {
         <InvoiceModal
           invoice={editInvoice}
           onClose={() => { setShowModal(false); setEditInvoice(null); }}
+        />
+      )}
+      {emailing && (
+        <SendEmailModal
+          mode="invoice"
+          client={emailing.client}
+          invoice={emailing.invoice}
+          pdfBytes={emailing.pdfBytes}
+          onClose={() => setEmailing(null)}
         />
       )}
       {ConfirmDialog}

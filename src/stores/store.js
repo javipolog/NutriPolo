@@ -3,7 +3,13 @@ import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
-import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes } from '../services/planificacion.js';
+import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes, replaceSeedRecipes } from '../services/planificacion.js';
+import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
+import RECETAS_V15_A_NUEVAS from '../data/recetasPlanificacionesV15.json';
+import {
+  isIssued, isCorrective, issuerSnapshot, recipientSnapshot, nextInvoiceNumber, issueProblems, issueFields,
+  correctiveDraft, cancelsInFull, billedConsultationIds, PAYMENT_FIELDS, SERIES,
+} from '../services/invoicing.js';
 
 // ============================================
 // TAURI STORAGE — Write queue amb debounce
@@ -37,10 +43,14 @@ function flushWrite(name) {
   const value = typeof queued === 'string' ? queued : JSON.stringify(queued);
   if (!isTauri()) {
     try { localStorage.setItem(name, value); } catch {}
+    partWritten(name);
     return Promise.resolve();
   }
   return invoke('save_data', { key: name, value })
-    .then(() => { if (useStore.getState().saveError) reportSaveError(null); })
+    .then(() => {
+      partWritten(name);
+      if (useStore.getState().saveError) reportSaveError(null);
+    })
     .catch((err) => {
       // Keep the value queued (unless a newer one arrived) and retry.
       if (writeQueue[name] === undefined) writeQueue[name] = value;
@@ -58,49 +68,200 @@ async function loadRaw(name) {
     const msg = String(err || '');
     // Nothing saved yet (first launch).
     if (msg.includes('not_found')) return null;
-    // If the vault is locked return null so Zustand keeps its defaults
-    // and let App.jsx re-trigger rehydration after unlock.
-    if (msg.includes('not_unlocked')) return null;
-    // The file exists but is unreadable: never fall back to empty
-    // defaults silently, or the next save would destroy the real data.
+    // Anything else means the file exists but is unreadable: never fall back
+    // to empty defaults silently, or the next save would destroy the real
+    // data. That includes `not_unlocked`: hydration only runs once the vault
+    // is open, so it means an encrypted file whose `encryption.json` is gone.
     loadFailure = { key: name, error: msg };
     return null;
   }
+}
+
+// ── Split storage ───────────────────────────────────────────────────────────
+// The store is saved in parts: each large collection in its own file, the
+// rest (config, sync state, preferences) in `nutripolo-storage`. A change
+// rewrites only the parts whose data changed, by reference: typing in a
+// client's interview writes the clients, not the appointments or the
+// product photos; changing view writes nothing.
+//
+// Migration from the single file is safe: until every part has been written
+// once, `nutripolo-storage` keeps the whole store (as before), so a crash
+// half-way leaves a complete file to load. Only then does it become the
+// small main part, marked `split`, and a load of it requires every part.
+const omit = (obj, key) => { const { [key]: _, ...rest } = obj || {}; return rest; };
+const entriesOf = (obj) => Object.keys(obj || {}).sort().flatMap(k => [k, obj[k]]);
+const STORE_PARTS = [
+  ['nutripolo-clients', 'clients'],
+  ['nutripolo-consultations', 'consultations'],
+  ['nutripolo-measurements', 'measurements'],
+  ['nutripolo-plans', 'nutritionPlans'],
+  ['nutripolo-invoices', 'invoices'],
+  ['nutripolo-documents', 'clientDocuments'],
+  ['nutripolo-suggestions', 'patientSuggestions'],
+  ['nutripolo-personal-events', 'personalEvents'],
+].map(([key, field]) => ({
+  key,
+  get: (st) => st[field],
+  put: (st, v) => { st[field] = v; },
+  deps: (st) => [st[field]],
+  field,
+})).concat([
+  // Product photos apart from the rest of the library: they are most of the bytes
+  {
+    key: 'nutripolo-library-products',
+    get: (st) => st.planLibrary?.productos,
+    put: (st, v) => { st.planLibrary = { ...(st.planLibrary || {}), productos: v }; },
+    deps: (st) => [st.planLibrary?.productos],
+  },
+  {
+    key: 'nutripolo-library',
+    get: (st) => omit(st.planLibrary, 'productos'),
+    put: (st, v) => { st.planLibrary = { ...(v || {}), ...(st.planLibrary?.productos ? { productos: st.planLibrary.productos } : {}) }; },
+    deps: (st) => entriesOf(omit(st.planLibrary, 'productos')),
+    field: 'planLibrary',
+  },
+]);
+const MAIN_KEY = 'nutripolo-storage';
+/** Every key the store is saved under (main part first). */
+export const STORE_KEYS = [MAIN_KEY, ...STORE_PARTS.map(p => p.key)];
+const PART_FIELDS = new Set(STORE_PARTS.map(p => p.field).filter(Boolean));
+const mainState = (st) => Object.fromEntries(Object.entries(st).filter(([k]) => !PART_FIELDS.has(k)));
+
+let storeLoaded = false;         // getItem has read the files (nothing is written before)
+let splitReady = false;          // the main file on disk is the small `split` one
+const lastDeps = {};             // per key: references of the data last queued
+const partsWritten = new Set();  // parts written at least once since loading
+let lastValue = null;            // last { state, version } from persist
+
+const sameDeps = (a, b) => !!a && a.length === b.length && a.every((v, i) => v === b[i]);
+
+function queueWrite(name, value) {
+  writeQueue[name] = value;
+  clearTimeout(writeTimers[name]);
+  writeTimers[name] = setTimeout(() => flushWrite(name), 300);
+}
+
+function partWritten(name) {
+  if (splitReady || name === MAIN_KEY) return;
+  partsWritten.add(name);
+  if (STORE_PARTS.every(p => partsWritten.has(p.key)) && lastValue) {
+    // Every part is on disk: the main file can become the small one
+    splitReady = true;
+    const { state, version } = lastValue;
+    queueWrite(MAIN_KEY, { version, state: mainState(state), split: true });
+  }
+}
+
+/**
+ * Before a new version migrates the data, keep it as it was in the safety
+ * copy ("previous copy" in Settings and on the load error screen): a
+ * migration with a mistake would otherwise be saved over it, and the daily
+ * backups would go through the same migration on restore.
+ */
+async function saveBeforeUpdate(state, version) {
+  if (!Number.isInteger(version) || version >= STORE_VERSION || !state || !hasData(state)) return;
+  try {
+    const data = { ...state, config: configForBackup(state.config) };
+    await invoke('save_data', { key: SAFETY_BACKUP_KEY, value: JSON.stringify({ version, date: new Date().toISOString(), data }) });
+    await invoke('save_data', { key: SAFETY_INFO_KEY, value: JSON.stringify({ date: new Date().toISOString(), reason: 'update' }) });
+  } catch { /* outside Tauri, or the disk: the load goes on */ }
 }
 
 // Persist storage for zustand (objects in, objects out).
 const tauriStorage = {
   // A JSON parse error throws: the persist middleware reports it as a load failure.
   getItem: async (name) => {
+    storeLoaded = false;
+    // What is on disk becomes the state: writes queued from the state it
+    // replaces must not land on top of it.
+    for (const key of STORE_KEYS) { clearTimeout(writeTimers[key]); delete writeTimers[key]; delete writeQueue[key]; }
+    // Until every part is written again, the main file keeps the whole store
+    const startOver = () => {
+      splitReady = false;
+      partsWritten.clear();
+      for (const key of STORE_KEYS) delete lastDeps[key];
+      storeLoaded = true;
+    };
     const raw = await loadRaw(name);
-    return raw == null ? null : JSON.parse(raw);
+    if (raw == null) { startOver(); return null; }   // first launch (or loadFailure)
+    const main = JSON.parse(raw);
+    // Single file (before v1.19): the next change writes every part
+    if (!main?.split) { startOver(); await saveBeforeUpdate(main?.state, main?.version); return main; }
+    const state = { ...main.state };
+    for (const part of STORE_PARTS) {
+      const partRaw = await loadRaw(part.key);
+      if (partRaw == null) {
+        // A part the main file says exists is missing: never load without it
+        if (!loadFailure) loadFailure = { key: part.key, error: 'missing' };
+        startOver();
+        return null;
+      }
+      try {
+        part.put(state, JSON.parse(partRaw));
+      } catch (e) {
+        loadFailure = { key: part.key, error: String(e?.message || e) };
+        startOver();
+        return null;
+      }
+    }
+    splitReady = true;
+    for (const part of STORE_PARTS) lastDeps[part.key] = part.deps(state);
+    await saveBeforeUpdate(state, main.version);
+    storeLoaded = true;
+    return { ...main, state };
   },
   // `value` is the persisted object ({ state, version }). Zustand calls this on
-  // every set(); the object is only turned into JSON when the debounced write
-  // runs, so bursts of updates (a sync, typing) cost one serialization.
+  // every set(); only the parts whose data changed are queued, and they are
+  // turned into JSON when the debounced write runs, so bursts of updates (a
+  // sync, typing) cost one serialization of what changed.
   setItem: (name, value) => {
-    if (loadFailure) return;
-    writeQueue[name] = value;
-    clearTimeout(writeTimers[name]);
-    writeTimers[name] = setTimeout(() => flushWrite(name), 300);
+    // Before the files are read the state is the empty default: writing it
+    // would replace the real data. And never while a file is unreadable.
+    if (!storeLoaded || loadFailure) return;
+    lastValue = value;
+    const { state, version } = value;
+    let changed = false;
+    for (const part of STORE_PARTS) {
+      const deps = part.deps(state);
+      if (sameDeps(lastDeps[part.key], deps)) continue;
+      lastDeps[part.key] = deps;
+      queueWrite(part.key, part.get(state));
+      changed = true;
+    }
+    const main = mainState(state);
+    const mainDeps = [version, ...entriesOf(main)];
+    // The small main file only when its own data changed; while it still holds
+    // the whole store (before every part is on disk), on any change
+    if (sameDeps(lastDeps[MAIN_KEY], mainDeps) && (splitReady || !changed)) return;
+    lastDeps[MAIN_KEY] = mainDeps;
+    // Until every part is on disk the main file keeps the whole store
+    queueWrite(name, splitReady ? { version, state: main, split: true } : value);
   },
-  removeItem: async (name) => {
-    clearTimeout(writeTimers[name]);
-    delete writeQueue[name];
-    delete writeTimers[name];
-    if (!isTauri()) { localStorage.removeItem(name); return; }
-    await invoke('delete_data', { key: name }).catch(() => {});
+  removeItem: async () => {
+    for (const key of STORE_KEYS) {
+      clearTimeout(writeTimers[key]);
+      delete writeQueue[key];
+      delete writeTimers[key];
+      delete lastDeps[key];
+      if (!isTauri()) { localStorage.removeItem(key); continue; }
+      await invoke('delete_data', { key }).catch(() => {});
+    }
   },
 };
 
-/** Write every queued value now. Await it before locking the vault. */
-export function flushAllPending() {
+/**
+ * Write every queued value now. Await it before locking the vault or quitting.
+ * Resolves to true when everything reached the disk, false when a write
+ * failed (it stays queued and is retried).
+ */
+export async function flushAllPending() {
   const names = new Set([...Object.keys(writeTimers), ...Object.keys(writeQueue)]);
-  return Promise.all([...names].map(name => {
+  await Promise.all([...names].map(name => {
     clearTimeout(writeTimers[name]);
     delete writeTimers[name];
     return flushWrite(name);
   }));
+  return Object.keys(writeQueue).length === 0;
 }
 
 if (typeof window !== 'undefined') {
@@ -254,26 +415,25 @@ export function computeInvoiceTotals(items = [], ivaPct = 0, irpfPct = 0) {
 // ============================================
 // INVOICE NUMBERING
 // ============================================
-const INVOICE_SERIES_RE = /^(NP-\d{4}-)(\d+)$/;
-
-/** Sequence number of `numero` within the series `prefix` (NP-YYYY-), or 0. */
-function invoiceSeq(numero, prefix) {
-  const m = INVOICE_SERIES_RE.exec(numero || '');
-  return m && m[1] === prefix ? parseInt(m[2], 10) : 0;
-}
-
 /**
- * Invoice numbers must stay correlative, without gaps: only the last invoice
- * of its series can be deleted (its number is then reused). Any other one is
- * cancelled (`anulada`) instead. Numbers outside the NP-YYYY-NNN series are
- * free to delete.
+ * Only a draft can be deleted: it has no number yet, so no gap is left.
+ * An issued invoice is corrected with a corrective invoice instead
+ * (see services/invoicing.js).
  */
 export function canDeleteInvoice(invoices, invoice) {
-  const m = INVOICE_SERIES_RE.exec(invoice?.numero || '');
-  if (!m) return true;
-  const seq = parseInt(m[2], 10);
-  return !(invoices || []).some(i => i.id !== invoice.id && invoiceSeq(i.numero, m[1]) > seq);
+  return !!invoice && !isIssued(invoice);
 }
+
+const invoiceTotalsFields = (inv) => {
+  const items = inv.items || [];
+  const totals = computeInvoiceTotals(items, inv.ivaPct ?? 0, inv.irpfPct ?? 0);
+  return {
+    ...totals,
+    // backward-compat fields
+    concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
+    importe: totals.total,
+  };
+};
 
 // ============================================
 // DEFAULT DATA
@@ -298,7 +458,7 @@ export const EMPTY_PLAN_LIBRARY = { productos: [], recetas: [], alimentos: {} };
 // ============================================
 // SCHEMA MIGRATION
 // ============================================
-const STORE_VERSION = 14;
+const STORE_VERSION = 17;
 
 // ── Default invoice design (exported for reuse) ──
 export const DEFAULT_INVOICE_DESIGN = {
@@ -326,6 +486,30 @@ function migrateStore(persistedState, version) {
   const box = { state: persistedState || {} };
   migrateLegacy(box, version);
   const s = box.state;
+  if (version < 17 && Array.isArray(s.invoices)) {
+    // v16 → v17: draft → issued. Every invoice so far was handed out when it
+    // was created, so it counts as issued, with the issuer's and client's
+    // data as they are now (the closest there is to the day it was issued).
+    const clientsById = new Map((s.clients || []).map(c => [c.id, c]));
+    const emisor = issuerSnapshot(s.config || {});
+    s.invoices = s.invoices.map(inv => (inv.emitidaAt ? inv : {
+      ...inv,
+      emitidaAt: inv.fecha ? `${inv.fecha}T12:00:00.000Z` : new Date().toISOString(),
+      emisor,
+      destinatario: recipientSnapshot(clientsById.get(inv.clienteId) || {}),
+    }));
+  }
+  if (version === 15 && Array.isArray(s.planLibrary?.recetas)) {
+    // v15 → v16: les receptes de Canva que va sembrar la v1.18.0 i que no
+    // s'han tocat passen a la versió neta (errates, unitats, duplicats fusionats).
+    s.planLibrary = { ...s.planLibrary, recetas: replaceSeedRecipes(s.planLibrary.recetas, RECETAS_V15_A_NUEVAS, RECETAS_PLANIFICACIONES) };
+  }
+  if (version < 15) {
+    // v14 → v15: "Mis recetas" s'omple amb els plats i opcions de les
+    // planificacions fetes amb Canva (scripts/recetas). Les que ja hi són no es toquen.
+    const planLibrary = { ...EMPTY_PLAN_LIBRARY, ...(s.planLibrary || {}) };
+    s.planLibrary = { ...planLibrary, recetas: addMissingRecipes(planLibrary.recetas || [], RECETAS_PLANIFICACIONES) };
+  }
   if (version < 14 && Array.isArray(s.clients)) {
     // v13 → v14: l'última visita es calcula (lastVisitByClient); el camp desat
     // podia anar enrere en editar una consulta antiga.
@@ -749,6 +933,16 @@ export function stripGoogleSecrets(config) {
   };
 }
 
+/**
+ * Config as it goes into any copy (automatic backups, safety copy, ZIP):
+ * without the Google tokens nor the SMTP password, which live in the OS
+ * keyring. A store file from an old version may still carry them.
+ */
+export function configForBackup(config) {
+  const c = stripGoogleSecrets(config);
+  return c?.smtp?.password ? { ...c, smtp: { ...c.smtp, password: '' } } : c;
+}
+
 // Restored backups must not replace the live Google connection.
 function mergeRestoredConfig(current, restored) {
   if (!restored) return current;
@@ -895,8 +1089,11 @@ function buildClientDeletion(s, id) {
   const consultations = s.consultations.flatMap(c => {
     if (c.clienteId === id) {
       if (!c.googleEventId) return [];
+      // Kept so the next pull does not import it again, but without the
+      // patient's notes (undo brings them back from the snapshot).
       // matchedBy 'user': the sync must not propose the deleted patient again.
-      return [{ ...c, clienteId: null, matchStatus: 'unknown', matchedBy: 'user', suggestedClienteId: undefined, matchScore: undefined }];
+      return [{ ...c, clienteId: null, matchStatus: 'unknown', matchedBy: 'user', suggestedClienteId: undefined, matchScore: undefined,
+        notasPrivadas: '', notasCliente: '' }];
     }
     if (c.suggestedClienteId === id) {
       return [{ ...c, suggestedClienteId: undefined, matchScore: undefined, matchStatus: 'suggested' }];
@@ -939,48 +1136,157 @@ function restoreClientDeletion(s, entry) {
   };
 }
 
+/** A file that is not a usable NutriPolo backup; `code` is shown translated. */
+export class BackupError extends Error {
+  constructor(code) { super(code); this.code = code; }
+}
+
+const BACKUP_ARRAYS = ['clients', 'measurements', 'consultations', 'nutritionPlans', 'services', 'invoices', 'clientDocuments'];
+
 /**
- * Data of a parsed backup brought up to the current schema, like a normal
+ * Check a parsed backup and bring it up to the current schema, like a normal
  * load. Accepts exports/auto-backups (`{ version, data }`), the raw store
  * file (`{ version, state }`) and very old bare objects (taken as current).
+ * Returns { data, date, counts }. Throws BackupError:
+ *   not_a_backup → no NutriPolo data in it (another JSON, an empty object…)
+ *   backup_newer → written by a newer version of the app
  */
-export function backupData(parsed) {
-  const raw = parsed?.data || parsed?.state || parsed || {};
+export function readBackup(parsed) {
+  const raw = parsed?.data || parsed?.state || parsed;
+  if (!raw || typeof raw !== 'object' || !Array.isArray(raw.clients)) throw new BackupError('not_a_backup');
+  if (BACKUP_ARRAYS.some(k => raw[k] != null && !Array.isArray(raw[k]))) throw new BackupError('not_a_backup');
   const version = Number.isInteger(parsed?.version) ? parsed.version : STORE_VERSION;
-  return version < STORE_VERSION ? migrateStore(raw, version) : raw;
+  if (version > STORE_VERSION) throw new BackupError('backup_newer');
+  const data = version < STORE_VERSION ? migrateStore(raw, version) : raw;
+  const count = (k) => (Array.isArray(data[k]) ? data[k].length : 0);
+  return {
+    data,
+    date: parsed?.exportDate || parsed?.date || null,
+    counts: { clients: count('clients'), consultations: count('consultations'), invoices: count('invoices'), nutritionPlans: count('nutritionPlans') },
+  };
+}
+
+const hasData = (s) => !!(s.clients?.length || s.consultations?.length || s.invoices?.length || s.nutritionPlans?.length);
+
+// Copy of the data taken right before a restore or import replaces it, so a
+// wrong file can be undone (Settings and the load error screen offer it).
+const SAFETY_BACKUP_KEY = 'backup-safety';
+const SAFETY_INFO_KEY = 'backup-safety-info';
+const AUTO_BACKUP_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Dates of the automatic backups on disk, oldest first. */
+async function listAutoBackupDates() {
+  // The files themselves are the truth: a damaged manifest must not hide them.
+  const keys = await invoke('list_data_keys', { prefix: 'backup-' }).catch(() => null);
+  let dates;
+  if (Array.isArray(keys)) {
+    dates = keys.map(k => k.slice('backup-'.length));
+  } else {
+    const raw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
+    try { dates = raw ? JSON.parse(raw) : []; } catch { dates = []; }
+    if (!Array.isArray(dates)) dates = [];
+  }
+  return [...new Set(dates)].filter(d => AUTO_BACKUP_DATE.test(d)).sort();
+}
+
+function backupSnapshot(s) {
+  return { version: STORE_VERSION, date: new Date().toISOString(), data: { config: configForBackup(s.config), ...backupCollections(s) } };
+}
+
+/** Save the current data as the safety copy (skipped when there is nothing to keep). Throws if it cannot. */
+async function saveSafetyBackup(s) {
+  if (!hasData(s)) return;
+  await invoke('save_data', { key: SAFETY_BACKUP_KEY, value: JSON.stringify(backupSnapshot(s)) });
+  await invoke('save_data', { key: SAFETY_INFO_KEY, value: JSON.stringify({ date: new Date().toISOString() }) });
 }
 
 /** Collections included in backups and exports (config is added stripped). */
 function backupCollections(s) {
   const { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
-    emailTemplates, planLibrary, patientSuggestions } = s;
+    emailTemplates, planLibrary, patientSuggestions, sentByEvent } = s;
   return { clients, measurements, consultations, nutritionPlans, services, invoices, clientDocuments,
-    emailTemplates, planLibrary, patientSuggestions };
+    emailTemplates, planLibrary, patientSuggestions, sentByEvent };
 }
 
 /**
- * State patch that replaces the data with a backup's (`d` from backupData).
+ * State patch that replaces the data with a backup's (`d` from readBackup).
+ * Two things are kept from the current data, because they already happened
+ * outside the app:
+ *  - invoices issued after the backup (dropping them would hand their
+ *    numbers out again), counted in `keptInvoices`;
+ *  - the reminder / review-request status of each consultation (or the
+ *    next tick would send them again), and the one kept for events waiting
+ *    to be imported again after an agenda reset (`sentByEvent`).
+ * Personal events are a mirror of Google: one that is a consultation again
+ * in the backup (a copy from before converting its calendar) is dropped, so
+ * the appointment does not show twice.
  * The undo history belongs to the replaced data, so it is cleared.
  */
-function restoredState(d, current) {
+export function restoredState(d, current) {
+  const backupInvoices = d.invoices || [];
+  const ids = new Set(backupInvoices.map(i => i.id));
+  const numbers = new Set(backupInvoices.map(i => i.numero).filter(Boolean));
+  const newerInvoices = (current.invoices || []).filter(i => !ids.has(i.id) && !(i.numero && numbers.has(i.numero)));
+  const sent = new Map((current.consultations || []).filter(c => c.reminders || c.reviewRequest).map(c => [c.id, c]));
+  const consultations = (d.consultations || []).map(c => {
+    const now = sent.get(c.id);
+    return now ? { ...c, reminders: now.reminders ?? c.reminders, reviewRequest: now.reviewRequest ?? c.reviewRequest } : c;
+  });
+  return {
+    keptInvoices: newerInvoices.length,
+    patch: restoredPatch(d, current, { invoices: [...backupInvoices, ...newerInvoices], consultations }),
+  };
+}
+
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+
+function restoredPatch(d, current, { invoices, consultations }) {
+  const consultationEvents = new Set(consultations.map(c => c.googleEventId).filter(Boolean));
   return {
     clients:        d.clients        || [],
     measurements:   d.measurements   || [],
-    consultations:  d.consultations  || [],
+    consultations,
     nutritionPlans: d.nutritionPlans || [],
     services:       d.services       || DEFAULT_SERVICES,
-    invoices:       d.invoices       || [],
+    invoices,
     clientDocuments:d.clientDocuments || [],
     emailTemplates: d.emailTemplates || null,
     planLibrary:    d.planLibrary    || EMPTY_PLAN_LIBRARY,
     // Older backups did not include the inbox; the sync rebuilds missing suggestions.
     patientSuggestions: Array.isArray(d.patientSuggestions) ? d.patientSuggestions : current.patientSuggestions,
+    personalEvents: (current.personalEvents || []).filter(e => !e.googleEventId || !consultationEvents.has(e.googleEventId)),
+    sentByEvent: { ...(isPlainObject(d.sentByEvent) ? d.sentByEvent : {}), ...(current.sentByEvent || {}) },
     config: mergeRestoredConfig(current.config, d.config),
     selectedClientId: null,
     _history: [],
     _future: [],
   };
 }
+
+// Why an undo entry can no longer be applied safely (null = it can).
+// - delete_invoice: its number was reused by a newer invoice → two invoices
+//   with the same number (numbering must be unique and correlative).
+// - add_client: undoing deletes the client; not once it has been edited
+//   (interview, energy…) or has anything linked to it.
+export function undoBlockReason(s, entry) {
+  if (entry?.type === 'delete_invoice') {
+    const { id, numero } = entry.item || {};
+    return (s.invoices || []).some(i => i.id === id || (numero && i.numero === numero))
+      ? 'invoice_number_taken' : null;
+  }
+  if (entry?.type === 'add_client') {
+    const id = entry.item?.id;
+    const current = (s.clients || []).find(c => c.id === id);
+    if (!current) return null;
+    const linked = [s.consultations, s.measurements, s.nutritionPlans, s.invoices, s.clientDocuments]
+      .some(list => (list || []).some(x => x?.clienteId === id));
+    return current !== entry.item || linked ? 'client_in_use' : null;
+  }
+  return null;
+}
+
+// Last config given to partialize and its stripped copy
+const safeConfigCache = { from: undefined, to: undefined };
 
 // ============================================
 // STORE
@@ -992,6 +1298,9 @@ const useStore = create(
       config: {
         nombre: 'Raquel Polo García',
         nif: '',
+        iban: '',
+        // Wording of the VAT exemption on invoices ('' = DEFAULT_VAT_EXEMPTION_TEXT)
+        textoExencionIva: '',
         numColegiada: 'CV01944',
         email: 'nutripoloraquel@gmail.com',
         telefono: '+34 622 573 834',
@@ -1201,6 +1510,11 @@ const useStore = create(
         const isSyncOp = sync;
         const data = isSyncOp ? input : withoutSyncFields(input);
         const extra = isSyncOp ? {} : { localUpdatedAt: new Date().toISOString() };
+        // An all-day event the user gives a date or time becomes a timed appointment
+        const before = get().consultations.find(c => c.id === id);
+        if (!isSyncOp && before?.allDay && ((data.hora && data.hora !== before.hora) || (data.fecha && data.fecha !== before.fecha))) {
+          extra.allDay = false;
+        }
 
         // Hook: if a user manually changes clienteId on a consultation matched by
         // the sync (pending review, or linked automatically), flip matchStatus to
@@ -1233,13 +1547,34 @@ const useStore = create(
           }));
         }
       },
-      resetAgenda: (onlyGoogleSynced = false) => set(s => ({
-        consultations: onlyGoogleSynced
-          ? s.consultations.filter(c => !c.googleEventId)
-          : [],
-        _history: [],
-        _future: [],
-      })),
+      // Reminders and review requests already sent are remembered by Google
+      // event, so the next sync does not import those appointments as if
+      // nothing had been sent (see takeSentStatus).
+      resetAgenda: (onlyGoogleSynced = false) => set(s => {
+        const sent = { ...(s.sentByEvent || {}) };
+        for (const c of s.consultations) {
+          if (c.googleEventId && (c.reminders || c.reviewRequest)) {
+            sent[c.googleEventId] = { reminders: c.reminders, reviewRequest: c.reviewRequest };
+          }
+        }
+        return {
+          consultations: onlyGoogleSynced ? s.consultations.filter(c => !c.googleEventId) : [],
+          sentByEvent: sent,
+          _history: [],
+          _future: [],
+        };
+      }),
+      sentByEvent: {},
+      // The sent status remembered for a Google event, once (it is dropped).
+      takeSentStatus: (googleEventId) => {
+        const status = get().sentByEvent?.[googleEventId];
+        if (!status) return null;
+        set(s => ({ sentByEvent: omit(s.sentByEvent, googleEventId) }));
+        return status;
+      },
+      // Copy of the current data before something that cannot be undone
+      // (reset the agenda, turn a calendar's appointments into personal events)
+      saveSafetyBackup: () => saveSafetyBackup(get()),
 
       removeConsultationsForCalendar: (calendarId) => set(s => ({
         consultations: s.consultations.filter(c => c.sourceCalendarId !== calendarId),
@@ -1283,7 +1618,7 @@ const useStore = create(
           fecha: c.fecha,
           hora: c.hora,
           duracion: c.duracion,
-          allDay: false,
+          allDay: !!c.allDay,
           lastSyncedAt: c.lastSyncedAt || null,
           remoteUpdated: c.remoteUpdated || null,
           cancelled: c.estado === 'cancelada',
@@ -1720,77 +2055,79 @@ const useStore = create(
       // ---- INVOICES ----
       invoices: [],
 
-      // Next number of the series of the invoice date's year (NP-YYYY-NNN),
-      // derived from the invoices list. Self-healing: tolerates imports and
-      // year rollovers without a persisted counter to keep in sync.
-      generateInvoiceNumber: (fecha) => {
-        const year = /^\d{4}/.test(fecha || '') ? fecha.slice(0, 4) : String(new Date().getFullYear());
-        const prefix = `NP-${year}-`;
-        const maxSeq = (get().invoices || []).reduce((max, inv) => {
-          const n = invoiceSeq(inv?.numero, prefix);
-          return n > max ? n : max;
-        }, 0);
-        return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+      // Next number of a series for the year of `fecha` (NP-YYYY-NNN, R-YYYY-NNN).
+      generateInvoiceNumber: (fecha, serie = SERIES.ordinaria) => nextInvoiceNumber(get().invoices || [], fecha, serie),
+
+      // Create (no id) or update a draft. A draft has no number: it gets one
+      // when it is issued. Returns the saved draft.
+      saveInvoiceDraft: (data, id = null) => {
+        const existing = id ? get().invoices.find(i => i.id === id) : null;
+        if (existing && isIssued(existing)) return existing;
+        const { numero, emitidaAt, emisor, destinatario, ...fields } = data;
+        const draft = {
+          ...(existing || {}),
+          ...fields,
+          id: existing?.id || generateId(),
+          estado: fields.estado || existing?.estado || 'pendiente',
+          items: fields.items || existing?.items || [],
+          ivaPct: fields.ivaPct ?? existing?.ivaPct ?? 0,
+          irpfPct: fields.irpfPct ?? existing?.irpfPct ?? 0,
+        };
+        const saved = { ...draft, ...invoiceTotalsFields(draft) };
+        set(s => ({ invoices: existing ? s.invoices.map(i => (i.id === saved.id ? saved : i)) : [...s.invoices, saved] }));
+        return saved;
       },
 
-      addInvoice: (invoice) => {
-        let numero = invoice.numero || get().generateInvoiceNumber(invoice.fecha);
-        // Defensive: if the caller supplied a number that collides with an
-        // existing invoice (e.g. manual edit), regenerate to avoid duplicates.
-        if (get().invoices.some(i => i.numero === numero)) {
-          console.warn(`[addInvoice] Duplicate invoice number "${numero}" detected, regenerating`);
-          numero = get().generateInvoiceNumber(invoice.fecha);
-        }
-        const items = invoice.items || [];
-        const ivaPct = invoice.ivaPct ?? 0;
-        const irpfPct = invoice.irpfPct ?? 0;
-        const totals = computeInvoiceTotals(items, ivaPct, irpfPct);
-        const newI = {
-          ...invoice,
-          id: generateId(),
-          numero,
-          estado: invoice.estado || 'pendiente',
-          items,
-          ivaPct,
-          irpfPct,
-          ...totals,
-          // backward-compat fields
-          concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
-          importe: totals.total,
-        };
-        set(s => ({ invoices: [...s.invoices, newI] }));
-        return newI;
+      // Issue a draft: next number of its series, the issuer's and client's
+      // data frozen, and no more edits. Returns { ok, invoice } or
+      // { ok: false, problems } (see issueProblems).
+      issueInvoice: (id) => {
+        const s = get();
+        const draft = s.invoices.find(i => i.id === id);
+        if (!draft) return { ok: false, problems: [{ code: 'not_found' }] };
+        if (isIssued(draft)) return { ok: true, invoice: draft };
+        const client = s.clients.find(c => c.id === draft.clienteId);
+        const problems = issueProblems(draft, client, s.config, s.invoices);
+        if (problems.length) return { ok: false, problems };
+        const invoice = { ...draft, ...issueFields(draft, client, s.config, s.invoices, new Date().toISOString()) };
+        const original = isCorrective(invoice) ? s.invoices.find(i => i.id === invoice.rectificaA) : null;
+        set(st => ({
+          invoices: st.invoices.map(i => {
+            if (i.id === invoice.id) return invoice;
+            if (original && i.id === original.id) {
+              return {
+                ...i,
+                rectificadaPor: [...(i.rectificadaPor || []), invoice.id],
+                // Cancelled in full: its consultations can be billed again
+                ...(cancelsInFull(invoice, i) ? { estado: 'anulada' } : {}),
+              };
+            }
+            return i;
+          }),
+        }));
+        return { ok: true, invoice };
       },
+
+      // Draft of a corrective invoice for an issued one (full cancellation
+      // to start with; its lines can be edited). Returns the draft.
+      createCorrectiveDraft: (id) => {
+        const original = get().invoices.find(i => i.id === id);
+        if (!original || !isIssued(original) || isCorrective(original)) return null;
+        return get().saveInvoiceDraft(correctiveDraft(original, { fecha: todayISO(), generateId }));
+      },
+
+      // A draft takes any change; an issued invoice only how and when it was
+      // paid (PAYMENT_FIELDS), and is never set to "anulada" by hand.
       updateInvoice: (id, data) => {
         const existing = get().invoices.find(i => i.id === id);
         if (!existing) return;
-        // Duplicate numero check: reject a change that would collide
-        // with another invoice's number (fiscal audit integrity).
-        let safeData = data;
-        if (data.numero && data.numero !== existing.numero) {
-          const dup = get().invoices.some(i => i.id !== id && i.numero === data.numero);
-          if (dup) {
-            if (import.meta.env.DEV) {
-              console.warn(`[updateInvoice] Duplicate numero "${data.numero}" — keeping previous "${existing.numero}"`);
-            }
-            safeData = { ...data, numero: existing.numero };
-          }
-        }
-        const merged = { ...existing, ...safeData };
-        const items = merged.items || [];
-        const ivaPct = merged.ivaPct ?? 0;
-        const irpfPct = merged.irpfPct ?? 0;
-        const totals = computeInvoiceTotals(items, ivaPct, irpfPct);
-        const updated = {
-          ...merged,
-          ...totals,
-          concepto: items.map(i => i.descripcion).filter(Boolean).join(', '),
-          importe: totals.total,
-        };
-        set(s => ({ invoices: s.invoices.map(i => i.id === id ? updated : i) }));
+        if (!isIssued(existing)) { get().saveInvoiceDraft(data, id); return; }
+        const allowed = Object.fromEntries(Object.entries(data).filter(([k]) => PAYMENT_FIELDS.includes(k)));
+        if (allowed.estado === 'anulada' && existing.estado !== 'anulada') delete allowed.estado;
+        set(s => ({ invoices: s.invoices.map(i => (i.id === id ? { ...i, ...allowed } : i)) }));
       },
-      // Only the last invoice of a series can be deleted (see canDeleteInvoice).
-      // Returns whether it was deleted.
+
+      // Only drafts can be deleted (see canDeleteInvoice). Returns whether it was deleted.
       deleteInvoice: (id) => {
         const item = get().invoices.find(i => i.id === id);
         if (!item || !canDeleteInvoice(get().invoices, item)) return false;
@@ -1804,9 +2141,7 @@ const useStore = create(
 
       getUnbilledConsultations: (clienteId) => {
         const { consultations, invoices } = get();
-        const billedIds = new Set(
-          invoices.flatMap(inv => (inv.items || []).map(item => item.consultationId).filter(Boolean))
-        );
+        const billedIds = billedConsultationIds(invoices);
         return consultations.filter(c =>
           c.clienteId === clienteId &&
           c.estado === 'completada' &&
@@ -1835,10 +2170,25 @@ const useStore = create(
       _history: [],
       _future: [],
 
+      // "Undo" on the toast of a deletion: only if that deletion is still the
+      // last thing in the history (nothing else gets undone by mistake).
+      undoDeletion: (type, id) => {
+        const last = get()._history[0];
+        if (last?.type !== type || last.item?.id !== id) return { ok: false, reason: 'not_last' };
+        return get().undo();
+      },
+
+      // Returns { ok: true } or { ok: false, reason } when undoing would break
+      // data: the blocked entry is dropped so it doesn't stay stuck on top.
       undo: () => {
         const history = get()._history;
-        if (!history.length) return;
+        if (!history.length) return { ok: false, reason: 'empty' };
         const [last, ...rest] = history;
+        const reason = undoBlockReason(get(), last);
+        if (reason) {
+          set({ _history: rest });
+          return { ok: false, reason };
+        }
         // Single set() so every consumer sees a consistent snapshot —
         // previously this fired 2 separate updates and components could
         // observe the item list mutated before the history bookkeeping.
@@ -1854,6 +2204,7 @@ const useStore = create(
           if (last.type === 'delete_invoice')      next.invoices        = [last.item, ...s.invoices];
           return next;
         });
+        return { ok: true };
       },
       redo: () => {
         const future = get()._future;
@@ -1921,48 +2272,79 @@ const useStore = create(
       // ---- BACKUP ----
       lastBackupDate: null,
 
+      // Once a day, also while the app lives in the tray (useBackgroundJobs
+      // calls it every few minutes). Returns { ok, skipped?, error? }.
       runAutoBackup: async () => {
         const today = todayISO();
-        if (get().lastBackupDate === today) return;
-        const backup = {
-          version: STORE_VERSION,
-          date: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
-        };
+        const s = get();
+        if (s.lastBackupDate === today) return { ok: true, skipped: true };
+        // A backup of nothing (e.g. right after "start empty") would push a
+        // real one out of the rotation.
+        if (!hasData(s)) return { ok: true, skipped: true };
         try {
-          const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
-          const manifest = manifestRaw ? JSON.parse(manifestRaw) : [];
-          await invoke('save_data', { key: `backup-${today}`, value: JSON.stringify(backup) });
-          const newManifest = [...manifest.filter(d => d !== today), today].slice(-7);
-          await invoke('save_data', { key: 'backup-manifest', value: JSON.stringify(newManifest) });
-          for (const old of manifest.slice(0, Math.max(0, manifest.length - 6))) {
+          const dates = await listAutoBackupDates();
+          await invoke('save_data', { key: `backup-${today}`, value: JSON.stringify(backupSnapshot(s)) });
+          const keep = [...dates.filter(d => d !== today), today].slice(-7);
+          await invoke('save_data', { key: 'backup-manifest', value: JSON.stringify(keep) });
+          for (const old of dates.filter(d => !keep.includes(d))) {
             await invoke('delete_data', { key: `backup-${old}` }).catch(() => {});
           }
           set({ lastBackupDate: today });
-        } catch (e) { if (import.meta.env.DEV) console.warn('Backup failed:', e); }
+          return { ok: true };
+        } catch (e) {
+          return { ok: false, error: String(e?.message || e) };
+        }
       },
 
+      // { count, lastDate, dates, safety: { date } | null }
       getAutoBackupInfo: async () => {
-        try {
-          const manifestRaw = await invoke('load_data', { key: 'backup-manifest' }).catch(() => null);
-          const manifest = manifestRaw ? JSON.parse(manifestRaw) : [];
-          return { count: manifest.length, lastDate: manifest.length > 0 ? manifest[manifest.length - 1] : null, dates: manifest };
-        } catch { return { count: 0, lastDate: null, dates: [] }; }
+        const dates = await listAutoBackupDates().catch(() => []);
+        const info = await invoke('load_data', { key: SAFETY_INFO_KEY }).then(JSON.parse).catch(() => null);
+        return {
+          count: dates.length,
+          lastDate: dates.length > 0 ? dates[dates.length - 1] : null,
+          dates,
+          safety: info?.date ? { date: info.date } : null,
+        };
       },
 
-      restoreFromAutoBackup: async (date) => {
-        const raw = await invoke('load_data', { key: `backup-${date}` });
-        const d = backupData(JSON.parse(raw));
-        set(s => restoredState(d, s));
+      // Read and check an automatic backup ('YYYY-MM-DD') or the copy taken
+      // before the last restore ('safety'). Nothing changes yet.
+      loadAutoBackup: async (date) => {
+        const key = date === 'safety' ? SAFETY_BACKUP_KEY : `backup-${date}`;
+        const raw = await invoke('load_data', { key });
+        return readBackup(JSON.parse(raw));
       },
 
+      // Replace the data with a checked backup (from loadAutoBackup or
+      // pickBackupFile). The current data is first saved as the safety copy;
+      // if that fails nothing is replaced. Returns { keptInvoices }.
+      applyBackup: async (backup, { safety = true } = {}) => {
+        if (safety) await saveSafetyBackup(get());
+        const { patch, keptInvoices } = restoredState(backup.data, get());
+        set(patch);
+        return { keptInvoices };
+      },
+
+      restoreFromAutoBackup: async (date) => get().applyBackup(await get().loadAutoBackup(date)),
+
+      // Returns { saved: false } if the save dialog is cancelled, or
+      // { saved: true, skipped } once the file is on disk; a failed write throws
+      // (the caller must not report a backup that does not exist).
       exportDataToZip: async (onProgress) => {
+        const fileName = `nutripolo-backup-${todayISO()}.zip`;
+        let path = null;
+        if (isTauri()) {
+          const { save } = await import('@tauri-apps/api/dialog');
+          path = await save({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip'] }], defaultPath: fileName });
+          if (!path) return { saved: false };
+        }
         const JSZip = (await import('jszip')).default;
         const { clientDocuments } = get();
         const payload = {
           version: STORE_VERSION,
           exportDate: new Date().toISOString(),
-          data: { config: stripGoogleSecrets(get().config), ...backupCollections(get()) },
+          data: { config: configForBackup(get().config), ...backupCollections(get()) },
         };
 
         const zip = new JSZip();
@@ -1987,78 +2369,84 @@ const useStore = create(
 
         const zipBytes = await zip.generateAsync({ type: 'uint8array' });
 
-        try {
-          const { save } = await import('@tauri-apps/api/dialog');
-          const { writeBinaryFile } = await import('@tauri-apps/api/fs');
-          const path = await save({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip'] }], defaultPath: `nutripolo-backup-${todayISO()}.zip` });
-          if (path) {
-            await writeBinaryFile(path, zipBytes);
-          }
-        } catch {
-          const blob = new Blob([zipBytes], { type: 'application/zip' });
-          const url = URL.createObjectURL(blob);
+        if (!path) {
+          // Browser preview only (npm run dev): plain download
+          const url = URL.createObjectURL(new Blob([zipBytes], { type: 'application/zip' }));
           const a = document.createElement('a');
           a.href = url;
-          a.download = `nutripolo-backup-${todayISO()}.zip`;
+          a.download = fileName;
           a.click();
-          URL.revokeObjectURL(url);
+          setTimeout(() => URL.revokeObjectURL(url), 60000);
+          return { saved: true, skipped };
         }
-
-        return { skipped };
+        const { writeBinaryFile } = await import('@tauri-apps/api/fs');
+        await writeBinaryFile(path, zipBytes);
+        return { saved: true, skipped };
       },
 
-      importDataFromZip: async () => {
+      // Choose a .zip export (or an old .json) and check it. Returns null if
+      // the dialog is cancelled; throws BackupError / read errors. Nothing
+      // changes until importBackup.
+      pickBackupFile: async () => {
         const { open } = await import('@tauri-apps/api/dialog');
         const path = await open({ filters: [{ name: 'NutriPolo Backup', extensions: ['zip', 'json'] }] });
         if (!path) return null;
+        const parse = (text) => {
+          try { return JSON.parse(text); } catch { throw new BackupError('not_a_backup'); }
+        };
 
         // JSON fallback for old backups
-        if (path.endsWith('.json')) {
+        if (path.toLowerCase().endsWith('.json')) {
           const { readTextFile } = await import('@tauri-apps/api/fs');
-          const raw = await readTextFile(path);
-          const d = backupData(JSON.parse(raw));
-          set(s => restoredState(d, s));
-          return { documentsRestored: 0 };
+          return { ...readBackup(parse(await readTextFile(path))), zip: null, documents: 0 };
         }
 
-        // ZIP import
         const JSZip = (await import('jszip')).default;
         const { readBinaryFile } = await import('@tauri-apps/api/fs');
-
-        const zipBytes = await readBinaryFile(path);
-        const zip = await JSZip.loadAsync(zipBytes);
-
-        // Restore data.json
+        let zip;
+        try { zip = await JSZip.loadAsync(await readBinaryFile(path)); } catch { throw new BackupError('not_a_backup'); }
         const dataFile = zip.file('data.json');
-        if (!dataFile) throw new Error('Invalid backup: data.json not found');
-        const dataRaw = await dataFile.async('string');
-        const d = backupData(JSON.parse(dataRaw));
+        if (!dataFile) throw new BackupError('not_a_backup');
+        const backup = readBackup(parse(await dataFile.async('string')));
+        const documents = Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir).length;
+        return { ...backup, zip, documents };
+      },
+
+      // Apply a backup from pickBackupFile: safety copy of the current data,
+      // then the documents, then the data.
+      // Returns { documentsRestored, documentsFailed, keptInvoices }.
+      importBackup: async (picked) => {
+        await saveSafetyBackup(get());
 
         // Restore document files through the backend so they are encrypted
         // when at-rest encryption is on. Only `documents/<clientId>/<file>`
         // entries with safe names are accepted.
         const SAFE_SEGMENT = /^[A-Za-z0-9._-]+$/;
         let documentsRestored = 0;
-        const docFiles = Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir);
+        let documentsFailed = 0;
+        const zip = picked.zip;
+        const docFiles = zip ? Object.keys(zip.files).filter(f => f.startsWith('documents/') && !zip.files[f].dir) : [];
         for (const filePath of docFiles) {
+          const parts = filePath.split('/');
+          const [, clienteId, storedFileName] = parts;
+          if (parts.length !== 3 || !SAFE_SEGMENT.test(clienteId) || !SAFE_SEGMENT.test(storedFileName)
+            || clienteId.includes('..') || storedFileName.includes('..')) {
+            documentsFailed++;
+            continue;
+          }
           try {
-            const parts = filePath.split('/');
-            if (parts.length !== 3) continue;
-            const [, clienteId, storedFileName] = parts;
-            if (!SAFE_SEGMENT.test(clienteId) || !SAFE_SEGMENT.test(storedFileName)
-              || clienteId.includes('..') || storedFileName.includes('..')) continue;
             const base64Data = await zip.files[filePath].async('base64');
             await invoke('save_bytes_to_documents', { clientId: clienteId, destFilename: storedFileName, base64Data });
             documentsRestored++;
           } catch (e) {
+            documentsFailed++;
             if (import.meta.env.DEV) console.warn('Failed to restore document:', filePath, e);
           }
         }
 
-        // Apply data to store
-        set(s => restoredState(d, s));
-
-        return { documentsRestored };
+        const { patch, keptInvoices } = restoredState(picked.data, get());
+        set(patch);
+        return { documentsRestored, documentsFailed, keptInvoices };
       },
 
       emailTemplates: null,
@@ -2088,13 +2476,19 @@ const useStore = create(
         // NEVER persist the SMTP password — it lives only in the OS
         // credential store (see store_smtp_password / get_smtp_password).
         // Strip it defensively before Zustand serializes the config.
-        let safeConfig = s.config
-          ? { ...s.config, smtp: s.config.smtp ? { ...s.config.smtp, password: '' } : s.config.smtp }
-          : s.config;
-        // Google secrets live in the keyring (see syncGoogleSecrets).
-        if (isTauri()) safeConfig = stripGoogleSecrets(safeConfig);
+        // The stripped copy is reused while the config is the same object, so
+        // the storage sees it unchanged (see setItem) and does not rewrite it.
+        if (s.config !== safeConfigCache.from) {
+          let safeConfig = s.config
+            ? { ...s.config, smtp: s.config.smtp ? { ...s.config.smtp, password: '' } : s.config.smtp }
+            : s.config;
+          // Google secrets live in the keyring (see syncGoogleSecrets).
+          if (isTauri()) safeConfig = stripGoogleSecrets(safeConfig);
+          safeConfigCache.from = s.config;
+          safeConfigCache.to = safeConfig;
+        }
         return {
-          config: safeConfig,
+          config: safeConfigCache.to,
           clients: s.clients,
           measurements: s.measurements,
           consultations: s.consultations,
@@ -2109,6 +2503,7 @@ const useStore = create(
           emailTemplates: s.emailTemplates,
           planLibrary: s.planLibrary,
           lastBackupDate: s.lastBackupDate,
+          sentByEvent: s.sentByEvent,
           sidebarCollapsed: s.sidebarCollapsed,
           appTheme: s.appTheme,
           clientFilters: s.clientFilters,

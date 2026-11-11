@@ -6,7 +6,7 @@ Aplicacio d'escriptori per a Windows 11 per a la gestio de consultes de nutricio
 
 **Autor:** Javier Polo Garcia
 **Llicencia:** MIT
-**Versio:** 1.16.0
+**Versio:** 1.19.0
 **Identificador:** com.nutripolo.app
 
 ---
@@ -61,6 +61,8 @@ nutripolo-app/
 │   │   ├── NutritionPlanEditor.jsx   # Vista Planes (pestanyes Planes / Alimentos / Recetas) + editor antic (per àpats)
 │   │   ├── plan/FoodsView.jsx        # Pestanya Alimentos: catàleg d'aliments bàsics (Mercadona + nutrició)
 │   │   ├── plan/PlanificacionEditor.jsx # Editor a pantalla completa de la planificació setmanal
+│   │   ├── plan/SportEditors.jsx     # Parts esportives de l'editor (tipus i pes, preses d'entrenament, pla de competició)
+│   │   ├── plan/editorParts.jsx      # Estils i botons compartits pels editors de planificació
 │   │   ├── plan/PdfPreview.jsx       # Vista prèvia en viu d'un PDF (pdf.js)
 │   │   ├── plan/WebRecipePicker.jsx  # Llista de receptes de nutripoloraquel.com (WebRecipeList: selector i pestanya Recetas)
 │   │   ├── plan/FoodCatalogPicker.jsx # Selector del catàleg d'aliments amb foto
@@ -90,10 +92,12 @@ nutripolo-app/
 │   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
 │   │   ├── fuzzyMatcher.js           # Quin pacient es cada cita importada (pur, amb tests)
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
+│   │   ├── invoicing.js              # Factures: esborrany → emesa, rectificatives, llibre d'ingressos (pur, amb tests)
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
 │   │   ├── pdfPlanificacionGenerator.js # PDF de la planificació (substitueix Canva; Onest + icones Lucide)
 │   │   ├── planificacion.js          # Model de la planificació (pur, amb tests)
+│   │   ├── deportiva.js              # Planificació esportiva: g/kg, preses d'entrenament, competició (pur, amb tests)
 │   │   ├── planPdf.js                # Tria generador segons format + imatges de productes
 │   │   ├── reminderService.js        # Logica de recordatoris (pura, amb tests) + wa.me / SMTP
 │   │   ├── webRecipes.js             # Receptari de la web: API REST + parseig HTML (pur, amb tests)
@@ -101,6 +105,10 @@ nutripolo-app/
 │   │   ├── entrevista.js             # Model de l'entrevista de primera visita (pur, amb tests)
 │   │   ├── energia.js                # TMB, NEED, macros i parseDecimal (pur, amb tests)
 │   │   └── keyboardGrid.js           # On salta cada tecla en els formularis rapids (pur, amb tests)
+│   │
+│   ├── data/
+│   │   ├── recetasPlanificaciones.json # Receptes dels plans antics de Canva (llavor de "Mis recetas")
+│   │   └── recetasPlanificacionesV15.json # Firma de cada recepta de la v1.18.0 → la nova (migració v16)
 │   │
 │   ├── stores/                       # Estat global (Zustand)
 │   │   └── store.js                  # Store unic amb totes les entitats
@@ -147,7 +155,7 @@ npm run dev
 # Compilar frontend
 npm run build
 
-# Tests unitaris (vitest)
+# Tests unitaris (vitest); el CI (.github/workflows/ci.yml) els passa a cada PR, amb el build, cargo test i clippy
 npm test
 
 # Compilar aplicacio completa (.exe)
@@ -169,6 +177,7 @@ fn save_data(app_handle, key, value) -> Result<(), String>      // escriptura at
 fn load_data(app_handle, key) -> Result<String, String>
 fn delete_data(app_handle, key) -> Result<(), String>
 fn quarantine_data(app_handle, key) -> Result<(), String>       // mou un fitxer illegible a *.corrupt-<ts>
+fn list_data_keys(app_handle, prefix) -> Result<Vec<String>, String>  // claus al disc (troba les còpies encara que el manifest es perdi)
 
 // Secrets (Windows Credential Manager)
 fn store_smtp_password / get_smtp_password / clear_smtp_password / has_smtp_password
@@ -209,6 +218,7 @@ fn recipes_fetch(path) -> Result<String, String>
 fn autostart_is_enabled() / autostart_set(enabled)   // clau Run del registre, arrenca amb --hidden
 fn configure_tray(close_to_tray, show_label, quit_label)
 fn quit_app()                                         // el JS el crida despres de flushAllPending (event `tray-quit`)
+fn cancel_quit()                                      // el JS es queda obert (canvis sense desar o escriptura fallida) i mostra la finestra
 ```
 
 ---
@@ -222,11 +232,14 @@ fn quit_app()                                         // el JS el crida despres 
 - i18n via `src/i18n.js` amb suport ES/CA
 
 ### Gestio d'Estat
-- **Zustand** amb persistencia automatica al filesystem via Tauri
+- **Zustand** amb persistencia automatica al filesystem via Tauri, per parts (vegeu Persistencia de Dades)
 - Store unic (`store.js`) amb totes les entitats i accions
 - Undo/redo integrat (`_history`, `_future`)
 - Migracions a `migrateStore` (STORE_VERSION); `config` es fusiona amb els valors per defecte en hidratar
-- Si el fitxer de dades no es pot llegir, les escriptures queden bloquejades (`getLoadFailure`)
+- Si el fitxer de dades no es pot llegir, les escriptures queden bloquejades (`getLoadFailure`); també un `.enc` sense `encryption.json` (`not_unlocked`). `LoadErrorScreen` llegeix i valida la còpia abans de moure el fitxer a quarantena
+- `flushAllPending()` torna `true` si tot és al disc. Sortir i instal·lar una actualització no continuen si no (ni amb un formulari amb canvis: `setUnsavedWork` / `hasUnsavedWork` a `UI.jsx`, que ja fan servir `Modal guardChanges` i l'editor de planificacions). El bloqueig automàtic, en aquests casos, tapa la pantalla amb `ScreenLock` (sense recarregar, la clau segueix en memòria per poder desar) en lloc de no bloquejar
+- Còpies automàtiques: una al dia des de `useBackgroundJobs` (també amb l'app a la safata), 7 a la rotació, mai d'un store buit; la llista surt dels fitxers (`list_data_keys`), no només del manifest. Restaurar o importar: `readBackup` valida (rebutja altres JSON i versions més noves), es desa abans `backup-safety` ("Abans de l'última restauració") i es conserven les factures posteriors a la còpia i l'estat dels recordatoris (`restoredState`)
+- Xifratge (Rust): totes les lectures/escriptures prenen `VAULT` (RwLock) i l'activació / canvi de contrasenya l'agafen en exclusiva. El canvi de contrasenya és transaccional (`backup_pre_rekey`: si falla es restaura; a l'arrencada `recover_vault` resol un canvi tallat). `encryption.json` té una còpia a `encryption.backup.json`. `write_atomic` fa `sync_all` abans del rename
 - Canvis de sincronitzacio o de recordatoris no han de tocar `localUpdatedAt` (si no, es fa push a Google)
 
 ### Google Calendar
@@ -239,6 +252,10 @@ fn quit_app()                                         // el JS el crida despres 
 - Pacient de cada cita importada (tots els calendaris de consultes, propi i de clíniques): `_resolvePatient` / `_rematch` amb `matchPatient` (`fuzzyMatcher.js`), clients indexats un cop per sync (`clientIndex`). Ordre: correu dels convidats o correu/telèfon de la descripció (telèfons sense espais ni +34) → nom exacte únic → difús. S'assigna sol (`matchStatus: 'exact'`, `matchedBy: 'system'`, `matchedVia`, `matchedAt`, `matchScore`) només per contacte o nom exacte únic i si l'organitzador és el mateix calendari (`organizer_self` o `organizer` = id del calendari): una invitació d'algú altre (Google les afegeix soles) només es proposa (`pending-confirm`); un nom repetit o un contacte compartit → suggeriment `pending`; difús ≥ 0,92 → `pending-confirm` sense `clienteId`; res → suggeriment sense candidats (crear fitxa, prerrellenada amb `displayName`, `contactEmail`, `contactPhone`)
 - Un suggeriment per pacient i calendari (`normalizedName`), amb `consultationIds`; els noms descartats no tornen. Soroll (`NOISE_TITLES`: bloqueig, dinar, personal…, sense títol, "Consulta" sola, tot el dia sense coincidència segura) no genera res
 - No es torna a avaluar mai: cita amb `clienteId`, decisió de l'usuari (`matchedBy: 'user'`, `manual`, `exact`, `dismissed`) ni esdeveniment creat per l'app (`nutripolo_id`). Les importades sense pacient ni suggeriment viu s'omplen al sync següent; si Google canvia el títol, es refà. `eventToConsultation` no porta `clienteId`, així un canvi remot mai esborra un vincle
+- Nom del títol (`extractPatientName`): de les parts al voltant d'un guió amb espai o de dos punts es queda la primera que no és només una etiqueta de tipus (`TYPE_TOKENS`: nutrició, valoració, online, 1a visita…), perquè «Nutrición - X» no agrupi pacients diferents. Un contacte que apunta a una fitxa amb un nom diferent al títol (`nameFits`) només es proposa. `ignoreEmails`: tots els calendaris, el compte de Google (`userEmail`) i `config.email`
+- Ubicació per calendari (`calendars[].locationId`, Ajustos): les cites importades la prenen (`eventToConsultation`) i en triar-la s'omplen les que no en tenen. Una cita `cancelada` aquí en un calendari on no es pot escriure no torna a `programada` per un canvi a Google
+- Notes per al client: no van a Google tret que `googleCalendar.syncNotes` (desactivat per defecte) i mai a calendaris de clínica (`notesGoToGoogle`); si no van, el PATCH no porta descripció (`keep_remote_description`) i el pull no les sobreescriu
+- Recordatoris automàtics: les cites de calendaris desactualitzats (sync fallit, desconnectat, sense sync la darrera hora, guarda d'esborrat massiu: `staleCalendarIds`) no s'envien soles; avís un cop
 - Assignar no escriu mai a Google; una cita vinculada pel sync conserva el títol de Google en fer push. Desfer: `unlinkAutoMatch` (cita o fitxa), sense `localUpdatedAt`. `syncAll` torna `suggested` (suggeriments nous) → avís amb "Revisar" (`notifySuggestions`)
 
 ### Recordatoris de cites
@@ -249,18 +266,37 @@ fn quit_app()                                         // el JS el crida despres 
 - Ressenya de Google despres de la consulta: `config.reviewRequests` (defectes a `DEFAULT_REVIEW_CONFIG`): primera visita / seguiment (per historial del client), enllac i interruptor per ubicacio (`locations[id]`, si no `defaultUrl`), `delayHours` despres del final. Estat a `consultation.reviewRequest.{email|whatsapp}`; nomes un cop per client (`already_asked`); opt-out a `client.recordatorios.review`
 - Segon pla: en tancar la finestra l'app queda a la safata (`config.closeToTray`) i pot arrencar amb Windows amagada (`--hidden`); instancia unica (tauri-plugin-single-instance). Amb xifratge cal desbloquejar abans que s'envii res
 
+### Facturació
+- Regles a `services/invoicing.js` (pures, amb tests). Una factura és **esborrany** (sense número, editable i esborrable) fins que s'**emet** (`issueInvoice`): llavors pren el número següent de la seva sèrie i any (`NP-AAAA-NNN`, rectificatives `R-AAAA-NNN`) i desa les dades de l'emissora i de la clienta tal com són aquell dia (`emisor`, `destinatario`). El PDF d'una emesa surt sempre d'aquestes dades, encara que la fitxa canviï o s'esborri
+- Una emesa no s'edita ni s'esborra: només `PAYMENT_FIELDS` (estat de cobrament, `fechaCobro`, forma de pagament). Per corregir-la: «Rectificar» (`createCorrectiveDraft`, línies en negatiu i `motivoRectificacion`); si l'anul·la sencera, l'original passa a `anulada` i allibera les seves consultes (`billedConsultationIds`)
+- Abans d'emetre (`issueProblems`): NIF propi; amb IRPF, NIF i adreça de la clienta; data no anterior a l'última de la sèrie; motiu a les rectificatives
+- IVA 0 % → menció d'exempció al PDF (`config.textoExencionIva`, si és buit `DEFAULT_VAT_EXEMPTION_TEXT`). IBAN a Ajustos (`isValidIban`), surt amb transferència
+- Llibre d'ingressos en CSV (`incomeBookCsv`: `;`, coma decimal, BOM) i xifres del període per any/trimestre (`periodTotals`; les anul·lades a mà d'abans de la v17 no compten). La migració v17 dona per emeses les factures anteriors amb les dades d'aquell moment
+- Pendent de decidir amb el gestor: VeriFactu, mòdul de despeses, bons/packs vinculats a consultes, model 347
+
 ### Planificacions (dietes setmanals)
 - Format nou: `nutritionPlans` amb `formato: 'planificacion'` (model a `planificacion.js`); els plans sense `formato` són els antics per àpats i conserven el seu editor i PDF
 - Seccions: `desayunos` / `mediaManana` / `merienda` (opcions), `cantidades`, `menu.dias[]` (7 dies × `comida`/`cena` × `a`/`b`, amb `receta` enllaçada al PDF) i `productos` (ids)
+- Ordre de les seccions: `plan.orden` (`normalizeOrder`: les que falten van darrere de la que les precedeix a `SECTION_ORDER`). Es tria arrossegant les seccions al menú lateral de l'editor (esdeveniments de punter, `moveSectionTo`: l'arrossegament HTML5 no va a Tauri/Windows) o amb Alt+↑/↓ (`moveSection`, que salta les amagades) i mana a l'índex de la portada i al PDF, on cada secció és una funció (`renderOptions`, `renderCantidades`…) cridada en aquest ordre
 - Productes reutilitzables a `planLibrary.productos` (`{ id, nombre, imagen }`, JPEG petit en data URL); inclosos a les còpies de seguretat
 - Secció Productos: un aliment de la planificació que es diu igual que un de la biblioteca d'aliments (`foodMatcher`: primer els genèrics, després el bàsic de Mercadona sense parèntesi) agafa la foto amb un clic; el botó "Biblioteca de alimentos" (`FoodCatalogPicker`) tria de tota la biblioteca. La foto es copia a `planLibrary.productos` (`foodPhotoDataUrl`)
 - Una planificació nova copia el contingut de l'última del client; els títols de "Mis recetas" i de la web autocompleten ingredients (`buildDishIndex`)
 - "Mis recetas": `planLibrary.recetas` (`{ id, titulo, alimentos, receta, nota, updatedAt }`, clau = `dishKey(titulo)`). En desar una planificació s'hi desen sols els plats i opcions amb títol i aliments nous o canviats des que es va obrir l'editor (`collectOwnRecipes` + `mergeOwnRecipes`), excepte receptes de la web sense retocar (així una recepta esborrada no torna); la migració v13 la sembra amb les planificacions existents. Es tria i s'esborra des de la pestanya del selector de receptes
+- Receptes dels plans antics de Canva: `src/data/recetasPlanificaciones.json` (~1.260 plats i opcions, `{ titulo, alimentos, receta?, nota? }`), afegides a "Mis recetas" per la migració v15 (`addMissingRecipes`: només els títols que no hi són). Es regenera amb `scripts/recetas/extract-planificaciones.py` (PyMuPDF) + `build-recetas.py`, que treu les notes amb noms de pacients, corregeix errates (`WORD_FIXES`), escriu les quantitats en "g" / "ml", treu majúscules i fusiona el mateix plat escrit de maneres diferents (`merge_key`: sense ordre, articles, parèntesis ni plurals); `--review` en treu la llista per revisar. Els PDF i l'extracció intermèdia no van a git
+- La v1.18.0 va sembrar la versió sense netejar. La migració v16 (`replaceSeedRecipes`) canvia les receptes d'aquella llavor que no s'han tocat (`seedSignature`, FNV-1a de títol + aliments + enllaç) per la nova segons `recetasPlanificacionesV15.json`; les editades o esborrades no es toquen. Si es torna a canviar la llavor, cal una migració i un mapa nous a partir de la publicada
 - PDF: Onest en una sola família; salvia i taronja del logo com a accents, text en `ink`/`soft`/`olive` (AA) i res per sota de ~7 pt. Mides de text només de l'escala `T` del generador (una mida per rol)
 - Ingredients "Nom (170 g)" → quantitat alineada a la dreta (`splitQuantity`); a la guia, "Pa: 60 g" → taula aliment | ració
-- El menú va en vertical com la resta (un dia per fila, columnes Comida A/B · Cena A/B) en una sola pàgina si el text hi cap a mida llegible; si no, es parteix en comidas i cenas i, en últim cas, una columna (A o B) per pàgina. Les columnes buides no s'imprimeixen
+- El menú va en vertical com la resta (un dia per fila, columnes Comida A/B · Cena A/B) en una sola pàgina si el text hi cap a mida llegible; si no, es parteix en comidas i cenas i, en últim cas, cada àpat en dues meitats de la setmana. Les columnes buides no s'imprimeixen
 - Receptes de la web (`webRecipes.js`): llista per l'API REST de WordPress (tipus `receta`) i ingredients/temps/etiquetes llegits de l'HTML de cada recepta (camps ACF que l'API no exposa). Memòria cau a `planLibrary.recetasWeb` (`{ items, syncedAt }`); es resincronitza en obrir l'editor si té més de 6 h i només es baixen les receptes amb `modified` nou. El servidor atén les peticions en sèrie (~6 s cadascuna): les pàgines es baixen d'una en una, la llista es mostra de seguida amb `ingredientes: null` per a les pendents, i una recepta pendent es baixa a l'acte si es tria (`loadWebRecipeNow`). Triar-ne una omple títol, enllaç (`receta`) i només els ingredients clau (`summarizeIngredients`: sense quantitats, rebost, espècies ni opcionals, i les verdures de sofrit en una línia), o la versió retocada si n'hi ha una a "Mis recetas"; també surten a l'autocompletat de títols (`buildDishIndex`, per darrere de "Mis recetas")
 - Les imatges de la web porten `referrerPolicy="no-referrer"`: el servidor talla la connexió si rep un Referer d'un altre lloc
+
+### Nutrició esportiva (planificació `tipo: 'deportiva'`)
+- El mateix format `planificacion`, amb `tipo: 'deportiva'` (sense `tipo` = general). Model a `deportiva.js`; replica l'estructura dels plans d'esportistes de la Raquel
+- `deporte.peso` (tal com s'escriu) és el pes de totes les xifres per kg: en crear-la o passar a esportiva es posa el de l'últim pesatge; no es copia d'una altra planificació. `perKg` arrodoneix de 5 en 5 g (mg de 10 en 10)
+- Opcions d'esmorzar / mig matí / berenar: `entreno` = el que canvia els dies d'entrenament ("Cornflakes: 60 g → 90 g"). Guia de quantitats: la ració d'entrenament va després d'una fletxa (`splitTraining`) i surt en taronja; en passar a esportiva, la guia de la plantilla es canvia per `DEFAULT_CANTIDADES_DEPORTE`
+- Preses d'entrenament (`sesiones`, secció `entrenos`): nom, presa, moment (`pre`/`post`), opcions i pauta (objectiu, hidrats i proteïna amb rang en g/kg, greixos, fibra, volum, quan). Cada presa és una secció del PDF; si la presa és una secció d'opcions (`sessionOptionSection`), aquesta surt com la dels dies de descans (`restSections`)
+- Pla de competició (`competicion`, null fins que s'afegeix): prova, data, durada i blocs `previa`, `desayuno`, `cafeina`, `durante`, `recuperacion` (cadascun amb `activo`). "Durant": el text i els hidrats/hora escrits o, si són buits, `duringRecommendation` segons la durada
+- Tornar a general no esborra res: les seccions esportives només s'amaguen
 
 ### Catàleg d'aliments (pestanya Alimentos de Planes)
 - Planes té tres pestanyes (`plansSection` al store, no es desa): Planes, Alimentos i Recetas (receptari de la web; en prémer una recepta s'obre al navegador). La paleta (Ctrl+K) porta directament a cada pestanya
@@ -286,7 +322,7 @@ fn quit_app()                                         // el JS el crida despres 
 - `sage`, `wellness` i `terra` són variables CSS a `styles.css` (clar i fosc); no feu servir colors de Tailwind (`red-*`, `orange-*`…) ni hex als components
 - Contrast WCAG AA: `sage-400`+ com a text; `wellness-400` / `terra-500` porten text blanc
 - Dark mode via `data-theme` a `<html>`; les excepcions (`bg-white`, text semàntic) són a `styles.css`
-- Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Combobox` (llistes llargues, p. ex. clients), `Modal` (prop `footer` fora del scroll)
+- Components base a `UI.jsx`: `Button`, `Badge`, `StatusBadge`, `SegmentedControl`, `Combobox` (llistes llargues, p. ex. clients), `Modal` (prop `footer` fora del scroll; `guardChanges` als formularis: Escape, ✕ o clic fora pregunten abans de descartar). Amb un diàleg obert (`hasOpenDialog`) les dreceres globals no actuen. Esborrats amb `confirm({ message, danger: true, confirmText: t.delete })` (focus a Cancel·lar)
 - Tipografia: **Onest a tot arreu** (UI, títols i PDFs). `font-serif` / `font-mono` són només rols (títols de vista `font-serif text-title`, codis) i també són Onest; xifres amb `tabular-nums`; res per sota d'11 px
 - UI: Onest empaquetada amb @fontsource (`main.jsx`); PDFs: instàncies estàtiques completes (latin-ext, fletxes) a `public/fonts` amb `Onest-OFL.txt`, via `pdfFonts.js`. Cap petició a Google Fonts
 
@@ -306,7 +342,7 @@ Les dades es guarden localment a:
 Windows: C:\Users\<usuari>\AppData\Roaming\com.nutripolo.app\
 ```
 
-Cada entitat es guarda com a fitxer JSON separat (`clients.json`, `consultations.json`, etc.).
+El store es desa per parts (`STORE_PARTS` a `store.js`): `nutripolo-clients`, `-consultations`, `-measurements`, `-plans`, `-invoices`, `-documents`, `-suggestions`, `-personal-events`, `-library` i `-library-products` (les fotos), més `nutripolo-storage` amb la resta (config, sync, preferències) i la marca `split`. Cada canvi reescriu només les parts que han canviat per referència; canviar de vista no escriu res. Fins que totes les parts s'han escrit un cop, `nutripolo-storage` conserva el store sencer (migració des del fitxer únic); un fitxer `split` amb una part que falta és un error de càrrega. No s'escriu res abans d'acabar la càrrega (`storeLoaded`).
 Documents dels clients es guarden a `documents/<clientId>/`.
 
 ---

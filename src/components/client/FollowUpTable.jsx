@@ -94,7 +94,7 @@ export const FollowUpTable = ({ client, measurements }) => {
 
   const handleDelete = async (col) => {
     if (!col.m) return;
-    if (!(await confirm(t.measurement_confirm_delete))) return;
+    if (!(await confirm({ message: t.measurement_confirm_delete, danger: true, confirmText: t.delete }))) return;
     deleteMeasurement(col.m.id);
     if (col.m.id === draftId) setDraftId(null);
     toast.success(t.measurement_deleted);
@@ -108,7 +108,8 @@ export const FollowUpTable = ({ client, measurements }) => {
     const m = col.m;
     const label = `${t[row.label]} · ${col.isDraft ? t.seg_new : (m?.fecha || '')}`;
     if (row.kind === 'computed') {
-      const value = m?.imc ?? calcIMC(m?.peso, client.altura);
+      // From the current height: a corrected height also corrects old weigh-ins
+      const value = calcIMC(m?.peso, client.altura) ?? m?.imc;
       return <span className="block px-2 py-1 text-right tabular-nums text-sage-500">{formatNumber(value, locale, 1)}</span>;
     }
     if (row.kind === 'check') {
@@ -135,10 +136,11 @@ export const FollowUpTable = ({ client, measurements }) => {
         data-select="all"
         value={m?.[row.key]}
         locale={locale}
-        placeholder={suggestion != null ? formatNumber(suggestion, locale, 1) : ''}
+        // "≈" and italics: a calculated hint, not a saved value
+        placeholder={suggestion != null ? `≈ ${formatNumber(suggestion, locale, 1)}` : ''}
         title={suggestion != null ? t.seg_suggestion : undefined}
         onCommit={v => commit(col, row.key, v)}
-        className={CELL_CLASS}
+        className={`${CELL_CLASS} placeholder:italic`}
       />
     );
   };

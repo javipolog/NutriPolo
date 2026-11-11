@@ -4,8 +4,10 @@
  * PDF de la planificació setmanal (substitueix el disseny de Canva):
  * portada amb índex, opcions d'esmorzar / mig matí / berenar, guia de
  * quantitats, menú setmanal (amb enllaços a receptes) i
- * productes. Vectorial amb pdf-lib + fontkit (Onest via pdfFonts.js,
- * icones de Lucide, ISC).
+ * productes. Les planificacions esportives hi afegeixen l'ajust de dia
+ * d'entrenament a les opcions, les preses d'entrenament amb la seva pauta,
+ * la ració d'entrenament a la guia i el pla de competició (deportiva.js).
+ * Vectorial amb pdf-lib + fontkit (Onest via pdfFonts.js, icones de Lucide, ISC).
  */
 
 import { PDFDocument, PDFString, StandardFonts, LineCapStyle, rgb, degrees } from 'pdf-lib';
@@ -14,6 +16,10 @@ import {
   normalizePlanificacion, visibleSections, linesOf, isDishEmpty, safeUrl,
   MENU_SLOTS, MENU_VARIANTS, OPTION_SECTIONS,
 } from './planificacion';
+import {
+  isDeportiva, pesoKg, pautaRows, pautaHasContent, sessionHasContent, restSections, splitTraining,
+  hasTrainingValue, competicionBlocks, duringContent, rangeLabel, perKg, parseRange, formatDuration, fmtNum,
+} from './deportiva';
 import { ONEST_FILES, fetchFont } from './pdfFonts';
 
 // ── Pàgina ─────────────────────────────────────────────────────────────────
@@ -52,6 +58,7 @@ const T = {
   body: 8.8,     // text de les targetes i subtítols
   callout: 9.2,  // avisos destacats
   card: 11,      // títols de targeta i de l'índex
+  figure: 15,    // xifres clau del pla de competició
   title: 24,     // títols de secció
 };
 const HERO_H = 84;
@@ -88,7 +95,45 @@ const L = {
     cantidades:  { index: 'Guía de cantidades', title: 'Guía de cantidades',       sub: 'Lo que es una ración para ti, por alimento.' },
     menu:        { index: 'Menú semanal',       title: 'Menú semanal',             sub: 'Comidas y cenas de lunes a domingo.' },
     productos:   { index: 'Productos',          title: 'Productos del menú',       sub: '' },
+    competicion: { index: 'Plan de competición', title: 'Plan de competición',     sub: 'Antes, durante y después de la prueba.' },
   },
+  sport: 'Nutrición deportiva',
+  rest: 'descanso',
+  restSub: 'Para los días de descanso. Elige la opción que prefieras.',
+  trainingDay: 'Día de entreno',
+  pre: 'Pre-entreno',
+  post: 'Post-entreno',
+  restPortion: 'Ración de descanso',
+  trainingPortion: 'Ración de entreno',
+  inYourCase: 'en tu caso',
+  pauta: {
+    objetivo: 'Objetivo', hidratos: 'Hidratos', proteina: 'Proteína', grasas: 'Grasas',
+    fibra: 'Fibra', volumen: 'Volumen', tiempo: 'Cuándo',
+  },
+  race: { name: 'Prueba', date: 'Fecha', duration: 'Duración prevista', weight: 'Peso' },
+  blocks: {
+    previa: 'Las 24 horas previas',
+    desayuno: 'Desayuno del día de la prueba',
+    cafeina: 'Cafeína antes de la prueba',
+    durante: 'Durante la prueba',
+    recuperacion: 'Recuperación',
+  },
+  dayCarbs: 'Hidratos del día',
+  breakfastCarbs: 'Hidratos del desayuno',
+  caffeine: 'Cafeína',
+  carbsPerHour: 'Hidratos por hora',
+  carbs: 'Hidratos',
+  protein: 'Proteína',
+  hydration: 'Hidratación',
+  guidelines: 'Pautas',
+  intake: 'Ingesta',
+  foodsAmounts: 'Alimentos y cantidades',
+  amounts: 'Cantidades',
+  example: 'Ejemplo',
+  when: 'Cuándo',
+  what: 'Qué tomar',
+  ofWeight: 'de peso',
+  breakfastHours: (h) => `Desayuna al menos ${h} h antes de la salida para evitar molestias digestivas.`,
 };
 
 const INDEX_DESC = {
@@ -96,11 +141,22 @@ const INDEX_DESC = {
   mediaManana: () => 'Las diferentes opciones para media mañana. Elige cada día la que prefieras.',
   merienda:    () => 'Las diferentes opciones para la merienda. Elige cada día la que prefieras.',
   cantidades:  () => 'Lo que es una ración para ti. No es el máximo diario: es la cantidad que pones cada vez que tomas ese alimento.',
+  competicion: (p) => `Qué comer el día antes${p.competicion?.nombre ? ` de ${p.competicion.nombre}` : ''}, el mismo día, durante la prueba y después.`,
   menu:        () => 'De lunes a domingo, con dos opciones (A y B) por comida y cena. Los platos subrayados te llevan a la receta.',
   productos:   (p) => `Productos que aparecen en tu menú${p.supermercado ? `, de ${p.supermercado}` : ''}.`,
 };
 
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const WEEKDAYS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+/** "2026-12-20" → "domingo 20 de diciembre" (offset en dies: -1 = el dia abans). */
+const longDate = (iso, offset = 0) => {
+  const [y, m, d] = String(iso || '').split('-').map(Number);
+  if (!y || !m || !d) return '';
+  const dt = new Date(Date.UTC(y, m - 1, d + offset));
+  return `${WEEKDAYS[dt.getUTCDay()]} ${dt.getUTCDate()} de ${MONTHS[dt.getUTCMonth()]}`;
+};
+const capFirst = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
+
 const monthYear = (iso) => {
   if (!iso) return '';
   const [y, m] = iso.split('-').map(Number);
@@ -127,10 +183,15 @@ const ICONS = {
   soup: ['M12 21a9 9 0 0 0 9-9H3a9 9 0 0 0 9 9Z', 'M7 21h10', 'M19.5 12 22 6', 'M16.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.73 1.62', 'M11.25 3c.27.1.8.53.74 1.36-.05.83-.93 1.2-.98 2.02-.06.78.33 1.24.72 1.62', 'M6.25 3c.27.1.8.53.75 1.36-.06.83-.93 1.2-1 2.02-.05.78.34 1.24.74 1.62'],
   info: ['M2 12a10 10 0 1 0 20 0a10 10 0 1 0 -20 0', 'M12 16v-4', 'M12 8h.01'],
   leaf: ['M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z', 'M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12'],
+  dumbbell: ['m6.5 6.5 11 11', 'm21 21-1-1', 'm3 3 1 1', 'm18 22 4-4', 'm2 6 4-4', 'm3 10 7-7', 'm14 21 7-7'],
+  trophy: ['M6 9H4.5a2.5 2.5 0 0 1 0-5H6', 'M18 9h1.5a2.5 2.5 0 0 0 0-5H18', 'M4 22h16', 'M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22', 'M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22', 'M18 2H6v7a6 6 0 0 0 12 0V2Z'],
+  zap: ['M13 2L3 14L12 14L11 22L21 10L12 10L13 2Z'],
+  heartPulse: ['M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z', 'M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27'],
+  timer: ['M10 2L14 2', 'M12 14L15 11', 'M4 14a8 8 0 1 0 16 0a8 8 0 1 0 -16 0'],
 };
 const SECTION_ICON = {
   desayunos: 'coffee', mediaManana: 'apple', merienda: 'cookie',
-  cantidades: 'pieChart', menu: 'calendarDays', productos: 'shoppingBasket',
+  cantidades: 'pieChart', menu: 'calendarDays', productos: 'shoppingBasket', competicion: 'trophy',
 };
 const fold = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const GROUP_ICONS = [
@@ -298,6 +359,14 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   const p = normalizePlanificacion(plan);
   const productsById = Object.fromEntries(products.map(pr => [pr.id, pr]));
   const sections = visibleSections(p, productsById);
+  // Planificació esportiva: cada presa d'entrenament és una secció pròpia
+  const sport = isDeportiva(p);
+  const peso = sport ? pesoKg(p) : null;
+  const sessions = sections.includes('entrenos') ? p.sesiones.filter(sessionHasContent) : [];
+  const sessionById = Object.fromEntries(sessions.map(x => [`sesion:${x.id}`, x]));
+  const entries = sections.flatMap(k => (k === 'entrenos' ? sessions.map(x => `sesion:${x.id}`) : [k]));
+  const rest = restSections(p);
+  const trainingLines = (o) => (sport ? linesOf(o?.entreno) : []);
 
   const doc = await PDFDocument.create();
   doc.setTitle(`${p.nombre || 'Planificación'} — ${client?.nombre || ''}`.trim());
@@ -305,6 +374,19 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   doc.setCreator('NutriPolo');
 
   const F = await embedFonts(doc, loadFont);
+  // Measuring text (fontkit shaping) is most of the time of a PDF, and the
+  // same words are measured again and again while wrapping: cache each
+  // (text, size) per font for this document.
+  for (const font of new Set(Object.values(F))) {
+    const measure = font.widthOfTextAtSize.bind(font);
+    const cache = new Map();
+    font.widthOfTextAtSize = (t, size) => {
+      const key = `${size}|${t}`;
+      let w = cache.get(key);
+      if (w === undefined) { w = measure(t, size); cache.set(key, w); }
+      return w;
+    };
+  }
   const sanitizers = new Map([...new Set(Object.values(F))].map(f => [f, makeSanitizer(f)]));
   const clean = (font, s) => sanitizers.get(font)(s);
   const width = (s, font, size) => font.widthOfTextAtSize(clean(font, s), size);
@@ -326,16 +408,24 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     const out = [];
     for (const para of String(s ?? '').split(/\r?\n/)) {
       const words = glueUnits(clean(font, para).split(/\s+/).filter(Boolean));
+      const spaceW = font.widthOfTextAtSize(' ', size);
       let line = '';
+      let lineW = 0;
       for (let word of words) {
         // Paraules més llargues que la línia (URLs…) es tallen per caràcters
         if (font.widthOfTextAtSize(word, size) > wAt(out.length)) {
-          if (line) { out.push(line); line = ''; }
+          if (line) { out.push(line); line = ''; lineW = 0; }
           word = splitLong(word, font, size, wAt(out.length), out);
         }
+        const wordW = font.widthOfTextAtSize(word, size);
+        const max = wAt(out.length);
+        // Amplada sumada per paraules (ja a la memòria cau); només a prop del
+        // límit es mesura la línia sencera, per si l'interlletratge hi compta
+        const guess = line ? lineW + spaceW + wordW : wordW;
         const test = line ? `${line} ${word}` : word;
-        if (font.widthOfTextAtSize(test, size) <= wAt(out.length)) line = test;
-        else { if (line) out.push(line); line = word; }
+        const fits = guess <= max - 0.5 || (guess <= max + 0.5 && font.widthOfTextAtSize(test, size) <= max);
+        if (fits) { line = test; lineW = guess; }
+        else { if (line) out.push(line); line = word; lineW = wordW; }
       }
       if (line) out.push(line);
     }
@@ -351,6 +441,54 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     while (last && font.widthOfTextAtSize(last + dots, size) > maxW) last = last.slice(0, -1).trimEnd();
     return [...lines.slice(0, n - 1), last + dots];
   }
+
+  /**
+   * Com wrap, però per a trossos amb font i color propis ({ text, font, color }).
+   * Retorna línies de segments amb la seva x relativa.
+   */
+  function wrapRuns(runs, size, maxW) {
+    const words = [];
+    let space = false;
+    for (const r of runs) {
+      const parts = clean(r.font, r.text).split(/(\s+)/);
+      for (const part of parts) {
+        if (!part) continue;
+        if (/^\s+$/.test(part)) { space = true; continue; }
+        const prev = words[words.length - 1];
+        // "50-70 g": la xifra i la unitat del mateix tros no es parteixen
+        if (prev && space && prev.font === r.font && prev.color === r.color && UNIT.test(part) && /\d$/.test(prev.text)) prev.text += ` ${part}`;
+        else words.push({ text: part, font: r.font, color: r.color, space: space && words.length > 0 });
+        space = false;
+      }
+    }
+    const out = [];
+    let line = [];
+    let x = 0;
+    for (const w of words) {
+      const ww = w.font.widthOfTextAtSize(w.text, size);
+      const sw = line.length && w.space ? w.font.widthOfTextAtSize(' ', size) : 0;
+      if (line.length && x + sw + ww > maxW) { out.push(line); line = []; x = 0; }
+      const gap = line.length && w.space ? sw : 0;
+      line.push({ ...w, x: x + gap });
+      x += gap + ww;
+    }
+    if (line.length) out.push(line);
+    return out;
+  }
+  const drawRuns = (page, line, x, baseline, size) => {
+    for (const seg of line) page.drawText(seg.text, { x: x + seg.x, y: baseline, font: seg.font, size, color: seg.color });
+  };
+  /** "Cornflakes: 60 g → 90 g" → trossos amb la ració d'entrenament en taronja. */
+  const trainingRuns = (s, { withLabel = true, plain = C.ink } = {}) => {
+    const { label: lab, value } = withLabel ? splitLabel(s) : { label: '', value: s };
+    const { descanso, entreno } = splitTraining(value);
+    const runs = lab ? [{ text: `${lab}: `, font: F.semi, color: C.ink }] : [];
+    if (!entreno) return [...runs, { text: value, font: F.reg, color: plain }];
+    return [...runs,
+      { text: descanso, font: F.reg, color: C.soft },
+      { text: ' → ', font: F.reg, color: C.soft },
+      { text: entreno, font: F.bold, color: C.orangeInk }];
+  };
 
   const text = (page, s, x, baseline, font, size, color) => {
     const t = clean(font, s);
@@ -410,7 +548,43 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
 
   const clientName = client?.nombre || '';
   const when = monthYear(p.fechaInicio);
-  const secNum = (key) => String(sections.indexOf(key) + 1).padStart(2, '0');
+  const secNum = (key) => String(entries.indexOf(key) + 1).padStart(2, '0');
+  /** Títols, icona i descripció de cada secció del PDF (també de les preses d'entrenament). */
+  const metaFor = (key) => {
+    const ses = sessionById[key];
+    if (ses) {
+      const name = ses.nombre?.trim() || (ses.momento === 'post' ? L.post : L.pre);
+      const toma = ses.toma?.trim();
+      const when = ses.momento === 'post' ? 'después de entrenar' : 'antes de entrenar';
+      return {
+        index: toma ? `${toma} (${name.toLowerCase()})` : name,
+        kicker: ses.momento === 'post' ? L.post : L.pre,
+        title: toma ? `${toma} · ${name}` : name,
+        sub: `Opciones para los días de ${name.toLowerCase()}, ${when}.`,
+        icon: ses.momento === 'post' ? 'heartPulse' : 'dumbbell',
+        desc: `${toma ? `Opciones de ${toma.toLowerCase()}` : 'Opciones'} para los días de ${name.toLowerCase()}, ${when}${pautaHasContent(ses.pauta) ? ', con su pauta' : ''}.`,
+      };
+    }
+    const base = L.sections[key];
+    const meta = { ...base, icon: SECTION_ICON[key], desc: INDEX_DESC[key](p) };
+    const what = { desayunos: 'desayunar', mediaManana: 'media mañana', merienda: 'la merienda' }[key];
+    const withTraining = OPTION_SECTIONS.includes(key) && p[key].opciones.some(o => trainingLines(o).length);
+    if (rest.includes(key)) {
+      meta.index = `${base.index} (${L.rest})`;
+      meta.sub = L.restSub;
+      meta.desc = `Las opciones para ${what} en los días de descanso, cuando no entrenas.`;
+    } else if (withTraining) {
+      meta.desc = `Las opciones para ${what} y, al lado, el aumento de los días de entreno.`;
+    }
+    if (key === 'cantidades' && sport && p.cantidades.grupos.some(g => hasTrainingValue(g.texto))) {
+      meta.desc = 'Lo que es una ración para ti, por alimento. En naranja, la de los días de entreno.';
+    }
+    if (key === 'competicion') {
+      const c = p.competicion;
+      meta.sub = [c?.nombre, capFirst(longDate(c?.fecha))].filter(Boolean).join(' · ') || base.sub;
+    }
+    return meta;
+  };
   const prof = {
     name: config?.nombre || 'NutriPolo',
     col: config?.numColegiada ? `${L.colegiada} ${config.numColegiada}` : '',
@@ -448,23 +622,25 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   function sectionHero(page, key, top, { continued = false } = {}) {
     const { width: W } = page.getSize();
     const m = MARGIN;
-    const meta = L.sections[key];
+    const meta = metaFor(key);
     const sub = key === 'productos' && p.supermercado ? `Los de tu planificación son de ${p.supermercado}.` : meta.sub;
     const showSub = sub && !continued;
     const h = HERO_H;
     const ts = T.title;
     box(page, m, top, W - m * 2, h, { r: 16, fill: C.sagePale });
     const r = 22;
-    iconDisc(page, SECTION_ICON[key], m + 18 + r, top - h / 2, r, { fill: C.white, k: 0.95 });
+    iconDisc(page, meta.icon, m + 18 + r, top - h / 2, r, { fill: C.white, k: 0.95 });
     const tx = m + 18 + r * 2 + 16;
     // Bloc kicker + títol (+ subtítol) centrat verticalment
     const subGap = 12;
     const blockH = T.label * 0.72 + 8 + ts * 0.72 + (showSub ? subGap + T.body * 0.72 : 0);
     const kBL = top - (h - blockH) / 2 - T.label * 0.72;
-    label(page, `${secNum(key)}  ·  ${meta.index}`, tx, kBL);
+    label(page, `${secNum(key)}  ·  ${meta.kicker || meta.index}`, tx, kBL);
     const tBL = kBL - 8 - ts * 0.72;
-    text(page, meta.title, tx - 0.5, tBL, F.display, ts, C.ink);
-    if (showSub) text(page, sub, tx, tBL - subGap - T.body * 0.72, F.med, T.body, C.soft);
+    // Els títols llargs (p. ex. el nom d'una presa) acaben en "…" abans de la píndola
+    const titleW = W - m - 18 - tx - (continued ? labelWidth(L.continued, { sp: 0.9 }) + 28 : 0);
+    text(page, wrapMax(meta.title, F.display, ts, titleW, 1)[0] || '', tx - 0.5, tBL, F.display, ts, C.ink);
+    if (showSub) text(page, wrapMax(sub, F.med, T.body, W - m - 18 - tx, 1)[0] || '', tx, tBL - subGap - T.body * 0.72, F.med, T.body, C.soft);
     if (continued) {
       const w = labelWidth(L.continued, { sp: 0.9 }) + 16;
       pill(page, L.continued, W - m - 18 - w, top - h / 2 + 8, { fill: C.white, color: C.olive });
@@ -485,7 +661,31 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     const page = newPage(PORTRAIT);
     const [W, H] = PORTRAIT;
     const m = MARGIN;
-    const bandH = 432;
+
+    // Índex: dues columnes. Amb moltes seccions (planificació esportiva) les
+    // descripcions s'escurcen i l'ona baixa una mica, perquè tot càpiga.
+    const gap = 28;
+    const colW = (W - m * 2 - gap) / 2;
+    const descW = colW - 50;
+    const layoutIndex = (maxLines, band) => {
+      const items = entries.map((k, i) => ({
+        k, n: String(i + 1).padStart(2, '0'), meta: metaFor(k),
+        desc: maxLines ? wrapMax(metaFor(k).desc, F.reg, T.small, descW, maxLines) : [],
+      }));
+      const rows = Math.ceil(items.length / 2);
+      const itemH = (it) => Math.max(40, 22 + it.desc.length * lh(T.small, 1.45)) + 16;
+      const rowH = [...Array(rows)].map((_, r) => Math.max(...[items[r], items[r + rows]].filter(Boolean).map(itemH)));
+      const top = H - band - 58 - 22;
+      // Cada fila porta 16 pt d'aire a sota; el peu és a 52 pt
+      return { items, rows, rowH, band, fits: top - rowH.reduce((a, b) => a + b, 0) >= 50 };
+    };
+    const ladder = [[99, 432], [3, 432], [3, 400], [2, 400], [1, 400], [0, 400]];
+    let index = null;
+    for (const [n, band] of ladder) {
+      index = layoutIndex(n, band);
+      if (index.fits) break;
+    }
+    const bandH = index.band;
     // Ona de Raquel, en una sola corba neta + un filet que l'acompanya
     page.drawSvgPath(`M0,0 H${W} V${bandH * 0.9} C${W * 0.68},${bandH * 1.02} ${W * 0.34},${bandH * 0.86} 0,${bandH} Z`, { x: 0, y: H, color: C.sage });
     page.drawSvgPath(`M0,${bandH + 16} C${W * 0.34},${bandH * 0.86 + 16} ${W * 0.68},${bandH * 1.02 + 16} ${W},${bandH * 0.9 + 16}`, { x: 0, y: H, borderColor: C.sageSoft, borderWidth: 1.4 });
@@ -495,6 +695,15 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     const byline = prof.col || (prof.name !== 'NutriPolo' ? prof.name : '');
     text(page, 'NutriPolo', m + 52, byline ? H - 59 : H - 65.5, F.bold, 11, C.ink);
     if (byline) text(page, byline, m + 52, H - 71, F.med, T.meta, C.ink);
+
+    // Planificació esportiva: etiqueta sobre el títol, amb la disciplina
+    if (sport) {
+      const tag = [L.sport, p.deporte?.disciplina?.trim()].filter(Boolean).join('  ·  ');
+      const maxW = W - m * 2 - 120;
+      let t = tag;
+      while (t.length > 4 && labelWidth(t, { sp: 0.9 }) + 16 > maxW) t = `${t.slice(0, -2).trimEnd()}…`;
+      pill(page, t, m, H - 118, { fill: C.white, color: C.olive, h: 18 });
+    }
 
     // Títol
     spaced(page, L.planning, m - 2, H - 196, F.display, 54, C.ink, -1.4);
@@ -530,24 +739,17 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     const lw = label(page, L.intro, m, y, { color: C.ink, sp: 1.6 });
     pill(page, L.mustRead, m + lw + 10, y + 10.6);
     y -= 22;
-    const gap = 28;
-    const colW = (W - m * 2 - gap) / 2;
-    const descW = colW - 50;
-    const items = sections.map((k, i) => ({
-      k, n: String(i + 1).padStart(2, '0'), desc: wrap(INDEX_DESC[k](p), F.reg, T.small, descW),
-    }));
-    const rows = Math.ceil(items.length / 2);
-    const itemH = (it) => Math.max(40, 22 + it.desc.length * lh(T.small, 1.45)) + 16;
-    const rowH = [...Array(rows)].map((_, r) => Math.max(...[items[r], items[r + rows]].filter(Boolean).map(itemH)));
+    const { items, rows, rowH } = index;
     items.forEach((it, i) => {
       const col = i < rows ? 0 : 1;
       const row = i < rows ? i : i - rows;
       const x = m + col * (colW + gap);
       const top = y - rowH.slice(0, row).reduce((a, b) => a + b, 0);
       hline(page, x, x + colW, top, C.rule, 0.6);
-      iconDisc(page, SECTION_ICON[it.k], x + 17, top - 30, 17, { k: 0.9 });
+      iconDisc(page, it.meta.icon, x + 17, top - 30, 17, { k: 0.9 });
       text(page, it.n, x + 50, top - 23, F.bold, T.card, C.olive);
-      text(page, L.sections[it.k].index, x + 50 + width(it.n, F.bold, T.card) + 6, top - 23, F.bold, T.card, C.ink);
+      const nx = x + 50 + width(it.n, F.bold, T.card) + 6;
+      text(page, wrapMax(it.meta.index, F.bold, T.card, x + colW - nx, 1)[0] || '', nx, top - 23, F.bold, T.card, C.ink);
       it.desc.forEach((ln, j) => text(page, ln, x + 50, top - 37 - j * lh(T.small, 1.45), F.reg, T.small, C.soft));
     });
 
@@ -557,8 +759,11 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     textRight(page, prof.name, W - m, fy, F.bold, T.meta, C.ink);
   }
 
-  // ── 2. Seccions d'opcions ────────────────────────────────────────────────
-  const optionKeys = sections.filter(k => OPTION_SECTIONS.includes(k));
+  // ── 2. Seccions d'opcions (i preses d'entrenament) ─────────────────────
+  // Les seccions es dibuixen en l'ordre de `entries` (el triat a l'editor).
+  // Les d'opcions seguides comparteixen pàgina si hi caben; `cur` és la
+  // pàgina oberta i es tanca quan ve una secció d'un altre tipus.
+  const isOptionKey = (k) => OPTION_SECTIONS.includes(k) || !!sessionById[k];
   let cur = null; // { page, y, m, W }
   const imgCache = new Map();
   const productImage = async (id) => {
@@ -580,8 +785,12 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     });
     const nota = o.nota?.trim() ? wrap(o.nota.trim(), F.med, CARD.ns, inner - 34) : [];
     const notaH = nota.length ? Math.max(30, nota.length * lh(CARD.ns, 1.4) + 18) : 0;
-    const h = CARD.pad + 15 + 10 + title.length * lh(CARD.ts, 1.25) + 14 + rows.reduce((n, r) => n + r.h, 0) + (notaH ? notaH + 8 : 0) + CARD.pad - 6;
-    return { title, rows, nota, notaH, h };
+    // Dia d'entrenament: "Cornflakes: 60 g → 90 g", la ració d'entrenament en taronja
+    const train = trainingLines(o).flatMap(l => wrapRuns(trainingRuns(l), CARD.ns, inner - 20));
+    const trainH = train.length ? 12 + T.label + 7 + train.length * lh(CARD.ns, 1.4) + 2 : 0;
+    const h = CARD.pad + 15 + 10 + title.length * lh(CARD.ts, 1.25) + 14 + rows.reduce((n, r) => n + r.h, 0)
+      + (trainH ? trainH + 8 : 0) + (notaH ? notaH + 8 : 0) + CARD.pad - 6;
+    return { title, rows, nota, notaH, train, trainH, h };
   };
 
   const drawOption = (page, oi, x, top, w, mm, h) => {
@@ -602,6 +811,13 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
       if (r.qty) textRight(page, r.qty, ix + inner, bl, F.semi, CARD.is, C.olive);
       y -= r.h;
     }
+    if (mm.train.length) {
+      const ty = y - 4;
+      box(page, ix, ty, inner, mm.trainH, { r: 10, fill: C.orangePale });
+      drawIcon(page, 'zap', ix + 14, ty - 6 - T.label * 0.36 - 0.5, 9, C.orangeInk, 1.1);
+      label(page, L.trainingDay, ix + 24, ty - 6 - T.label * 0.72, { color: C.orangeInk });
+      mm.train.forEach((ln, j) => drawRuns(page, ln, ix + 10, ty - 6 - T.label - 7 - CARD.ns * 0.8 - j * lh(CARD.ns, 1.4), CARD.ns));
+    }
     if (mm.nota.length) {
       const ny = top - h + CARD.pad - 6 + mm.notaH;
       box(page, ix, ny, inner, mm.notaH, { r: 10, fill: C.sagePale });
@@ -611,8 +827,61 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     }
   };
 
-  for (const [si, key] of optionKeys.entries()) {
-    const sec = p[key];
+  // Pauta d'una presa d'entrenament: objectiu i hidrats a dalt, la resta en graella
+  const PAUTA = { pad: 16, gap: 14, cols: 3 };
+  const measurePauta = (ses, w) => {
+    const rows = pautaRows(ses.pauta, peso);
+    if (!rows.length) return null;
+    const inner = w - PAUTA.pad * 2;
+    const cell = (r, cw) => {
+      const value = r.value ? wrap(r.value, F.semi, T.body, cw) : [];
+      const extra = r.kg ? wrapRuns([
+        { text: r.kg, font: F.semi, color: C.olive },
+        ...(r.calc ? [{ text: ` · ${L.inYourCase} `, font: F.reg, color: C.soft }, { text: r.calc, font: F.bold, color: C.orangeInk }] : []),
+      ], T.body, cw) : [];
+      return { r, value, extra, h: T.label + 7 + (value.length + extra.length) * lh(T.body, 1.36) };
+    };
+    const head = rows.filter(r => r.key === 'objetivo' || r.key === 'hidratos');
+    const restRows = rows.filter(r => !head.includes(r));
+    const headW = head.length > 1 ? (inner - PAUTA.gap) / 2 : inner;
+    const headCells = head.map(r => cell(r, headW));
+    const gridW = (inner - PAUTA.gap * (PAUTA.cols - 1)) / PAUTA.cols;
+    const grid = [];
+    for (let i = 0; i < restRows.length; i += PAUTA.cols) {
+      const cells = restRows.slice(i, i + PAUTA.cols).map(r => cell(r, gridW));
+      grid.push({ cells, h: Math.max(...cells.map(c => c.h)) });
+    }
+    const headH = headCells.length ? Math.max(...headCells.map(c => c.h)) : 0;
+    const gridH = grid.reduce((n, g) => n + g.h, 0) + Math.max(0, grid.length - 1) * 10;
+    const titleH = T.label + 14;
+    const h = PAUTA.pad + titleH + headH + (headH && gridH ? 22 : 0) + gridH + PAUTA.pad - 4;
+    return { headCells, headW, grid, gridW, headH, titleH, h };
+  };
+  const drawPauta = (page, ses, mm, x, top, w) => {
+    box(page, x, top, w, mm.h, { r: 16, fill: C.surface });
+    const ix = x + PAUTA.pad;
+    let y = top - PAUTA.pad;
+    drawIcon(page, ses.momento === 'post' ? 'heartPulse' : 'zap', ix + 5, y - T.label * 0.36, 11, C.orangeInk, 1.2);
+    label(page, [ses.momento === 'post' ? L.post : L.pre, ses.nombre?.trim()].filter(Boolean).join('  ·  '), ix + 16, y - T.label * 0.72, { color: C.orangeInk });
+    y -= mm.titleH;
+    const drawCell = (c, cx, cy) => {
+      label(page, L.pauta[c.r.key], cx, cy - T.label * 0.72);
+      let by = cy - T.label - 7 - T.body * 0.78;
+      c.value.forEach(ln => { text(page, ln, cx, by, F.semi, T.body, C.ink); by -= lh(T.body, 1.36); });
+      c.extra.forEach(ln => { drawRuns(page, ln, cx, by, T.body); by -= lh(T.body, 1.36); });
+    };
+    mm.headCells.forEach((c, i) => drawCell(c, ix + i * (mm.headW + PAUTA.gap), y));
+    y -= mm.headH;
+    if (mm.headH && mm.grid.length) { y -= 11; hline(page, ix, x + w - PAUTA.pad, y, C.rule, 0.6); y -= 11; }
+    for (const g of mm.grid) {
+      g.cells.forEach((c, i) => drawCell(c, ix + i * (mm.gridW + PAUTA.gap), y));
+      y -= g.h + 10;
+    }
+  };
+
+  async function renderOptions(key) {
+    const ses = sessionById[key];
+    const sec = ses || p[key];
     const opts = sec.opciones.filter(o => o.titulo?.trim() || linesOf(o.alimentos).length);
     const full = PORTRAIT[0] - MARGIN * 2;
     const colW = (full - CARD.gap) / 2;
@@ -625,12 +894,20 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
       rowsOfCards.push({ pair, h: Math.max(...pair.map(c => c.mm.h)) });
     }
 
+    const pauta = ses ? measurePauta(ses, full) : null;
+
     // Les seccions curtes comparteixen pàgina si hi caben
-    const firstH = rowsOfCards[0]?.h || 0;
-    if (!cur || si === 0 || cur.y - 10 - HERO_H - HERO_GAP - firstH < BOTTOM) {
+    const firstH = pauta?.h || rowsOfCards[0]?.h || 0;
+    if (!cur || cur.y - 10 - HERO_H - HERO_GAP - firstH < BOTTOM) {
       cur = sectionPage(PORTRAIT, key);
     } else {
       cur.y = sectionHero(cur.page, key, cur.y - 10);
+    }
+
+    if (pauta) {
+      if (cur.y - pauta.h < BOTTOM) cur = sectionPage(PORTRAIT, key, { continued: true });
+      drawPauta(cur.page, ses, pauta, cur.m, cur.y, full);
+      cur.y -= pauta.h + CARD.gap;
     }
 
     for (const row of rowsOfCards) {
@@ -670,7 +947,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   }
 
   // ── 3. Guia de quantitats ───────────────────────────────────────────────
-  if (sections.includes('cantidades')) {
+  function renderCantidades() {
     let pg = sectionPage(PORTRAIT, 'cantidades');
     const { W, m } = pg;
     const full = W - m * 2;
@@ -687,6 +964,20 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
       pg.y -= h + CARD.gap;
     }
 
+    // Planificació esportiva: llegenda de la ració de descans → entrenament
+    const withTraining = sport && p.cantidades.grupos.some(g => hasTrainingValue(g.texto));
+    if (withTraining) {
+      const runs = [
+        { text: L.restPortion, font: F.semi, color: C.soft },
+        { text: '  →  ', font: F.reg, color: C.soft },
+        { text: L.trainingPortion, font: F.bold, color: C.orangeInk },
+      ];
+      const [ln] = wrapRuns(runs, T.small, full);
+      drawIcon(pg.page, 'zap', m + 6, pg.y - 4 - T.small * 0.36, 10, C.orangeInk, 1.1);
+      drawRuns(pg.page, ln, m + 18, pg.y - 4 - T.small * 0.72, T.small);
+      pg.y -= T.small + 4 + CARD.gap;
+    }
+
     const gap = CARD.gap;
     const colW = (full - gap) / 2;
     const pad = 14;
@@ -700,7 +991,11 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
         const pairs = linesOf(g.texto).map(splitLabel);
         const layoutRows = (labW) => pairs.map(({ label: lab, value }) => {
           const ll = lab ? wrap(lab, F.semi, is, labW - 8) : [];
-          const vl = wrap(value, F.reg, is, lab ? inner - labW : inner);
+          const color = lab ? C.soft : C.ink;
+          const valueW = lab ? inner - labW : inner;
+          const vl = withTraining && splitTraining(value).entreno
+            ? wrapRuns(trainingRuns(value, { withLabel: false }), is, valueW)
+            : wrap(value, F.reg, is, valueW).map(t => [{ text: t, font: F.reg, color, x: 0 }]);
           return { ll, vl, h: Math.max(ll.length, vl.length) * lh(is, 1.34) + 5.5 };
         });
         // Columna d'etiquetes: l'amplada (30-50 %) amb què la targeta fa menys línies
@@ -738,7 +1033,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
         if (ri > 0) hline(page, ix, ix + inner, y + 0.5, C.rule, 0.5);
         const bl = y - 2.9 - is * 0.76;
         r.ll.forEach((ln, j) => text(page, ln, ix, bl - j * lh(is, 1.34), F.semi, is, C.ink));
-        r.vl.forEach((ln, j) => text(page, ln, r.ll.length ? ix + c.labW : ix, bl - j * lh(is, 1.34), F.reg, is, r.ll.length ? C.soft : C.ink));
+        r.vl.forEach((ln, j) => drawRuns(page, ln, r.ll.length ? ix + c.labW : ix, bl - j * lh(is, 1.34), is));
         y -= r.h;
       });
       colY[col] = top - c.h - gap;
@@ -750,7 +1045,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   // el text hi cap a mida llegible; si no, comidas i cenas van en pàgines
   // separades, i en últim cas cada àpat es parteix en dues meitats de la
   // setmana. Totes les pàgines del menú fan servir la mateixa escala.
-  if (sections.includes('menu')) {
+  function renderMenu() {
     const [W, H] = PORTRAIT;
     const m = MARGIN;
     const labelW = 22;
@@ -954,7 +1249,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
   }
 
   // ── 5. Productes ─────────────────────────────────────────────────────────
-  if (sections.includes('productos')) {
+  async function renderProductos() {
     let pg = sectionPage(PORTRAIT, 'productos');
     const cols = 4;
     const gap = CARD.gap;
@@ -975,6 +1270,209 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
         names[j].forEach((ln, li) => text(pg.page, ln, x + 2, pg.y - imgH - 13 - li * lh(ns, 1.3), F.semi, ns, C.ink));
       }
       pg.y -= h + 18;
+    }
+  }
+
+  // ── 6. Pla de competició ────────────────────────────────────────────────
+  // Blocs (24 h prèvies, esmorzar, cafeïna, durant, recuperació) un rere
+  // l'altre en pàgines verticals; cada bloc: llistes, xifra clau per al pes,
+  // taules i avisos. Les taules es parteixen per files entre pàgines.
+  function renderCompeticion() {
+    const comp = p.competicion;
+    let pg = sectionPage(PORTRAIT, 'competicion');
+    const { m } = pg;
+    const full = pg.W - m * 2;
+    const need = (h) => {
+      if (pg.y - h >= BOTTOM) return false;
+      pg = sectionPage(PORTRAIT, 'competicion', { continued: true });
+      return true;
+    };
+    const BL = { size: T.body, k: 1.42 };
+
+    // Fitxa de la prova: nom, data, durada, pes
+    const facts = [
+      [L.race.name, comp.nombre],
+      [L.race.date, longDate(comp.fecha).replace(/^\S+ /, '')],
+      [L.race.duration, formatDuration(comp.duracion)],
+      [L.race.weight, peso ? `${fmtNum(peso)} kg` : ''],
+    ].filter(([, v]) => v);
+    if (facts.length) {
+      const h = 50;
+      box(pg.page, m, pg.y, full, h, { r: 16, fill: C.white, stroke: C.rule });
+      const cw = full / facts.length;
+      facts.forEach(([k, v], i) => {
+        const x = m + i * cw;
+        if (i) pg.page.drawLine({ start: { x, y: pg.y - 12 }, end: { x, y: pg.y - h + 12 }, thickness: 0.6, color: C.rule });
+        label(pg.page, k, x + 16, pg.y - 18);
+        text(pg.page, wrapMax(v, F.bold, T.card, cw - 28, 1)[0] || '', x + 16, pg.y - 36, F.bold, T.card, C.ink);
+      });
+      pg.y -= h + 20;
+    }
+
+    const measureBullets = (ls) => ls.map(l => wrap(l, F.reg, BL.size, full - 14));
+    const bulletsH = (wrapped) => wrapped.reduce((n, w) => n + w.length * lh(BL.size, BL.k) + 3, 0);
+    const drawBullets = (wrapped) => {
+      if (!wrapped.length) return;
+      for (const w of wrapped) {
+        const h = w.length * lh(BL.size, BL.k) + 3;
+        need(h);
+        const bl = pg.y - BL.size * 0.78;
+        bullet(pg.page, m, bl, BL.size);
+        w.forEach((ln, j) => text(pg.page, ln, m + 12, bl - j * lh(BL.size, BL.k), F.reg, BL.size, C.ink));
+        pg.y -= h;
+      }
+      pg.y -= 8;
+    };
+
+    // Xifra clau: "Hidratos del día · 355-495 g · 5-7 g/kg de peso"
+    const FIG_H = 52;
+    const drawFigure = (items) => {
+      const its = items.filter(it => it.value);
+      if (!its.length) return;
+      need(FIG_H);
+      box(pg.page, m, pg.y, full, FIG_H, { r: 14, fill: C.orangePale });
+      const cw = full / its.length;
+      its.forEach((it, i) => {
+        const x = m + i * cw + 18;
+        label(pg.page, it.label, x, pg.y - 18, { color: C.orangeInk });
+        const vw = width(it.value, F.display, T.figure);
+        text(pg.page, it.value, x, pg.y - 38, F.display, T.figure, C.ink);
+        if (it.detail) text(pg.page, wrapMax(it.detail, F.med, T.small, cw - vw - 46, 1)[0] || '', x + vw + 8, pg.y - 38, F.med, T.small, C.soft);
+      });
+      pg.y -= FIG_H + 14;
+    };
+    /** Rang per kg → xifra clau (calculada si hi ha pes; si no, el rang per kg). */
+    const perKgFigure = (lab, range, { unit = 'g', step = 5 } = {}) => {
+      const kg = rangeLabel(range, `${unit}/kg`);
+      const calc = perKg(range, peso, { unit, step });
+      return calc ? { label: lab, value: calc, detail: `${kg} ${L.ofWeight}` } : { label: lab, value: kg, detail: '' };
+    };
+
+    // Taula de dues columnes amb capçalera; si es parteix, la capçalera es repeteix
+    const drawTable = (head, rows, { frac = 0.3 } = {}) => {
+      const list = rows.filter(([a, b]) => String(a || '').trim() || String(b || '').trim());
+      if (!list.length) return;
+      const pad = 10;
+      const c1 = full * frac;
+      const headH = 24;
+      const laid = list.map(([a, b]) => {
+        const la = wrap(String(a || ''), F.semi, T.body, c1 - pad * 2);
+        const lb = wrap(String(b || ''), F.reg, T.body, full - c1 - pad * 2);
+        return { la, lb, h: Math.max(la.length, lb.length, 1) * lh(T.body, 1.38) + pad * 2 - 2 };
+      });
+      const drawHead = () => {
+        box(pg.page, m, pg.y, full, headH, { r: 8, fill: C.olive });
+        label(pg.page, head[0], m + pad, pg.y - headH / 2 - T.label * 0.36, { color: C.white });
+        if (head[1]) label(pg.page, head[1], m + c1 + pad, pg.y - headH / 2 - T.label * 0.36, { color: C.white });
+        pg.y -= headH;
+      };
+      need(headH + laid[0].h);
+      drawHead();
+      laid.forEach((r, i) => {
+        if (need(r.h)) drawHead();
+        const { page } = pg;
+        page.drawRectangle({ x: m, y: pg.y - r.h, width: full, height: r.h, color: i % 2 ? C.surface : C.white });
+        hline(page, m, m + full, pg.y - r.h, C.rule, 0.6);
+        const bl = pg.y - pad - T.body * 0.78 + 1;
+        r.la.forEach((ln, j) => text(page, ln, m + pad, bl - j * lh(T.body, 1.38), F.semi, T.body, C.ink));
+        r.lb.forEach((ln, j) => text(page, ln, m + c1 + pad, bl - j * lh(T.body, 1.38), F.reg, T.body, C.ink));
+        pg.y -= r.h;
+      });
+      pg.y -= 16;
+    };
+
+    // Avís amb icona (hidratació)
+    const drawCallout = (icon, lab, ls) => {
+      if (!ls.length) return;
+      const wrapped = ls.map(l => wrap(l, F.med, T.body, full - 66));
+      const n = wrapped.reduce((a, w) => a + w.length, 0);
+      const h = Math.max(46, 30 + n * lh(T.body, 1.4) + (wrapped.length - 1) * 2);
+      need(h);
+      box(pg.page, m, pg.y, full, h, { r: 14, fill: C.sagePale });
+      iconDisc(pg.page, icon, m + 26, pg.y - h / 2, 12, { fill: C.white, k: 1.05 });
+      label(pg.page, lab, m + 50, pg.y - 18);
+      let y = pg.y - 32 - T.body * 0.5;
+      for (const w of wrapped) {
+        w.forEach(ln => { text(pg.page, ln, m + 50, y, F.med, T.body, C.ink); y -= lh(T.body, 1.4); });
+        y -= 2;
+      }
+      pg.y -= h + 16;
+    };
+
+    const subHead = (n, title, meta, nextH = 60) => {
+      need(34 + nextH);
+      const { page } = pg;
+      const r = 11;
+      page.drawCircle({ x: m + r, y: pg.y - r, size: r, color: C.orange });
+      textCenter(page, String(n), m + r, pg.y - r - 3.6, F.bold, T.card, C.ink);
+      const tw = width(title, F.bold, T.card);
+      text(page, title, m + r * 2 + 10, pg.y - r - 4, F.bold, T.card, C.ink);
+      if (meta) text(page, meta, m + r * 2 + 10 + tw + 8, pg.y - r - 4, F.med, T.small, C.soft);
+      pg.y -= 34;
+    };
+    const sublabel = (s) => {
+      need(18 + 20);
+      label(pg.page, s, m, pg.y - T.label * 0.72);
+      pg.y -= T.label + 10;
+    };
+
+    const firstH = (wrapped, fallback) => (wrapped.length ? Math.min(bulletsH(wrapped), 60) : fallback);
+    competicionBlocks(comp).forEach((k, i) => {
+      const b = comp[k];
+      const n = i + 1;
+      if (k === 'previa') {
+        const obj = measureBullets(linesOf(b.objetivo));
+        const day = longDate(comp.fecha, -1);
+        subHead(n, L.blocks.previa, day ? `(${day})` : '', firstH(obj, FIG_H));
+        drawBullets(obj);
+        drawFigure([perKgFigure(L.dayCarbs, b.hc)]);
+        drawTable([L.intake, L.foodsAmounts], b.menu.filter(r => String(r.texto || '').trim()).map(r => [r.ingesta, r.texto]));
+        drawCallout('droplet', L.hydration, linesOf(b.hidratacion));
+      } else if (k === 'desayuno') {
+        const horas = String(b.horas || '').trim();
+        const intro = measureBullets(horas ? [L.breakfastHours(horas)] : []);
+        subHead(n, L.blocks.desayuno, '', firstH(intro, FIG_H));
+        drawBullets(intro);
+        drawFigure([perKgFigure(L.breakfastCarbs, b.hc)]);
+        const pautas = measureBullets(linesOf(b.pautas));
+        if (pautas.length) { sublabel(L.guidelines); drawBullets(pautas); }
+        drawTable([L.example, L.amounts], b.opciones.map(r => [r.titulo, r.cantidad]), { frac: 0.34 });
+      } else if (k === 'cafeina') {
+        const intro = measureBullets(linesOf(b.intro));
+        subHead(n, L.blocks.cafeina, '', firstH(intro, FIG_H));
+        drawBullets(intro);
+        drawFigure([perKgFigure(L.caffeine, b.mg, { unit: 'mg', step: 10 })]);
+        b.protocolos.forEach((pr, j) => drawTable(
+          [pr.titulo?.trim() || `${L.option} ${j + 1}`, L.what],
+          pr.pasos.map(x => [x.cuando, x.que]),
+          { frac: 0.34 },
+        ));
+      } else if (k === 'durante') {
+        const d = duringContent(comp);
+        const dur = formatDuration(comp.duracion);
+        const texto = measureBullets(d.texto);
+        subHead(n, L.blocks.durante, dur ? `(${dur})` : '', d.hcHora ? FIG_H : firstH(texto, 46));
+        if (d.hcHora) drawFigure([{ label: L.carbsPerHour, value: d.hcHora, detail: '' }]);
+        drawBullets(texto);
+        drawCallout('droplet', L.hydration, d.hidratacion);
+      } else if (k === 'recuperacion') {
+        const hasFig = parseRange(b.hc) || parseRange(b.prot);
+        subHead(n, L.blocks.recuperacion, '', hasFig ? FIG_H : 40);
+        drawFigure([perKgFigure(L.carbs, b.hc), perKgFigure(L.protein, b.prot)]);
+        drawBullets(measureBullets(linesOf(b.texto)));
+        drawTable([L.example, L.amounts], b.opciones.map(r => [r.titulo, r.cantidad]), { frac: 0.34 });
+      }
+      pg.y -= 6;
+    });
+  }
+
+  const RENDER = { cantidades: renderCantidades, menu: renderMenu, productos: renderProductos, competicion: renderCompeticion };
+  for (const key of entries) {
+    if (isOptionKey(key)) {
+      await renderOptions(key);
+    } else {
+      cur = null;
+      await RENDER[key]();
     }
   }
 

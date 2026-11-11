@@ -11,6 +11,14 @@ describe('parseDecimal', () => {
     expect(parseDecimal('70 kg')).toBeNull();
     expect(parseDecimal(null)).toBeNull();
   });
+
+  it('reads Spanish thousands as thousands', () => {
+    expect(parseDecimal('1.500')).toBe(1500);
+    expect(parseDecimal('1 800')).toBe(1800);
+    expect(parseDecimal('12.000')).toBe(12000);
+    expect(parseDecimal('1.5')).toBe(1.5);
+    expect(parseDecimal('1,500')).toBe(1.5);
+  });
 });
 
 describe('edadDesde', () => {

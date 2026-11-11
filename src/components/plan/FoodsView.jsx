@@ -120,7 +120,7 @@ const FoodDetail = ({ food, onClose }) => {
   };
 
   return (
-    <Modal open onClose={onClose} title={food.basico}>
+    <Modal open guardChanges onClose={onClose} title={food.basico}>
       <div className="grid sm:grid-cols-[200px_1fr] gap-6">
         <div className="space-y-2">
           <FoodPhoto food={food} className="border border-sage-200" />

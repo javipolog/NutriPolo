@@ -8,13 +8,14 @@ import {
     AlertTriangle, CheckCircle, CheckCircle2, Clock, ArrowRight,
     UserPlus, Activity, Bell
 } from 'lucide-react';
-import { Card, StatCard, Button, Badge, EmptyState, StatusBadge } from './UI';
+import { Card, StatCard, Button, Badge, EmptyState, StatusBadge, clickableProps } from './UI';
 import useStore, { formatCurrency, formatDate, formatDateShort, filterVisibleConsultations } from '../stores/store';
 import { RemindersPanel, ReviewRequestsPanel } from './RemindersPanel';
 import { useChartTheme } from '../hooks/useChartTheme';
 import { ConsultationModal } from './ConsultationModal';
 import { ClientModal } from './ClientModal';
 import { InvoiceModal } from './InvoiceModal';
+import { billedConsultationIds } from '../services/invoicing';
 import { PlanEditorModal } from './NutritionPlanEditor';
 import { useT, useLocale, plural } from '../i18n';
 
@@ -127,7 +128,11 @@ const DashboardHeader = ({ nombre, onCreate }) => {
 
 const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expiringCount, pendingTotal, pendingCount, newClientsThisMonth, newClientsPrev }) => {
     const t = useT();
-    const nextConsultation = todayConsultations.find(c => c.estado === 'programada');
+    // Cancelled and no-shows are not today's work; "next" is one still to come
+    const now = new Date();
+    const nowHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const todayCount = todayConsultations.filter(c => c.estado === 'programada' || c.estado === 'completada').length;
+    const nextConsultation = todayConsultations.find(c => c.estado === 'programada' && !c.allDay && (c.hora || '') >= nowHHMM);
     const clientTrend = newClientsPrev > 0
         ? t.dashboard_new_this_month.replace('{n}', `${newClientsThisMonth >= newClientsPrev ? '+' : ''}${newClientsThisMonth - newClientsPrev}`)
         : newClientsThisMonth > 0 ? t.dashboard_new_this_month.replace('{n}', `+${newClientsThisMonth}`) : null;
@@ -137,8 +142,8 @@ const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expirin
             <StatCard
                 icon={Calendar}
                 label={t.dashboard_consultations_today}
-                value={todayConsultations.length.toString()}
-                subValue={nextConsultation ? t.dashboard_next_at.replace('{time}', nextConsultation.hora || '—') : todayConsultations.length ? t.dashboard_all_completed : t.dashboard_no_consultations_today}
+                value={todayCount.toString()}
+                subValue={nextConsultation ? t.dashboard_next_at.replace('{time}', nextConsultation.hora || '—') : todayCount ? t.dashboard_all_completed : t.dashboard_no_consultations_today}
                 color="wellness"
             />
             <StatCard
@@ -173,6 +178,9 @@ const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expirin
    ============================================ */
 
 const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
+    const setSelectedClientId = useStore(s => s.setSelectedClientId);
+    // Between patients: a row opens that patient's record
+    const openClient = (id) => { setSelectedClientId(id); onNavigate('clients'); };
     const t = useT();
     const clientsById = useMemo(() => new Map(clients.map(c => [c.id, c])), [clients]);
     const locationsById = useMemo(
@@ -206,9 +214,14 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                         const location = locationsById.get(c.locationId);
                         const dotColor = CONSULTATION_STATUS_DOT[c.estado] || 'bg-sage-300';
                         return (
-                            <div key={c.id} className="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
+                            <div
+                                key={c.id}
+                                {...(client ? clickableProps(() => openClient(client.id)) : {})}
+                                title={client ? t.dashboard_open_record : undefined}
+                                className={`flex items-center gap-4 py-3 first:pt-0 last:pb-0 ${client ? 'cursor-pointer hover:bg-sage-50 -mx-2 px-2 rounded-button' : ''}`}
+                            >
                                 <span className="tabular-nums text-sm text-sage-900 font-semibold w-14 shrink-0">
-                                    {c.hora || '—'}
+                                    {c.allDay ? t.calendar_all_day : c.hora || '—'}
                                 </span>
                                 <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
                                 <div className="flex-1 min-w-0">
@@ -631,13 +644,13 @@ export const Dashboard = () => {
         };
     }, [clients]);
 
-    // Unbilled consultations (exclude pending-confirm — not yet assigned to a client)
+    // Unbilled consultations: only those with a client (the ones an invoice can
+    // take), and a cancelled invoice frees its consultations (billedConsultationIds)
     const unbilledCount = useMemo(() => {
-        const billedIds = new Set(
-            invoices.flatMap(inv => (inv.items || []).map(item => item.consultationId).filter(Boolean))
-        );
+        const billedIds = billedConsultationIds(invoices);
         return consultations.filter(c =>
           c.estado === 'completada' &&
+          c.clienteId &&
           !billedIds.has(c.id) &&
           c.matchStatus !== 'auto-pending-review'
         ).length;
@@ -671,8 +684,9 @@ export const Dashboard = () => {
     const revenueChart = useMemo(() =>
         last6.map(({ year, month, label }) => {
             const prefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+            // "Collected": counted in the month it was paid (fechaCobro), not issued
             const total = invoices
-                .filter(i => i.estado === 'pagada' && i.fecha?.startsWith(prefix))
+                .filter(i => i.estado === 'pagada' && (i.fechaCobro || i.fecha)?.startsWith(prefix))
                 .reduce((s, i) => s + (i.total || i.importe || 0), 0);
             return { label, value: total };
         })

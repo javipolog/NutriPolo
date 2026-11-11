@@ -6,16 +6,63 @@
  * dilluns a diumenge amb dues opcions (A/B) per dinar i sopar, i productes.
  *
  * Tot és pur (sense store ni Tauri) perquè es pugui provar i reutilitzar
- * des de l'editor i el generador de PDF.
+ * des de l'editor i el generador de PDF. La part de nutrició esportiva
+ * (`tipo: 'deportiva'`) és a deportiva.js.
  */
+
+import {
+  isDeportiva, normalizeSport, copySport, sessionHasContent, competicionBlocks, TIPO_DEPORTIVA, emptyDeporte,
+} from './deportiva';
 
 export const PLAN_FORMAT = 'planificacion';
 
 // Seccions d'opcions (taula títol + aliments)
 export const OPTION_SECTIONS = ['desayunos', 'mediaManana', 'merienda'];
 
-// Ordre de les seccions al PDF i a l'índex de la portada
-export const SECTION_ORDER = ['desayunos', 'mediaManana', 'merienda', 'cantidades', 'menu', 'productos'];
+// Ordre de les seccions al PDF i a l'índex de la portada. `entrenos` i
+// `competicion` només surten a les planificacions esportives.
+export const SECTION_ORDER = ['desayunos', 'mediaManana', 'merienda', 'entrenos', 'cantidades', 'menu', 'productos', 'competicion'];
+
+/**
+ * Ordre de les seccions d'una planificació (`plan.orden`, triat a l'editor):
+ * les conegudes en l'ordre desat, sense repetides, i les que hi falten
+ * (p. ex. una secció nova de l'app) just després de la que les precedeix
+ * a l'ordre per defecte.
+ */
+export function normalizeOrder(orden) {
+  const out = [...new Set((Array.isArray(orden) ? orden : []).filter(k => SECTION_ORDER.includes(k)))];
+  SECTION_ORDER.forEach((k, i) => {
+    if (out.includes(k)) return;
+    const prev = SECTION_ORDER.slice(0, i).reverse().find(x => out.includes(x));
+    out.splice(prev ? out.indexOf(prev) + 1 : 0, 0, k);
+  });
+  return out;
+}
+
+/** Mou `key` una posició (dir = -1 / 1) entre les seccions `visible`; les amagades no compten. */
+export function moveSection(orden, key, dir, visible = SECTION_ORDER) {
+  const order = normalizeOrder(orden);
+  const shown = order.filter(k => visible.includes(k));
+  const j = shown.indexOf(key) + dir;
+  if (shown.indexOf(key) < 0 || j < 0 || j >= shown.length) return order;
+  const a = order.indexOf(key);
+  const b = order.indexOf(shown[j]);
+  [order[a], order[b]] = [order[b], order[a]];
+  return order;
+}
+
+/** Porta `key` al lloc de `target` (arrossegant): les altres es desplacen una posició. */
+export function moveSectionTo(orden, key, target) {
+  const order = normalizeOrder(orden);
+  const from = order.indexOf(key);
+  const to = order.indexOf(target);
+  if (from < 0 || to < 0 || from === to) return order;
+  order.splice(from, 1);
+  order.splice(to, 0, key);
+  return order;
+}
+
+export const isDefaultOrder = (orden) => normalizeOrder(orden).every((k, i) => k === SECTION_ORDER[i]);
 
 export const WEEK_DAYS = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
 export const MENU_SLOTS = ['comida', 'cena'];
@@ -34,7 +81,7 @@ export function linesOf(text) {
 }
 
 export const emptyDish = () => ({ titulo: '', alimentos: '', receta: '' });
-export const emptyOption = () => ({ id: uid(), titulo: '', alimentos: '', nota: '' });
+export const emptyOption = () => ({ id: uid(), titulo: '', alimentos: '', nota: '', entreno: '' });
 
 export const isDishEmpty = (d) => !d || (!String(d.titulo || '').trim() && !linesOf(d.alimentos).length);
 
@@ -69,7 +116,7 @@ export const DEFAULT_MENU_NOTAS = [
 ].join('\n');
 
 export const DEFAULT_SECCIONES = {
-  desayunos: true, mediaManana: true, merienda: true, cantidades: true, menu: true, productos: true,
+  desayunos: true, mediaManana: true, merienda: true, entrenos: true, cantidades: true, menu: true, productos: true, competicion: true,
 };
 
 /** Número de la següent planificació del client (1, 2, 3…). */
@@ -111,6 +158,8 @@ export function copyContent(src) {
       dias: normalizeWeek(src.menu?.dias),
     },
     productos: [...(src.productos || [])],
+    orden: normalizeOrder(src.orden),
+    ...copySport(src),
   };
 }
 
@@ -140,15 +189,23 @@ export function defaultContent() {
     },
     menu: { notas: DEFAULT_MENU_NOTAS, dias: emptyWeek() },
     productos: [],
+    orden: [...SECTION_ORDER],
+    tipo: 'general',
+    deporte: emptyDeporte(),
+    sesiones: [],
+    competicion: null,
   };
 }
 
 /**
  * Nova planificació per a un client. Si hi ha `base` (normalment l'última
  * del client) se'n copia el contingut, perquè només calgui retocar-lo.
+ * `peso` (l'últim pesatge) és el de les xifres per kg si és esportiva.
  */
-export function createPlanificacion({ clienteId, plans, base, today }) {
+export function createPlanificacion({ clienteId, plans, base, today, peso }) {
   const numero = nextPlanNumber(plans, clienteId);
+  const content = base ? copyContent(base) : defaultContent();
+  if (content.tipo === TIPO_DEPORTIVA && peso) content.deporte = { ...content.deporte, peso: String(peso) };
   return {
     formato: PLAN_FORMAT,
     clienteId,
@@ -159,7 +216,7 @@ export function createPlanificacion({ clienteId, plans, base, today }) {
     estado: 'borrador',
     objetivos: '',
     observaciones: '',
-    ...(base ? copyContent(base) : defaultContent()),
+    ...content,
   };
 }
 
@@ -176,6 +233,8 @@ export function normalizePlanificacion(plan) {
     cantidades: { ...base.cantidades, ...(plan?.cantidades || {}), grupos: plan?.cantidades?.grupos || [] },
     menu: { notas: plan?.menu?.notas ?? '', dias: normalizeWeek(plan?.menu?.dias) },
     productos: plan?.productos || [],
+    orden: normalizeOrder(plan?.orden),
+    ...normalizeSport(plan),
   };
 }
 
@@ -188,12 +247,14 @@ export function menuHasContent(menu) {
 /** Seccions que surten al PDF: activades i amb contingut. */
 export function visibleSections(plan, productsById = {}) {
   const p = normalizePlanificacion(plan);
-  return SECTION_ORDER.filter(k => {
+  return p.orden.filter(k => {
     if (!p.secciones[k]) return false;
     if (OPTION_SECTIONS.includes(k)) return hasOptions(p[k]);
     if (k === 'cantidades') return p.cantidades.grupos.some(g => g.titulo?.trim() || linesOf(g.texto).length);
     if (k === 'menu') return menuHasContent(p.menu);
     if (k === 'productos') return p.productos.some(id => productsById[id]);
+    if (k === 'entrenos') return isDeportiva(p) && p.sesiones.some(sessionHasContent);
+    if (k === 'competicion') return isDeportiva(p) && competicionBlocks(p.competicion).length > 0;
     return false;
   });
 }
@@ -273,6 +334,7 @@ export function planFoods(plan) {
   const p = normalizePlanificacion(plan);
   const lines = [
     ...OPTION_SECTIONS.flatMap(k => p[k].opciones.flatMap(o => linesOf(o.alimentos))),
+    ...(isDeportiva(p) ? p.sesiones.flatMap(s => s.opciones.flatMap(o => linesOf(o.alimentos))) : []),
     ...p.menu.dias.flatMap(d => MENU_SLOTS.flatMap(s => MENU_VARIANTS.flatMap(v => linesOf(d[s][v].alimentos)))),
   ];
   const byKey = new Map();
@@ -315,7 +377,11 @@ export function collectOwnRecipes(plan, webRecipes = []) {
       add(dish, { receta: String(dish?.receta || '').trim() });
     }
   }
-  for (const k of OPTION_SECTIONS) for (const o of plan?.[k]?.opciones || []) add(o, { nota: o.nota || '' });
+  // An option's note is about this patient ("pan sin gluten, es celíaca"):
+  // it stays in this plan and never goes to the shared list, where it would
+  // show up in another patient's plan. A note already in the list is kept.
+  for (const k of OPTION_SECTIONS) for (const o of plan?.[k]?.opciones || []) add(o, {});
+  if (isDeportiva(plan)) for (const s of plan.sesiones || []) for (const o of s.opciones || []) add(o, {});
   return out;
 }
 
@@ -334,6 +400,56 @@ export function mergeOwnRecipes(list = [], entries = [], now = new Date().toISOS
     }
   }
   return out;
+}
+
+/**
+ * Afegeix a "Mis recetas" les receptes que encara no hi són (per títol); les
+ * que ja hi ha no es toquen. Retorna la mateixa llista si no n'afegeix cap.
+ */
+export function addMissingRecipes(list = [], seeds = [], now = new Date().toISOString()) {
+  const known = new Set(list.map(r => dishKey(r.titulo)));
+  const added = [];
+  for (const s of seeds) {
+    const k = dishKey(s.titulo);
+    if (!k || known.has(k) || !linesOf(s.alimentos).length) continue;
+    known.add(k);
+    added.push({ id: uid(), titulo: s.titulo.trim(), alimentos: s.alimentos, receta: s.receta || '', nota: s.nota || '', updatedAt: now });
+  }
+  return added.length ? [...list, ...added] : list;
+}
+
+/**
+ * Firma d'una recepta de la llavor ("titulo\nalimentos\nreceta", FNV-1a de
+ * 32 bits en hex), per reconèixer-la mentre no s'hagi tocat. La mateixa que
+ * calcula scripts/recetas/build-recetas.py.
+ */
+export function seedSignature(r) {
+  let h = 0x811c9dc5;
+  for (const b of new TextEncoder().encode(`${r.titulo}\n${r.alimentos}\n${r.receta || ''}`)) {
+    h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
+/**
+ * Canvia les receptes d'una llavor antiga que no s'han tocat per la versió
+ * nova: `oldToNew` va de la firma antiga a l'índex a `seeds` (-1 si s'ha
+ * tret). La nova conserva l'id; les tocades o esborrades es queden com estan.
+ */
+export function replaceSeedRecipes(list = [], oldToNew = {}, seeds = [], now = new Date().toISOString()) {
+  const idByNew = new Map();
+  const kept = list.filter(r => {
+    const i = oldToNew[seedSignature(r)];
+    if (i === undefined) return true;
+    if (i >= 0 && seeds[i] && !idByNew.has(i)) idByNew.set(i, r.id);
+    return false;
+  });
+  if (kept.length === list.length) return list;
+  const known = new Set(kept.map(r => dishKey(r.titulo)));
+  const added = [...idByNew]
+    .filter(([i]) => !known.has(dishKey(seeds[i].titulo)))
+    .map(([i, id]) => ({ id, titulo: seeds[i].titulo, alimentos: seeds[i].alimentos, receta: seeds[i].receta || '', nota: seeds[i].nota || '', updatedAt: now }));
+  return [...kept, ...added];
 }
 
 /**
@@ -360,6 +476,7 @@ export function planificacionStats(plan) {
   const p = normalizePlanificacion(plan);
   let platos = 0;
   p.menu.dias.forEach(d => MENU_SLOTS.forEach(s => MENU_VARIANTS.forEach(v => { if (!isDishEmpty(d[s][v])) platos++; })));
-  const opciones = OPTION_SECTIONS.reduce((n, k) => n + p[k].opciones.filter(o => o.titulo?.trim()).length, 0);
+  const opciones = OPTION_SECTIONS.reduce((n, k) => n + p[k].opciones.filter(o => o.titulo?.trim()).length, 0)
+    + (isDeportiva(p) ? p.sesiones.reduce((n, s) => n + s.opciones.filter(o => o.titulo?.trim()).length, 0) : 0);
   return { platos, opciones, productos: p.productos.length };
 }

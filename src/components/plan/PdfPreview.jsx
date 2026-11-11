@@ -3,7 +3,8 @@ import { AlertTriangle } from 'lucide-react';
 import { Spinner } from '../UI';
 import { useT } from '../../i18n';
 
-// pdf.js es carrega només quan s'obre la vista prèvia
+// pdf.js es carrega només quan s'obre la vista prèvia, amb un sol worker
+// per a totes les regeneracions (abans se'n creava un per PDF)
 let pdfjsPromise = null;
 const loadPdfjs = () => {
   pdfjsPromise ??= Promise.all([
@@ -11,7 +12,7 @@ const loadPdfjs = () => {
     import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
   ]).then(([pdfjs, worker]) => {
     pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
-    return pdfjs;
+    return { pdfjs, worker: new pdfjs.PDFWorker() };
   });
   return pdfjsPromise;
 };
@@ -20,7 +21,7 @@ const loadPdfjs = () => {
  * Vista prèvia d'un PDF generat al vol. `generate` retorna els bytes; es
  * torna a cridar (amb retard) cada cop que canvia `deps`.
  */
-export const PdfPreview = ({ generate, deps, delay = 700 }) => {
+export const PdfPreview = ({ generate, deps, delay = 1200 }) => {
   const t = useT();
   const containerRef = useRef(null);
   const [state, setState] = useState({ busy: true, error: null });
@@ -33,9 +34,9 @@ export const PdfPreview = ({ generate, deps, delay = 700 }) => {
     const timer = setTimeout(async () => {
       setState(s => ({ ...s, busy: true }));
       try {
-        const [pdfjs, bytes] = await Promise.all([loadPdfjs(), genRef.current()]);
+        const [{ pdfjs, worker }, bytes] = await Promise.all([loadPdfjs(), genRef.current()]);
         if (cancelled) return;
-        doc = await pdfjs.getDocument({ data: bytes, isEvalSupported: false }).promise;
+        doc = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, worker }).promise;
         const container = containerRef.current;
         if (cancelled || !container) return;
         const width = container.clientWidth - 16;

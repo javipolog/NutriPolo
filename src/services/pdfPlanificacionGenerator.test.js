@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, extname, basename } from 'node:path';
 import { PDFDocument } from 'pdf-lib';
 import { generatePlanificacionPDF, splitQuantity, glueUnits } from './pdfPlanificacionGenerator';
-import { samplePlanificacion } from './planificacion.fixture';
+import { samplePlanificacion, sampleDeportiva } from './planificacion.fixture';
 
 const loadFont = async (file) => new Uint8Array(readFileSync(join(process.cwd(), 'public', 'fonts', file)));
 const client = { id: 'c1', nombre: 'Ana Ejemplo García' };
@@ -122,6 +122,42 @@ describe('generatePlanificacionPDF', () => {
       loadFont: async () => { throw new Error('offline'); },
     });
     expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-');
+  });
+});
+
+describe('sports planificación', () => {
+  it('adds training sessions with their guidance and a competition plan', async () => {
+    const bytes = await generatePlanificacionPDF(sampleDeportiva(), client, config, { loadFont });
+    if (process.env.PLAN_PDF_SPORT_OUT) writeFileSync(process.env.PLAN_PDF_SPORT_OUT, bytes);
+    const { pages } = await load(bytes);
+    const general = await load(await generatePlanificacionPDF({ ...sampleDeportiva(), tipo: 'general' }, client, config, { loadFont }));
+    // 2 sessions + competition plan (at least one page)
+    expect(pages.length).toBeGreaterThanOrEqual(general.pages.length + 2);
+  });
+
+  it('fits a long index on the cover and works without a weight', async () => {
+    const plan = sampleDeportiva();
+    plan.deporte.peso = '';
+    plan.productos = ['p0'];
+    plan.sesiones = [...plan.sesiones, { ...plan.sesiones[0], id: 's3', nombre: 'Ciclismo de carretera con un nombre muy largo', momento: 'post' }];
+    plan.competicion.duracion = '200';
+    const bytes = await generatePlanificacionPDF(plan, client, config, { products: fakeProducts(1), loadFont });
+    expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-');
+  });
+
+  it('draws the sections in the chosen order', async () => {
+    const plan = { ...samplePlanificacion(), orden: ['menu', 'desayunos'] };
+    const { pages } = await load(await generatePlanificacionPDF(plan, client, config, { loadFont }));
+    // cover, then the weekly menu (the only pages with recipe links) before the breakfasts
+    expect(linkCount([pages[1]])).toBeGreaterThan(0);
+    expect(linkCount([pages[pages.length - 1]])).toBe(0);
+  });
+  it('leaves the competition out when it is switched off', async () => {
+    const on = await load(await generatePlanificacionPDF(sampleDeportiva(), client, config, { loadFont }));
+    const plan = sampleDeportiva();
+    plan.secciones = { ...plan.secciones, competicion: false };
+    const off = await load(await generatePlanificacionPDF(plan, client, config, { loadFont }));
+    expect(off.pages.length).toBeLessThan(on.pages.length);
   });
 });
 

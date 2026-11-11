@@ -125,8 +125,13 @@ export function reminderState({ consultation, client, channel, config, now }) {
   const start = consultationStart(consultation);
   const record = consultation.reminders?.[channel];
   if (record && record.slot === reminderSlot(consultation)) {
-    if (record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS) return 'error';
-    return record.status;
+    const stale = record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS;
+    if (!stale && record.status !== 'error') return record.status;
+    // A failed attempt is retried on its own: not once the client has opted
+    // out or the contact is gone.
+    if (client?.recordatorios?.[channel] === false) return 'opted_out';
+    if (!channelContact(channel, client, config)) return 'no_contact';
+    return 'error';
   }
   if (client?.recordatorios?.[channel] === false) return 'opted_out';
   if (!channelContact(channel, client, config)) return 'no_contact';
@@ -150,6 +155,8 @@ export function getReminderCandidates({ consultations, clients, config, now = Da
   const entries = [];
   for (const consultation of consultations || []) {
     if (consultation.estado !== 'programada') continue;
+    // All day in Google: its 09:00 is a placeholder, not an appointment time
+    if (consultation.allDay) continue;
     const start = consultationStart(consultation);
     if (!start) continue;
     const ms = start.getTime() - now;
@@ -170,11 +177,20 @@ export function getReminderCandidates({ consultations, clients, config, now = Da
   return entries.sort((a, b) => a.start - b.start);
 }
 
+/**
+ * A failed send that may have reached the patient anyway: the app was closed
+ * or reloaded while it was `sending`, or the server timed out after taking
+ * the message. Not retried on its own (it would be a duplicate); the panel
+ * offers it to send by hand.
+ */
+export const mayHaveBeenSent = (record) =>
+  record?.status === 'sending' || String(record?.error || '').includes('timeout');
+
 /** Whether automatic sending should pick this email entry up. */
 export function isAutoSendable(entry) {
   if (entry.channel !== 'email') return false;
   if (entry.state === 'due') return true;
-  return entry.state === 'error' && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
+  return entry.state === 'error' && !mayHaveBeenSent(entry.record) && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
 }
 
 export function buildReminderEmail({ consultation, client, config }) {

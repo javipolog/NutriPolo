@@ -13,6 +13,7 @@ import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar, formatSyncStats, formatSyncErrors } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { RemindersSection } from './settings/RemindersSection';
+import { isValidIban, formatIban, DEFAULT_VAT_EXEMPTION_TEXT } from '../services/invoicing';
 import { invoke } from '@tauri-apps/api/tauri';
 
 // ── Locations CRUD ─────────────────────────────────────────────────────────
@@ -649,6 +650,18 @@ const GoogleCalendarSection = () => {
     };
   };
 
+  // Where the appointments of a calendar take place (a clinic's calendar is
+  // that clinic). It also fills the ones already imported without a location;
+  // a sync-type write, so nothing is pushed back to Google.
+  const handleCalendarLocation = (cal, locationId) => {
+    updateStoredCal(cal.id, { locationId: locationId || null });
+    if (!locationId) return;
+    const { consultations: all, updateConsultation } = useStore.getState();
+    for (const c of all) {
+      if (c.sourceCalendarId === cal.id && !c.locationId) updateConsultation(c.id, { locationId }, { sync: true });
+    }
+  };
+
   const handleCalendarSyncMode = (cal, newMode) => {
     const current = gcal.calendars || [];
     const exists = current.find(sc => sc.id === cal.id);
@@ -743,9 +756,14 @@ const GoogleCalendarSection = () => {
   };
 
   // Migration dialog resolvers
-  const handleMigrationConvert = () => {
+  const handleMigrationConvert = async () => {
     if (!migrationPrompt) return;
     const { cal, count } = migrationPrompt;
+    // The appointments' clinical notes do not survive the conversion: a copy first
+    try { await useStore.getState().saveSafetyBackup(); } catch (e) {
+      toast.error(t.backup_auto_failed.replace('{error}', errMsg(e)));
+      return;
+    }
     convertConsultationsToPersonal(cal.id);
     applyPurposeChange(cal, 'personal');
     setMigrationPrompt(null);
@@ -872,6 +890,20 @@ const GoogleCalendarSection = () => {
                         <option value="disabled">✗ {t.gcal_disabled}</option>
                       </select>
                     </div>
+                    {stored && syncMode !== 'disabled' && (purpose === 'primary' || purpose === 'external-clinic' || purpose === 'other') && (
+                      <div className="flex items-center gap-2 pl-5">
+                        <label htmlFor={`cal-location-${cal.id}`} className="text-[11px] text-sage-500 whitespace-nowrap">{t.gcal_calendar_location}:</label>
+                        <select
+                          id={`cal-location-${cal.id}`}
+                          value={stored.locationId || ''}
+                          onChange={e => handleCalendarLocation(cal, e.target.value)}
+                          className="text-xs px-2 py-1 border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400 flex-1"
+                        >
+                          <option value="">{t.gcal_calendar_location_none}</option>
+                          {(config.locations || []).map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+                        </select>
+                      </div>
+                    )}
 
                     {/* Mass-delete pending resolution panel */}
                     {stored?.massDeletePending && (
@@ -1053,6 +1085,29 @@ const GoogleCalendarSection = () => {
           </button>
         </div>
 
+        {/* Client notes to Google (off: they are health data) */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-sage-700">{t.gcal_sync_notes}</p>
+            <p className="text-xs text-sage-500">{t.gcal_sync_notes_hint}</p>
+          </div>
+          <button
+            onClick={() => setGcal({ syncNotes: !gcal.syncNotes })}
+            role="switch"
+            aria-checked={!!gcal.syncNotes}
+            aria-label={t.gcal_sync_notes}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+              gcal.syncNotes ? 'bg-wellness-400' : 'bg-sage-200'
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                gcal.syncNotes ? 'translate-x-4' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
         {/* Action buttons */}
         <div className="flex gap-2 flex-wrap">
           <Button
@@ -1170,13 +1225,15 @@ const SecuritySection = () => {
     }
     setBusy(true);
     try {
+      // Pending changes go to disk before the files are converted.
+      if (!(await flushAllPending())) throw new Error(t.security_save_first);
       await invoke('encryption_setup', { password: newPw });
       toast.success(t.security_enabled_ok);
       setEnabled(true);
       setSetupOpen(false);
       setNewPw(''); setConfirmPw(''); setAckLoss(false);
     } catch (e) {
-      toast.error(t.security_enable_error.replace('{error}', String(e)));
+      toast.error(t.security_enable_error.replace('{error}', errMsg(e)));
     } finally {
       setBusy(false);
     }
@@ -1193,6 +1250,8 @@ const SecuritySection = () => {
     }
     setBusy(true);
     try {
+      // Pending changes go to disk before the files are re-encrypted.
+      if (!(await flushAllPending())) throw new Error(t.security_save_first);
       await invoke('encryption_change_password', {
         oldPassword: oldPw,
         newPassword: changeNewPw,
@@ -1201,11 +1260,12 @@ const SecuritySection = () => {
       setChangeOpen(false);
       setOldPw(''); setChangeNewPw(''); setChangeConfirmPw('');
     } catch (e) {
-      const code = String(e || '');
+      const code = errMsg(e);
       if (code.includes('wrong_password')) {
         toast.error(t.security_wrong_password);
       } else {
-        toast.error(t.security_change_error.replace('{error}', code));
+        // On any failure the backend puts every file back on the old password.
+        toast.error(t.security_change_rolled_back.replace('{error}', code), 10000);
       }
     } finally {
       setBusy(false);
@@ -1774,9 +1834,11 @@ export const SettingsView = () => {
   const appTheme = useStore(s => s.appTheme);
   const setAppTheme = useStore(s => s.setAppTheme);
   const exportDataToZip = useStore(s => s.exportDataToZip);
-  const importDataFromZip = useStore(s => s.importDataFromZip);
+  const pickBackupFile = useStore(s => s.pickBackupFile);
+  const importBackup = useStore(s => s.importBackup);
   const getAutoBackupInfo = useStore(s => s.getAutoBackupInfo);
-  const restoreFromAutoBackup = useStore(s => s.restoreFromAutoBackup);
+  const loadAutoBackup = useStore(s => s.loadAutoBackup);
+  const applyBackup = useStore(s => s.applyBackup);
   const lastError = useStore(s => s.lastError);
   const clearLastError = useStore(s => s.clearLastError);
   const t = useT();
@@ -1785,17 +1847,16 @@ export const SettingsView = () => {
   const { confirm, ConfirmDialog } = useConfirm();
 
   const [exportProgress, setExportProgress] = useState(null);
-  const [backupInfo, setBackupInfo] = useState({ count: 0, lastDate: null, dates: [] });
+  const [backupInfo, setBackupInfo] = useState({ count: 0, lastDate: null, dates: [], safety: null });
   const [selectedBackupDate, setSelectedBackupDate] = useState('');
   const [importing, setImporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
 
-  useEffect(() => {
-    getAutoBackupInfo().then(info => {
-      setBackupInfo(info);
-      if (info.dates.length > 0) setSelectedBackupDate(info.dates[info.dates.length - 1]);
-    });
-  }, []);
+  const refreshBackupInfo = () => getAutoBackupInfo().then(info => {
+    setBackupInfo(info);
+    setSelectedBackupDate(info.dates.length > 0 ? info.dates[info.dates.length - 1] : (info.safety ? 'safety' : ''));
+  });
+  useEffect(() => { refreshBackupInfo(); }, []);
 
   const set = (k, v) => updateConfig({ [k]: v });
 
@@ -1806,8 +1867,9 @@ export const SettingsView = () => {
     try {
       const result = await exportDataToZip(({ current, total }) => setExportProgress({ current, total }));
       setExportProgress(null);
+      if (!result?.saved) return; // dialog cancelled: nothing was written
       toast.success(t.backup_export_success);
-      if (result?.skipped > 0) {
+      if (result.skipped > 0) {
         toast.warning(t.backup_skipped_files.replace('{count}', result.skipped));
       }
     } catch (e) {
@@ -1816,21 +1878,45 @@ export const SettingsView = () => {
     }
   };
 
+  const formatBackupDate = (iso) => new Date(iso.length === 10 ? `${iso}T12:00:00` : iso)
+    .toLocaleString(locale, iso.length === 10 ? { dateStyle: 'long' } : { dateStyle: 'long', timeStyle: 'short' });
+  // "Copy of 3 November 2026: 214 clients, 1,830 appointments, 96 invoices, 40 plans."
+  const backupSummary = (backup) => t.backup_summary
+    .replace('{date}', backup.date ? formatBackupDate(backup.date) : t.backup_summary_no_date)
+    .replace('{clients}', backup.counts.clients)
+    .replace('{consultations}', backup.counts.consultations)
+    .replace('{invoices}', backup.counts.invoices)
+    .replace('{plans}', backup.counts.nutritionPlans);
+  const backupError = (e) => (e?.code && t[`backup_${e.code}`]) || errMsg(e);
+  const reportKeptInvoices = (n) => {
+    if (n > 0) toast.info(plural(t, 'backup_kept_invoices', n), 8000);
+  };
+
   const handleImportZip = async () => {
+    let picked;
+    try {
+      picked = await pickBackupFile();
+    } catch (e) {
+      toast.error(t.backup_import_error + ': ' + backupError(e));
+      return;
+    }
+    if (!picked) return;
     const ok = await confirm({
       title: t.backup_import_confirm_title,
-      message: t.backup_import_confirm_msg,
+      message: `${backupSummary(picked)}\n\n${t.backup_import_confirm_msg}`,
       danger: true,
+      confirmText: t.backup_import_confirm_action,
     });
     if (!ok) return;
     setImporting(true);
     try {
-      const result = await importDataFromZip();
-      if (result) {
-        toast.success(t.backup_import_success);
-      }
+      const result = await importBackup(picked);
+      toast.success(t.backup_import_success);
+      if (result.documentsFailed > 0) toast.warning(t.backup_import_docs_failed.replace('{n}', result.documentsFailed), 10000);
+      reportKeptInvoices(result.keptInvoices);
+      refreshBackupInfo();
     } catch (e) {
-      toast.error(t.backup_import_error + ': ' + errMsg(e));
+      toast.error(t.backup_import_error + ': ' + backupError(e));
     } finally {
       setImporting(false);
     }
@@ -1838,22 +1924,30 @@ export const SettingsView = () => {
 
   const handleRestoreAutoBackup = async () => {
     if (!selectedBackupDate) return;
-    const ok = await confirm({
-      title: t.backup_auto_restore,
-      message: t.backup_auto_restore_confirm.replace('{date}', selectedBackupDate),
-      danger: true,
-    });
-    if (!ok) return;
     setRestoring(true);
     try {
-      await restoreFromAutoBackup(selectedBackupDate);
+      const backup = await loadAutoBackup(selectedBackupDate);
+      const ok = await confirm({
+        title: t.backup_auto_restore,
+        message: `${backupSummary(backup)}\n\n${t.backup_auto_restore_confirm}`,
+        danger: true,
+        confirmText: t.backup_restore_action,
+      });
+      if (!ok) return;
+      const result = await applyBackup(backup);
       toast.success(t.backup_import_success);
+      reportKeptInvoices(result.keptInvoices);
+      refreshBackupInfo();
     } catch (e) {
-      toast.error(t.backup_restore_error + ': ' + errMsg(e));
+      toast.error(t.backup_restore_error + ': ' + backupError(e));
     } finally {
       setRestoring(false);
     }
   };
+
+  // The last automatic copy is shown in red when it is more than 2 days old.
+  const backupStale = backupInfo.lastDate
+    && (Date.now() - new Date(`${backupInfo.lastDate}T00:00:00`).getTime()) > 3 * 86400000;
 
   const THEMES = [
     { id: 'light', icon: Sun, label: t.settings_theme_light },
@@ -1904,6 +1998,30 @@ export const SettingsView = () => {
           <label htmlFor="cfg-direccion" className="block text-xs font-medium text-sage-600 mb-1">{t.client_street}</label>
           <Textarea id="cfg-direccion" value={config.direccion || ''} onChange={e => set('direccion', e.target.value)} rows={2} />
         </div>
+        <div>
+          <label htmlFor="cfg-iban" className="block text-xs font-medium text-sage-600 mb-1">IBAN</label>
+          <Input
+            id="cfg-iban"
+            value={config.iban || ''}
+            onChange={e => set('iban', e.target.value.toUpperCase())}
+            onBlur={e => { if (isValidIban(e.target.value)) set('iban', formatIban(e.target.value)); }}
+            placeholder="ES00 0000 0000 0000 0000 0000"
+            error={config.iban && !isValidIban(config.iban) ? t.settings_iban_invalid : undefined}
+            className="font-mono"
+          />
+          <p className="text-[11px] text-sage-500 mt-1">{t.settings_iban_hint}</p>
+        </div>
+        <div>
+          <label htmlFor="cfg-exencion" className="block text-xs font-medium text-sage-600 mb-1">{t.settings_vat_exemption}</label>
+          <Textarea
+            id="cfg-exencion"
+            value={config.textoExencionIva || ''}
+            onChange={e => set('textoExencionIva', e.target.value)}
+            rows={2}
+            placeholder={DEFAULT_VAT_EXEMPTION_TEXT}
+          />
+          <p className="text-[11px] text-sage-500 mt-1">{t.settings_vat_exemption_hint}</p>
+        </div>
       </Section>
 
       {/* Clinic config */}
@@ -1922,7 +2040,7 @@ export const SettingsView = () => {
             id="cfg-duration"
             type="number"
             value={config.defaultConsultationDuration || 45}
-            onChange={e => set('defaultConsultationDuration', parseInt(e.target.value))}
+            onChange={e => set('defaultConsultationDuration', parseInt(e.target.value, 10) || undefined)}
             className="w-32"
           />
         </div>
@@ -2023,13 +2141,13 @@ export const SettingsView = () => {
           <div className="flex items-center gap-2 text-xs text-sage-500">
             <History size={13} />
             {backupInfo.lastDate ? (
-              <span>{t.backup_auto_last}: <strong className="text-sage-700">{backupInfo.lastDate}</strong> — {backupInfo.count} {t.backup_auto_count}</span>
+              <span>{t.backup_auto_last}: <strong className={backupStale ? 'text-danger' : 'text-sage-700'}>{formatBackupDate(backupInfo.lastDate)}</strong> — {backupInfo.count} {t.backup_auto_count}</span>
             ) : (
               <span>{t.backup_auto_none}</span>
             )}
           </div>
 
-          {backupInfo.dates.length > 0 && (
+          {(backupInfo.dates.length > 0 || backupInfo.safety) && (
             <div className="flex items-center gap-2">
               <select
                 value={selectedBackupDate}
@@ -2037,9 +2155,12 @@ export const SettingsView = () => {
                 aria-label={t.backup_auto_select}
                 className="text-xs border border-sage-300 rounded-button px-2 py-1.5 bg-white text-sage-700 focus:border-wellness-400 focus:ring-1 focus:ring-wellness-400 outline-none"
               >
-                {backupInfo.dates.map(d => (
-                  <option key={d} value={d}>{d}</option>
+                {[...backupInfo.dates].reverse().map(d => (
+                  <option key={d} value={d}>{formatBackupDate(d)}</option>
                 ))}
+                {backupInfo.safety && (
+                  <option value="safety">{t.backup_safety_option.replace('{date}', formatBackupDate(backupInfo.safety.date))}</option>
+                )}
               </select>
               <Button
                 variant="ghost"

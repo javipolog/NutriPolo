@@ -121,6 +121,16 @@ function eventTiming(event, allDayHora, allDayMinutes) {
  * Deterministic Google event id for a consultation: `np` + hex of its id.
  * Google accepts base32hex ids ([a-v0-9], 5–1024 chars), which hex satisfies.
  */
+/**
+ * Whether the client notes of an appointment are written to Google: only
+ * when Raquel turns it on (Settings → Google Calendar), and never to a
+ * clinic's calendar, whose staff can read it. They are health data.
+ */
+export function notesGoToGoogle(gc, calId) {
+  if (!gc?.syncNotes) return false;
+  return (gc.calendars || []).find(c => c.id === calId)?.purpose !== 'external-clinic';
+}
+
 export function googleEventIdFor(consultationId) {
   const bytes = new TextEncoder().encode(String(consultationId));
   return 'np' + Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
@@ -327,11 +337,15 @@ export const googleCalendar = {
   /**
    * Local `completada` / `no_show` are decisions Google cannot represent:
    * a remote "confirmed" event must not turn them back into `programada`.
+   * Neither does a local `cancelada` on a calendar the app cannot write to
+   * (a clinic's): the cancellation never reached Google, so any edit there
+   * (a note, the room) would bring the appointment and its reminder back.
    */
-  mergeRemoteEstado(localEstado, remoteEstado) {
+  mergeRemoteEstado(localEstado, remoteEstado, { canPush = true } = {}) {
     if (remoteEstado === 'programada' && (localEstado === 'completada' || localEstado === 'no_show')) {
       return localEstado;
     }
+    if (remoteEstado === 'programada' && localEstado === 'cancelada' && !canPush) return localEstado;
     return remoteEstado;
   },
 
@@ -351,14 +365,22 @@ export const googleCalendar = {
   eventToConsultation(event, sourceCalendarId) {
     const timing = eventTiming(event, '09:00', 60);
     if (!timing) return null;
+    // A calendar with a location (Settings: a clinic's calendar is that
+    // clinic) gives it to its appointments, for reminders and review links.
+    const locationId = (useStore.getState().config?.googleCalendar?.calendars || [])
+      .find(c => c.id === sourceCalendarId)?.locationId;
 
     return {
+      ...(locationId ? { locationId } : {}),
       fecha: timing.fecha,
       hora: timing.hora,
       duracion: timing.duracion,
       googleEventId: event.id,
       googleSummary: event.summary || '',
       estado: event.status === 'cancelled' ? 'cancelada' : 'programada',
+      // All day in Google: no real time (09:00 is a placeholder), so no
+      // reminders, and a push leaves its dates alone
+      allDay: !!timing.allDay,
       notasCliente: event.description || '',
       lastSyncedAt: nowISO(),
       sourceCalendarId: sourceCalendarId || null,
@@ -514,6 +536,13 @@ export const googleCalendar = {
   async _pushOne(token, calId, c) {
     const pushedAt = nowISO();
     const event = this.consultationToEvent(c, useStore.getState().clients);
+    // An all-day event keeps its all-day dates in Google (PATCH without start/end)
+    if (c.allDay) event.keep_remote_times = true;
+    if (!notesGoToGoogle(useStore.getState().config.googleCalendar, calId)) {
+      // Not shared: Google keeps the description it has (PATCH without it)
+      event.description = null;
+      event.keep_remote_description = true;
+    }
     if (c.restoreRemote) event.status = c.estado === 'cancelada' ? 'cancelled' : 'confirmed';
     try {
       const result = c.googleEventId
@@ -855,8 +884,13 @@ export const googleCalendar = {
   _matchContext(calendarConfig) {
     const state = useStore.getState();
     const calId = calendarConfig.id;
-    // The calendar's own address (and Raquel's) is never a patient's.
-    const ignoreEmails = new Set([normalizeEmail(calId), normalizeEmail(state.config?.email)].filter(Boolean));
+    // Raquel's own addresses are never a patient's: every configured calendar,
+    // the Google account (a clinic may invite it to its events) and the
+    // professional email in Settings.
+    const gc = state.config?.googleCalendar || {};
+    const ignoreEmails = new Set([
+      calId, gc.userEmail, state.config?.email, ...(gc.calendars || []).map(c => c.id),
+    ].map(normalizeEmail).filter(Boolean));
     return {
       calId,
       index: clientIndex(state.clients),
@@ -967,9 +1001,12 @@ export const googleCalendar = {
     // Created by NutriPolo (another device or a lost response): its patient is
     // already in the title, never guessed again.
     const match = ev.nutripolo_id ? null : this._resolvePatient(ev, ctx, partial);
+    // Imported again after "reset agenda": what was already sent stays sent
+    const sent = useStore.getState().takeSentStatus?.(ev.id);
     const newC = useStore.getState().addConsultation({
       ...partial,
       clienteId: null,
+      ...(sent || {}),
       ...extra,
       remoteUpdated: ev.updated || nowISO(),
       ...(match?.fields || {}),
@@ -1024,7 +1061,7 @@ export const googleCalendar = {
           const { notasCliente, ...clinical } = partial;
           useStore.getState().updateConsultation(existing.id, {
             ...(isMatchDecided(existing) ? clinical : partial),
-            estado: this.mergeRemoteEstado(existing.estado, partial.estado),
+            estado: this.mergeRemoteEstado(existing.estado, partial.estado, { canPush: false }),
             remoteUpdated: ev.updated || null,
             lastSyncedAt: nowISO(),
             remoteDeleted: false,
@@ -1078,7 +1115,12 @@ export const googleCalendar = {
       }
     }
 
+    // An event that is still a consultation here (e.g. restored from the copy
+    // taken before converting this calendar) is not mirrored a second time.
+    const asConsultation = new Set(store.consultations.map(c => c.googleEventId).filter(Boolean));
+
     for (const ev of [...fetched.active, ...moved]) {
+      if (asConsultation.has(ev.id)) continue;
       const partial = this.eventToPersonalEvent(ev, calId);
       if (!partial) continue;
       const existing = existingByGoogleId[ev.id];
@@ -1164,6 +1206,8 @@ export const googleCalendar = {
             // ── True conflict, remote is newer → pull it, keep local as shadow
             const partial = this.eventToConsultation(remote, calId);
             if (partial) {
+              // Notes that are not shared with Google stay as they are here
+              if (!notesGoToGoogle(useStore.getState().config.googleCalendar, calId)) delete partial.notasCliente;
               useStore.getState().updateConsultation(c.id, {
                 ...partial,
                 estado: this.mergeRemoteEstado(c.estado, partial.estado),
@@ -1228,10 +1272,12 @@ export const googleCalendar = {
           && (ts(ev.updated) > ts(local.remoteUpdated) || local.remoteDeleted);
         const partial = apply && this.eventToConsultation(ev, calId);
         if (partial) {
+          // Notes that are not shared with Google stay as they are here
+          if (!notesGoToGoogle(state.config.googleCalendar, calId)) delete partial.notasCliente;
           // `partial` has no clienteId: a link (the user's or the sync's) survives.
           state.updateConsultation(local.id, {
             ...partial,
-            estado: this.mergeRemoteEstado(local.estado, partial.estado),
+            estado: this.mergeRemoteEstado(local.estado, partial.estado, { canPush }),
             lastSyncedAt: nowISO(),
             remoteUpdated: ev.updated || nowISO(),
             remoteDeleted: false,
@@ -1251,7 +1297,8 @@ export const googleCalendar = {
       if (state.consultations.some(c => c.googleEventId === ev.id || (ev.nutripolo_id && c.id === ev.nutripolo_id))) continue;
       const partial = this.eventToConsultation(ev, calId);
       if (!partial) continue;
-      this._importEvent(ev, partial, ctx, { tipo: 'Google Calendar' });
+      // No technical `tipo`: it would reach the patient as "Tipo: Google Calendar"
+      this._importEvent(ev, partial, ctx);
       stats.pulled++;
     }
 

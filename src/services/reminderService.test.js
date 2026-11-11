@@ -62,6 +62,21 @@ describe('reminder records', () => {
     c.reminders = { email: { status: 'sending', at: new Date(NOW - 60 * 60000).toISOString(), slot: reminderSlot(c) } };
     expect(state(c)).toBe('error');
   });
+  it('does not retry a failed email once the client opted out or lost the address', () => {
+    const c = consult();
+    c.reminders = { email: { status: 'error', at: new Date(NOW).toISOString(), slot: reminderSlot(c), attempts: 1 } };
+    expect(state(c)).toBe('error');
+    expect(state(c, { ...client, recordatorios: { email: false } })).toBe('opted_out');
+    expect(state(c, { ...client, email: '' })).toBe('no_contact');
+  });
+  it('does not retry on its own a send that may have gone out', () => {
+    // Closed or reloaded while sending
+    expect(isAutoSendable({ channel: 'email', state: 'error', record: { status: 'sending', attempts: 1 } })).toBe(false);
+    // The server timed out after taking the message
+    expect(isAutoSendable({ channel: 'email', state: 'error', record: { status: 'error', attempts: 1, error: 'smtp_send_timeout' } })).toBe(false);
+    // A failure before sending is retried
+    expect(isAutoSendable({ channel: 'email', state: 'error', record: { status: 'error', attempts: 1, error: 'smtp_connection_failed' } })).toBe(true);
+  });
   it('stops automatic retries after MAX_AUTO_ATTEMPTS', () => {
     const entry = { channel: 'email', state: 'error', record: { attempts: MAX_AUTO_ATTEMPTS } };
     expect(isAutoSendable(entry)).toBe(false);
@@ -83,6 +98,11 @@ describe('client preferences and contact data', () => {
 });
 
 describe('getReminderCandidates', () => {
+  it('has no reminders for all-day events (their 09:00 is not a real time)', () => {
+    const entries = getReminderCandidates({ consultations: [consult({ allDay: true })], clients: [client], config, now: NOW });
+    expect(entries).toEqual([]);
+  });
+
   it('skips non-programmed and past consultations, flags unlinked ones', () => {
     const entries = getReminderCandidates({
       consultations: [
@@ -153,5 +173,15 @@ describe('resolveTemplate', () => {
       consultation: consult({ duracion: 45 }), config, lang: 'es',
     });
     expect(out).toBe('jueves|C/ Mayor 1|45 min');
+  });
+  it('leaves out what it has nothing to say about, instead of a "—"', () => {
+    const noLocation = consult({ locationId: undefined });
+    const out = resolveTemplate('Tu cita es a las {{citaHora}} en {{citaUbicacio}}.\n📍 Lugar: {{citaUbicacio}}\n🗂 Tipo: {{citaTipus}}\nHasta pronto', {
+      consultation: noLocation, config, lang: 'es',
+    });
+    expect(out).toBe('Tu cita es a las 09:30.\nHasta pronto');
+    // With a location everything stays
+    expect(resolveTemplate('en {{citaUbicacio}}.\nLugar: {{citaUbicacio}}', { consultation: consult(), config }))
+      .toBe('en Centro.\nLugar: Centro');
   });
 });

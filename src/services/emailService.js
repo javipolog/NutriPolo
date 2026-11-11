@@ -66,9 +66,18 @@ export const resolveTemplate = (template, { client, consultation, plan, invoice,
     '{{resenaUrl}}':       reviewUrl             || '—',
   };
 
+  // Nothing to say is left out instead of showing "—" to the patient: a
+  // label line ("📍 Lugar: {{citaUbicacio}}") goes away, and "… en
+  // {{citaUbicacio}}" loses its preposition (es "en", ca "a", en "at").
+  let result = template;
+  const empty = (key) => vars[key] === '—';
+  if (empty('{{citaUbicacio}}')) result = result.replace(/\s+(?:en|a|at)\s+\{\{citaUbicacio\}\}/g, '');
+  result = result.split('\n').filter(line => {
+    const keys = line.match(/\{\{\w+\}\}/g) || [];
+    return !(keys.length === 1 && empty(keys[0]) && /:\s*\{\{\w+\}\}\s*$/.test(line));
+  }).join('\n');
   // split/join instead of replaceAll: a replacement string containing `$&`
   // or `$1` (e.g. in a client's name) must be inserted literally.
-  let result = template;
   for (const [key, value] of Object.entries(vars)) {
     result = result.split(key).join(String(value));
   }
@@ -432,12 +441,13 @@ export const testSmtpConnection = async (smtpConfig) => {
  */
 export const sendPlanEmail = async ({ client, plan, config, subject, body, pdfBytes, useSmtp, smtpConfig }) => {
   if (useSmtp && smtpConfig) {
-    const safeName = (plan?.nombre || 'plan').replace(/[^a-zA-Z0-9_-]/g, '_');
+    // Same name as the downloaded PDF ("Planificación 3 - Ana López.pdf"), accents included
+    const fileName = `${[plan?.nombre || 'Plan', client?.nombre].filter(Boolean).join(' - ')}.pdf`.replace(/[\\/:*?"<>|]/g, '_');
     return sendEmailSMTP({
       to: client?.email || '',
       toName: client?.nombre,
       subject, body, pdfBytes,
-      pdfFilename: `${safeName}.pdf`,
+      pdfFilename: fileName,
       smtpConfig,
     });
   }

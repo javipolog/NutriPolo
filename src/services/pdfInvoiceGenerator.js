@@ -10,6 +10,7 @@ import { PDFDocument, rgb, LineCapStyle, StandardFonts } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import { validateDesign } from './invoiceDesignPresets';
 import { ONEST_FILES, fetchFont } from './pdfFonts';
+import { invoiceParties, recipientAddressLines, isCorrective, DEFAULT_VAT_EXEMPTION_TEXT, formatIban } from './invoicing';
 
 // ─── Constants A4 ───────────────────────────────────────────
 const A4_W = 595.28;  // punts (210mm)
@@ -50,20 +51,36 @@ const formatDateShort = (d) => {
 };
 
 function wrapText(text, maxWidth, font, size) {
-  const words = (text || '').split(' ');
+  const fits = (t) => font.widthOfTextAtSize(t, size) <= maxWidth;
   const lines = [];
-  let line = '';
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (font.widthOfTextAtSize(test, size) <= maxWidth) {
-      line = test;
-    } else {
+  for (const paragraph of String(text || '').split('\n')) {
+    let line = '';
+    for (let word of paragraph.split(' ')) {
+      const test = line ? `${line} ${word}` : word;
+      if (fits(test)) { line = test; continue; }
       if (line) lines.push(line);
+      // A word wider than the column (an email, a long company name) is cut
+      while (!fits(word) && word.length > 1) {
+        let n = word.length - 1;
+        while (n > 1 && !fits(word.slice(0, n))) n--;
+        lines.push(word.slice(0, n));
+        word = word.slice(n);
+      }
       line = word;
     }
+    lines.push(line);
   }
-  if (line) lines.push(line);
-  return lines;
+  return lines.filter((l, i) => l || i < lines.length - 1);
+}
+
+/** Draw wrapped lines from `topY` down; returns the y below the last line. */
+function drawWrapped(page, text, x, topY, maxWidth, font, size, lineH, color) {
+  let y = topY;
+  for (const line of wrapText(text, maxWidth, font, size)) {
+    page.drawText(line, { x, y, size, font, color });
+    y -= lineH;
+  }
+  return y;
 }
 
 // ─── Design tokens NutriPolo ────────────────────────────────
@@ -123,6 +140,9 @@ const GRID = {
 
 const LABELS = {
   invoiceNumber: 'Nº FACTURA',
+  correctiveNumber: 'Nº RECTIFICATIVA',
+  correctiveOf: 'Factura rectificativa de',
+  correctiveReason: 'Motivo',
   date: 'FECHA',
   professional: 'PROFESIONAL',
   client: 'CLIENTE',
@@ -271,7 +291,7 @@ function drawHeader(page, layout, tokens, fonts, invoice) {
 
   // Nº factura
   const yNro = yTop(pos.infoRow1 + 14);
-  page.drawText(LABELS.invoiceNumber, { x: gStart, y: yNro, size: SIZE.caption, font: fonts.secBold, color: tokens.colorAccent });
+  page.drawText(isCorrective(invoice) ? LABELS.correctiveNumber : LABELS.invoiceNumber, { x: gStart, y: yNro, size: SIZE.caption, font: fonts.secBold, color: tokens.colorAccent });
   drawTextRight(page, invoice?.numero || '---', hEnd, yNro, fonts.secBold, SIZE.caption, tokens.colorAccent);
 
   // Data
@@ -357,75 +377,46 @@ function drawSectionLabels(page, layout, tokens, fonts) {
   drawLine(page, rightStart, lineY, rightEnd, STROKE.heavy, tokens.colorDivider);
 }
 
-function drawPartyDetails(page, layout, tokens, fonts, config, client, invoice) {
+function drawPartyDetails(page, layout, tokens, fonts, config, parties, invoice) {
   const { colX, colW } = layout;
   const { pos } = layout;
   const lineH = px(17);
+  const { emisor, destinatario } = parties;
 
   const lx = colX[1];
   const rx = colX[5];
   const leftEnd = colX[4];
   const rightEnd = colX[7] + colW[7];
+  // Each column keeps to its own width: long names and addresses wrap
+  const leftW = leftEnd - lx - px(8);
+  const rightW = rightEnd - rx;
 
-  // (card backgrounds removed for cleaner look)
+  const draw = (text, x, y, w, font, size) => drawWrapped(page, text, x, y, w, font, size, lineH, tokens.colorSecondary);
 
-  // Noms
+  // Names (may take two lines)
   const nameY = yTop(pos.partyName + 14);
-  page.drawText(config?.nombre || '---', { x: lx, y: nameY, size: SIZE.body, font: fonts.priBold, color: tokens.colorPrimary });
-  page.drawText(client?.nombre || '---', { x: rx, y: nameY, size: SIZE.body, font: fonts.priBold, color: tokens.colorPrimary });
+  let ly = drawWrapped(page, emisor.nombre || '---', lx, nameY, leftW, fonts.priBold, SIZE.body, lineH, tokens.colorPrimary);
+  let ry = drawWrapped(page, destinatario.nombre || '---', rx, nameY, rightW, fonts.priBold, SIZE.body, lineH, tokens.colorPrimary);
 
-  // NIF
-  const nifY = yTop(pos.partyNif + 14);
-  if (config?.nif) {
-    page.drawText(`NIF: ${config.nif}`, { x: lx, y: nifY, size: SIZE.body, font: fonts.priReg, color: tokens.colorSecondary });
-  }
-  if (client?.cifNif) {
-    page.drawText(client.cifNif, { x: rx, y: nifY, size: SIZE.body, font: fonts.priReg, color: tokens.colorSecondary });
-  }
+  // NIF and registration number
+  if (emisor.nif) ly = draw(`NIF: ${emisor.nif}`, lx, ly, leftW, fonts.priReg, SIZE.body);
+  if (destinatario.nif) ry = draw(`NIF: ${destinatario.nif}`, rx, ry, rightW, fonts.priReg, SIZE.body);
+  if (emisor.numColegiada) ly = draw(`Núm. Colegiada: ${emisor.numColegiada}`, lx, ly, leftW, fonts.priReg, SIZE.body);
 
-  // Núm. Colegiada (esquerra)
-  const extraY = yTop(pos.partyExtra + 14);
-  if (config?.numColegiada) {
-    page.drawText(`Núm. Colegiada: ${config.numColegiada}`, { x: lx, y: extraY, size: SIZE.body, font: fonts.priReg, color: tokens.colorSecondary });
-  }
+  // Addresses, aligned below the taller of the two blocks above
+  const addrY = Math.min(ly, ry, yTop(pos.partyAddr + 14));
+  ly = emisor.direccion ? draw(emisor.direccion, lx, addrY, leftW, fonts.priReg, SIZE.body) : addrY;
+  const clientAddr = recipientAddressLines(destinatario).join('\n');
+  ry = clientAddr ? draw(clientAddr, rx, addrY, rightW, fonts.priReg, SIZE.body) : addrY;
 
-  // Adreces
-  const addrStartY = yTop(pos.partyAddr + 14);
-  let leftBottomY = addrStartY;
-  let rightBottomY = addrStartY;
-
-  if (config?.direccion) {
-    leftBottomY = drawMultiline(page, config.direccion, lx, addrStartY, fonts.priReg, SIZE.body, lineH, tokens.colorSecondary);
+  // Contact
+  let lyContact = ly - px(10);
+  for (const v of [emisor.email, emisor.telefono, emisor.web].filter(Boolean)) {
+    lyContact = draw(v, lx, lyContact, leftW, fonts.priReg, SIZE.caption);
   }
-  const clientAddr = [client?.calle, [client?.codigoPostal, client?.ciudad].filter(Boolean).join(' '), client?.provincia].filter(Boolean).join('\n');
-  if (clientAddr) {
-    rightBottomY = drawMultiline(page, clientAddr, rx, addrStartY, fonts.priReg, SIZE.body, lineH, tokens.colorSecondary);
-  }
-
-  // Contacte professional
-  let lyContact = leftBottomY - px(10);
-  if (config?.email) {
-    page.drawText(config.email, { x: lx, y: lyContact, size: SIZE.caption, font: fonts.priReg, color: tokens.colorSecondary });
-    lyContact -= lineH;
-  }
-  if (config?.telefono) {
-    page.drawText(config.telefono, { x: lx, y: lyContact, size: SIZE.caption, font: fonts.priReg, color: tokens.colorSecondary });
-    lyContact -= lineH;
-  }
-  if (config?.web) {
-    page.drawText(config.web, { x: lx, y: lyContact, size: SIZE.caption, font: fonts.priReg, color: tokens.colorSecondary });
-    lyContact -= lineH;
-  }
-
-  // Contacte client
-  let ryContact = rightBottomY - px(10);
-  if (client?.email) {
-    page.drawText(client.email, { x: rx, y: ryContact, size: SIZE.caption, font: fonts.priReg, color: tokens.colorSecondary });
-    ryContact -= lineH;
-  }
-  if (client?.telefono) {
-    page.drawText(client.telefono, { x: rx, y: ryContact, size: SIZE.caption, font: fonts.priReg, color: tokens.colorSecondary });
-    ryContact -= lineH;
+  let ryContact = ry - px(10);
+  for (const v of [destinatario.email, destinatario.telefono].filter(Boolean)) {
+    ryContact = draw(v, rx, ryContact, rightW, fonts.priReg, SIZE.caption);
   }
 
   // Lloc d'atenció
@@ -437,8 +428,7 @@ function drawPartyDetails(page, layout, tokens, fonts, config, client, invoice) 
     page.drawText('Lugar de atención:', { x: lx, y: lyContact, size: SIZE.caption, font: fonts.priBold, color: tokens.colorSecondary });
     lyContact -= lineH;
     const locText = location.address ? `${location.name} — ${location.address}` : location.name;
-    page.drawText(locText, { x: lx, y: lyContact, size: SIZE.caption, font: fonts.priReg, color: tokens.colorSecondary });
-    lyContact -= lineH;
+    lyContact = draw(locText, lx, lyContact, leftW, fonts.priReg, SIZE.caption);
   }
 
   // Border inferior
@@ -602,41 +592,66 @@ function drawItemsTable(pdfDoc, page0, layout, tokens, fonts, invoice, addrBotto
   return { page, tableBottomY: currentY };
 }
 
-function drawDetails(page, layout, tokens, fonts, invoice, conceptLineY) {
+/**
+ * Corrective reference, payment method, notes and the VAT exemption wording.
+ * With `dry` nothing is drawn: it returns where it would end (to measure).
+ */
+function drawDetails(page, layout, tokens, fonts, invoice, conceptLineY, exemptionText, dry = false) {
   const { colX, colW } = layout;
   const lx = colX[1];
   const rightEnd = colX[7] + colW[7];
+  const textW = rightEnd - lx - px(4);
+  const text = (t, x, y, font, color) => { if (!dry) page.drawText(t, { x, y, size: SIZE.caption, font, color }); };
+  const lines = (t, x, y, font, color) => {
+    for (const ln of wrapText(t, textW, font, SIZE.caption)) { text(ln, x, y, font, color); y -= px(12); }
+    return y;
+  };
 
-  if (!invoice?.metodoPago && !invoice?.notas) return conceptLineY;
+  const corrective = isCorrective(invoice);
+  const exempt = (invoice?.ivaPct ?? 0) === 0 && !!exemptionText;
+  if (!corrective && !invoice?.metodoPago && !invoice?.notas && !exempt) return conceptLineY;
 
   let y = conceptLineY - px(20);
 
-  page.drawText(LABELS.details, { x: lx, y, size: SIZE.caption, font: fonts.secBold, color: tokens.colorAccent });
+  text(LABELS.details, lx, y, fonts.secBold, tokens.colorAccent);
   y -= px(4);
-  drawLine(page, lx, y, rightEnd, STROKE.light, tokens.colorAccentMid);
+  if (!dry) drawLine(page, lx, y, rightEnd, STROKE.light, tokens.colorAccentMid);
   y -= px(12);
+
+  if (corrective) {
+    y = lines(`${LABELS.correctiveOf} ${invoice.rectificaNumero || '---'} (${formatDateShort(invoice.rectificaFecha)}).`, lx, y, fonts.secBold, tokens.colorPrimary);
+    if (invoice.motivoRectificacion) {
+      y = lines(`${LABELS.correctiveReason}: ${invoice.motivoRectificacion}`, lx, y, fonts.priReg, tokens.colorPrimary);
+    }
+    y -= px(2);
+  }
 
   if (invoice?.metodoPago) {
     const methodLabel = `${LABELS.paymentMethod}:`;
-    page.drawText(methodLabel, { x: lx, y, size: SIZE.caption, font: fonts.secBold, color: tokens.colorMuted });
+    text(methodLabel, lx, y, fonts.secBold, tokens.colorMuted);
     const labelW = fonts.secBold.widthOfTextAtSize(methodLabel, SIZE.caption);
-    const payDisplay = PAYMENT_LABELS[invoice.metodoPago] || invoice.metodoPago;
-    page.drawText(payDisplay, { x: lx + labelW + 6, y, size: SIZE.caption, font: fonts.priReg, color: tokens.colorPrimary });
+    text(PAYMENT_LABELS[invoice.metodoPago] || invoice.metodoPago, lx + labelW + 6, y, fonts.priReg, tokens.colorPrimary);
     y -= px(14);
   }
 
   if (invoice?.notas) {
-    page.drawText(`${LABELS.notes}:`, { x: lx, y, size: SIZE.caption, font: fonts.secBold, color: tokens.colorMuted });
+    text(`${LABELS.notes}:`, lx, y, fonts.secBold, tokens.colorMuted);
     y -= px(12);
-    const notaColW = rightEnd - lx - px(4);
-    const notaLines = wrapText(invoice.notas, notaColW, fonts.priReg, SIZE.caption);
-    notaLines.forEach(ln => {
-      page.drawText(ln, { x: lx + px(4), y, size: SIZE.caption, font: fonts.priReg, color: tokens.colorPrimary });
-      y -= px(12);
-    });
+    y = lines(invoice.notas, lx + px(4), y, fonts.priReg, tokens.colorPrimary);
+  }
+
+  if (exempt) {
+    y -= px(2);
+    y = lines(exemptionText, lx, y, fonts.priReg, tokens.colorSecondary);
   }
 
   return y;
+}
+
+/** Height of the totals card (see drawTotalSection). */
+function totalSectionHeight(invoice) {
+  const rows = 3 + ((invoice?.irpfPct ?? 0) > 0 ? 1 : 0);
+  return px(24) + rows * px(20) + px(36) + px(8);
 }
 
 function drawTotalSection(page, layout, tokens, fonts, invoice, afterDetailsY) {
@@ -680,7 +695,7 @@ function drawTotalSection(page, layout, tokens, fonts, invoice, afterDetailsY) {
   // IVA line
   if (ivaPct > 0) {
     page.drawText(`${LABELS.iva} (${ivaPct}%)`, { x: fx, y, size: labelSize, font: fonts.secReg, color: tokens.colorMuted });
-    drawTextRight(page, `+${safeCurrency(ivaImporte)}`, hEnd, y, fonts.mono, labelSize, tokens.colorPrimary);
+    drawTextRight(page, safeCurrency(ivaImporte), hEnd, y, fonts.mono, labelSize, tokens.colorPrimary);
     y -= taxRowH;
   } else {
     page.drawText(LABELS.taxExempt, { x: fx, y, size: labelSize, font: fonts.secReg, color: tokens.colorMuted });
@@ -690,7 +705,7 @@ function drawTotalSection(page, layout, tokens, fonts, invoice, afterDetailsY) {
   // IRPF line
   if (irpfPct > 0) {
     page.drawText(`${LABELS.irpf} (-${irpfPct}%)`, { x: fx, y, size: labelSize, font: fonts.secReg, color: tokens.colorMuted });
-    drawTextRight(page, `-${safeCurrency(irpfImporte)}`, hEnd, y, fonts.mono, labelSize, tokens.colorAccentDark);
+    drawTextRight(page, safeCurrency(-irpfImporte), hEnd, y, fonts.mono, labelSize, tokens.colorAccentDark);
     y -= taxRowH;
   }
 
@@ -701,7 +716,7 @@ function drawTotalSection(page, layout, tokens, fonts, invoice, afterDetailsY) {
   drawTextRight(page, safeCurrency(total), hEnd, y, fonts.priBold, SIZE.h1, tokens.colorAccentDark);
 }
 
-function drawFooter(page, layout, tokens, fonts, invoice, config, pageNum, totalPages) {
+function drawFooter(page, layout, tokens, fonts, invoice, emisor, pageNum, totalPages) {
   const { colX, colW } = layout;
 
   const footerLeftX = colX[1];
@@ -728,9 +743,9 @@ function drawFooter(page, layout, tokens, fonts, invoice, config, pageNum, total
   cy -= footerLineH;
 
   // Dades bancàries (IBAN) — only for transferencia
-  if (invoice?.metodoPago === 'transferencia' && config?.iban) {
+  if (invoice?.metodoPago === 'transferencia' && emisor?.iban) {
     page.drawText(LABELS.bankDetails, { x: footerLeftX, y: cy, size: SIZE.micro, font: fonts.priReg, color: tokens.colorSecondary });
-    drawTextRight(page, config.iban, footerRightX, cy, fonts.priReg, SIZE.micro, tokens.colorPrimary);
+    drawTextRight(page, formatIban(emisor.iban), footerRightX, cy, fonts.priReg, SIZE.micro, tokens.colorPrimary);
     cy -= footerLineH;
   }
 
@@ -752,7 +767,7 @@ function drawFooter(page, layout, tokens, fonts, invoice, config, pageNum, total
   }
 
   // Contact info centered
-  const contact = [config?.email, config?.telefono, config?.web].filter(Boolean);
+  const contact = [emisor?.email, emisor?.telefono, emisor?.web].filter(Boolean);
   if (contact.length) {
     const contactStr = contact.join('  ·  ');
     const cw = fonts.priMed.widthOfTextAtSize(contactStr, SIZE.micro);
@@ -793,22 +808,36 @@ export async function generateInvoicePDF(invoice, client, config) {
   // 2. Section labels
   drawSectionLabels(page0, layout, tokens, fonts);
 
-  // 3. Party details
-  const addrBottomY = drawPartyDetails(page0, layout, tokens, fonts, config, client, invoice);
+  // 3. Party details: frozen on issue, current ones for a draft
+  const parties = invoiceParties(invoice, client, config);
+  const addrBottomY = drawPartyDetails(page0, layout, tokens, fonts, config, parties, invoice);
 
   // 4. Items table (multi-page aware)
-  const { page: lastPage, tableBottomY } = drawItemsTable(pdfDoc, page0, layout, tokens, fonts, invoice, addrBottomY);
+  let { page: lastPage, tableBottomY } = drawItemsTable(pdfDoc, page0, layout, tokens, fonts, invoice, addrBottomY);
 
-  // 5. Details (metodoPago, notas)
-  const afterDetailsY = drawDetails(lastPage, layout, tokens, fonts, invoice, tableBottomY);
-
-  // 6. Tax breakdown + Total
+  // 5–6. Details and totals go together; if they would run into the footer,
+  // they move to a continuation page (never under the footer).
+  const exemptionText = (config?.textoExencionIva || '').trim() || DEFAULT_VAT_EXEMPTION_TEXT;
+  const detailsEnd = drawDetails(lastPage, layout, tokens, fonts, invoice, tableBottomY, exemptionText, true);
+  if (detailsEnd - totalSectionHeight(invoice) < FOOTER_H + px(16)) {
+    const { colX, colW } = layout;
+    const rightEnd = colX[7] + colW[7];
+    lastPage.drawText(LABELS.continuesOn, {
+      x: rightEnd - fonts.priReg.widthOfTextAtSize(LABELS.continuesOn, SIZE.micro) - px(2),
+      y: FOOTER_RESERVE - px(10),
+      size: SIZE.micro, font: fonts.priReg, color: tokens.colorMuted,
+    });
+    const next = addContinuationPage(pdfDoc, layout, tokens, fonts, invoice);
+    lastPage = next.page;
+    tableBottomY = next.startY;
+  }
+  const afterDetailsY = drawDetails(lastPage, layout, tokens, fonts, invoice, tableBottomY, exemptionText);
   drawTotalSection(lastPage, layout, tokens, fonts, invoice, afterDetailsY);
 
   // 7. Footer on ALL pages with page numbers
   const totalPages = pdfDoc.getPageCount();
   for (let i = 0; i < totalPages; i++) {
-    drawFooter(pdfDoc.getPage(i), layout, tokens, fonts, invoice, config, i + 1, totalPages);
+    drawFooter(pdfDoc.getPage(i), layout, tokens, fonts, invoice, parties.emisor, i + 1, totalPages);
   }
 
   return await pdfDoc.save();

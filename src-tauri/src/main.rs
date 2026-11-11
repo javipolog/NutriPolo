@@ -6,8 +6,10 @@ mod google_calendar;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem, WindowEvent};
 use base64::Engine as _;
 use lettre::{
@@ -52,11 +54,37 @@ fn get_data_dir(app_handle: &tauri::AppHandle) -> PathBuf {
         .expect("Failed to get app data dir")
 }
 
+/// A client id or a document file name used as one path segment under
+/// `documents/`. Only letters, digits, `.`, `_` and `-` (what the app
+/// generates): on Windows `Path::join("C:")` replaces the whole path, and
+/// trailing dots, `:` streams or `..` would point elsewhere. An id can come
+/// from an imported backup, so this is not only defensive.
 fn validate_path_component(name: &str, label: &str) -> Result<(), String> {
-    if name.is_empty() || name.contains("..") || name.contains('/') || name.contains('\\') || name.contains('\0') {
-        return Err(format!("Invalid {}: must not be empty or contain path separators", label));
+    let ok = !name.is_empty()
+        && name.len() <= 200
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
+        && !name.starts_with('.')
+        && !name.ends_with('.')
+        && !name.contains("..");
+    if !ok {
+        return Err(format!("invalid_{}", label));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod path_component_tests {
+    use super::validate_path_component;
+
+    #[test]
+    fn only_plain_names_are_path_components() {
+        for ok in ["0b2c4f1e-8a1d-4c3e-9b7a-2f6d5e4c3b2a", "lq3k9x_informe_analitica.pdf", "a"] {
+            assert!(validate_path_component(ok, "x").is_ok(), "{ok:?}");
+        }
+        for bad in ["", "C:", "x:y", "..", "../a", "a/b", "a\\b", "a.", ".hidden", "a b", "nul\0", "a..b"] {
+            assert!(validate_path_component(bad, "x").is_err(), "{bad:?} must be rejected");
+        }
+    }
 }
 
 /// Keys the frontend may read and write: lowercase words joined by hyphens
@@ -91,20 +119,40 @@ fn encryption_is_enabled_internal(app_handle: &tauri::AppHandle) -> bool {
     encryption_config_path(app_handle).exists()
 }
 
-/// Write `bytes` to `path` atomically: write a sibling `.tmp` file first and
-/// then rename it over the target. A crash or power cut mid-write leaves the
-/// previous version intact instead of a truncated file.
+/// Write `bytes` to `path` atomically: write a sibling `.tmp` file, flush it
+/// to disk and then rename it over the target. A crash or power cut mid-write
+/// leaves the previous version intact instead of a truncated or zeroed file
+/// (without the flush NTFS may journal the rename before the data).
 fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut tmp_name = path.as_os_str().to_owned();
     tmp_name.push(".tmp");
     let tmp = PathBuf::from(tmp_name);
-    fs::write(&tmp, bytes)?;
+    {
+        let mut file = fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
     fs::rename(&tmp, path)
+}
+
+/// Every read or write of data files and documents holds this lock shared;
+/// enabling encryption and changing the password hold it exclusively, so no
+/// save can land in the middle (it would be encrypted with the old key and
+/// become unreadable once the new salt is stored).
+static VAULT: RwLock<()> = RwLock::new(());
+
+fn vault_read() -> RwLockReadGuard<'static, ()> {
+    VAULT.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn vault_write() -> RwLockWriteGuard<'static, ()> {
+    VAULT.write().unwrap_or_else(|e| e.into_inner())
 }
 
 #[tauri::command]
 fn save_data(app_handle: tauri::AppHandle, key: String, value: String) -> Result<(), String> {
     validate_data_key(&key)?;
+    let _vault = vault_read();
     let dir = get_data_dir(&app_handle);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
@@ -130,6 +178,7 @@ fn save_data(app_handle: tauri::AppHandle, key: String, value: String) -> Result
 #[tauri::command]
 fn load_data(app_handle: tauri::AppHandle, key: String) -> Result<String, String> {
     validate_data_key(&key)?;
+    let _vault = vault_read();
     let dir = get_data_dir(&app_handle);
 
     // If an `.enc` file exists, it takes precedence — we require the
@@ -153,6 +202,7 @@ fn load_data(app_handle: tauri::AppHandle, key: String) -> Result<String, String
 #[tauri::command]
 fn delete_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> {
     validate_data_key(&key)?;
+    let _vault = vault_read();
     let dir = get_data_dir(&app_handle);
     for ext in &["json", "enc"] {
         let path = dir.join(format!("{}.{}", key, ext));
@@ -168,6 +218,7 @@ fn delete_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> 
 #[tauri::command]
 fn quarantine_data(app_handle: tauri::AppHandle, key: String) -> Result<(), String> {
     validate_data_key(&key)?;
+    let _vault = vault_read();
     let dir = get_data_dir(&app_handle);
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -181,6 +232,27 @@ fn quarantine_data(app_handle: tauri::AppHandle, key: String) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+/// Data keys on disk (plain or encrypted) that start with `prefix`, sorted.
+/// Lets the frontend find the automatic backups even if their manifest is
+/// lost or damaged.
+#[tauri::command]
+fn list_data_keys(app_handle: tauri::AppHandle, prefix: String) -> Result<Vec<String>, String> {
+    let _vault = vault_read();
+    let dir = get_data_dir(&app_handle);
+    let Ok(entries) = fs::read_dir(&dir) else { return Ok(Vec::new()) };
+    let mut keys: Vec<String> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let stem = name.strip_suffix(".json").or_else(|| name.strip_suffix(".enc"))?.to_string();
+            (stem.starts_with(&prefix) && validate_data_key(&stem).is_ok()).then_some(stem)
+        })
+        .collect();
+    keys.sort();
+    keys.dedup();
+    Ok(keys)
 }
 
 /// Directory where decrypted copies of encrypted documents are placed so the
@@ -235,6 +307,7 @@ fn launch_with_default_app(path: &Path) -> Result<(), String> {
 /// shell scope only allows https/mailto/tel URLs, so local paths were rejected.
 #[tauri::command(async)]
 fn open_file(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
+    let _vault = vault_read();
     let p = Path::new(&path);
     let is_pdf = p
         .extension()
@@ -409,6 +482,9 @@ fn send_email_smtp(
 
     match transport.send(&email) {
         Ok(response) => SendEmailResult { success: true, message_id: Some(format!("{}", response.code())), error: None },
+        // A timeout may come after the server took the message: the app must
+        // not send it again on its own (the user decides, seeing it may be out)
+        Err(e) if e.is_timeout() => err_result(&sanitize_err(e, "smtp_send_timeout")),
         Err(e) => err_result(&sanitize_err(e, "smtp_send_failed")),
     }
 }
@@ -562,6 +638,7 @@ fn encryption_setup(app_handle: tauri::AppHandle, password: String) -> Result<()
     if password.len() < 8 {
         return Err("password_too_short".into());
     }
+    let _vault = vault_write();
     let dir = get_data_dir(&app_handle);
     fs::create_dir_all(&dir).map_err(|e| sanitize_err(e, "data_dir_create_failed"))?;
 
@@ -583,12 +660,14 @@ fn encryption_setup(app_handle: tauri::AppHandle, password: String) -> Result<()
     let verify_blob = encryption::encrypt(encryption::MAGIC_VERIFY, &key)?;
     let cfg = EncryptionConfigFile { version: 1, salt: salt.to_vec(), verify_blob };
     let cfg_json = serde_json::to_string(&cfg).map_err(|e| sanitize_err(e, "serialize_failed"))?;
-    fs::write(encryption_config_path(&app_handle), cfg_json)
+    write_atomic(&encryption_config_path(&app_handle), cfg_json.as_bytes())
         .map_err(|e| sanitize_err(e, "encryption_config_write_failed"))?;
 
     // Migrate all *.json → *.enc (excluding encryption.json itself) and
     // every document PDF under documents/ → .pdf.enc.
     migrate_plaintext_to_encrypted(&dir, &key)?;
+    // Spare copy of the config (salt): without it nothing could be decrypted.
+    let _ = write_atomic(&dir.join(ENCRYPTION_SPARE_FILE), cfg_json.as_bytes());
 
     encryption::set_master_key(key);
 
@@ -624,11 +703,13 @@ fn encryption_lock(app_handle: tauri::AppHandle) {
     clear_viewer_temp_dir(&app_handle);
 }
 
-/// Re-encrypt every file with a new master key. We DO NOT keep both
-/// versions on disk simultaneously: for each file we decrypt with
-/// the old key, encrypt with the new key, and atomically overwrite.
-/// A crash mid-way would leave a mixed state — which is why we take
-/// a backup first.
+/// Re-encrypt every file with a new master key. Each file is decrypted with
+/// the old key, encrypted with the new one and atomically overwritten, after
+/// a snapshot of everything in `backup_pre_rekey/`. The new salt is only
+/// stored once every file is done; if anything fails first, the snapshot is
+/// put back so all files and `encryption.json` stay on the old password. A
+/// change cut short by a crash is settled on the next start
+/// (`recover_interrupted_rekey`).
 #[tauri::command(async)]
 fn encryption_change_password(
     app_handle: tauri::AppHandle,
@@ -638,6 +719,10 @@ fn encryption_change_password(
     if new_password.len() < 8 {
         return Err("password_too_short".into());
     }
+    let _vault = vault_write();
+    let dir = get_data_dir(&app_handle);
+    recover_interrupted_rekey(&dir);
+
     let cfg_path = encryption_config_path(&app_handle);
     let raw = fs::read_to_string(&cfg_path).map_err(|_| "no_encryption_config".to_string())?;
     let cfg: EncryptionConfigFile = serde_json::from_str(&raw)
@@ -650,21 +735,20 @@ fn encryption_change_password(
         return Err("wrong_password".into());
     }
 
-    // Safety net in case rekey fails mid-way through.
-    let dir = get_data_dir(&app_handle);
-    let rekey_backup = dir.join("backup_pre_rekey");
+    // Never overwrite a snapshot that could not be put back: it may be the
+    // only readable copy.
+    let rekey_backup = dir.join(REKEY_BACKUP_DIR);
     if rekey_backup.exists() {
-        let _ = fs::remove_dir_all(&rekey_backup);
+        return Err("rekey_backup_pending".into());
     }
     fs::create_dir_all(&rekey_backup).map_err(|e| sanitize_err(e, "backup_dir_create_failed"))?;
-    copy_dir_recursive(&dir, &rekey_backup, &rekey_backup)
-        .map_err(|e| sanitize_err(e, "backup_failed"))?;
+    if let Err(e) = copy_dir_recursive(&dir, &rekey_backup, &rekey_backup) {
+        let _ = fs::remove_dir_all(&rekey_backup);
+        return Err(sanitize_err(e, "backup_failed"));
+    }
 
     let new_salt = encryption::random_salt();
     let new_key = encryption::derive_key(&new_password, &new_salt)?;
-
-    rekey_all_files(&dir, &old_key, &new_key)?;
-
     let new_verify = encryption::encrypt(encryption::MAGIC_VERIFY, &new_key)?;
     let new_cfg = EncryptionConfigFile {
         version: 1,
@@ -673,8 +757,18 @@ fn encryption_change_password(
     };
     let cfg_json = serde_json::to_string(&new_cfg)
         .map_err(|e| sanitize_err(e, "serialize_failed"))?;
-    write_atomic(&cfg_path, cfg_json.as_bytes())
-        .map_err(|e| sanitize_err(e, "encryption_config_write_failed"))?;
+
+    let result = rekey_all_files(&dir, &old_key, &new_key).and_then(|_| {
+        write_atomic(&cfg_path, cfg_json.as_bytes())
+            .map_err(|e| sanitize_err(e, "encryption_config_write_failed"))
+    });
+    if let Err(e) = result {
+        // Back to the old password everywhere. If even that fails, the
+        // snapshot stays and is put back on the next start.
+        let _ = restore_rekey_backup(&dir);
+        return Err(e);
+    }
+    let _ = write_atomic(&dir.join(ENCRYPTION_SPARE_FILE), cfg_json.as_bytes());
 
     encryption::set_master_key(new_key);
 
@@ -682,6 +776,58 @@ fn encryption_change_password(
     // every file and the config use the new key.
     let _ = fs::remove_dir_all(&rekey_backup);
     Ok(())
+}
+
+const REKEY_BACKUP_DIR: &str = "backup_pre_rekey";
+/// Spare copy of `encryption.json`: the salt only lives there, so losing that
+/// file would make every encrypted file unreadable even with the password.
+const ENCRYPTION_SPARE_FILE: &str = "encryption.backup.json";
+
+/// Copy the `backup_pre_rekey/` snapshot back over the data dir, then drop it.
+fn restore_rekey_backup(dir: &Path) -> Result<(), String> {
+    let backup = dir.join(REKEY_BACKUP_DIR);
+    copy_dir_recursive(&backup, dir, &backup).map_err(|e| sanitize_err(e, "rekey_restore_failed"))?;
+    let _ = fs::remove_dir_all(&backup);
+    Ok(())
+}
+
+/// A `backup_pre_rekey/` left behind means a password change was cut short.
+/// If `encryption.json` is still the one in the snapshot, files may be half
+/// re-encrypted with a key whose salt was never stored: put the snapshot
+/// back. If it already holds the new salt, the change had finished and the
+/// snapshot is just stale.
+fn recover_interrupted_rekey(dir: &Path) {
+    let backup = dir.join(REKEY_BACKUP_DIR);
+    if !backup.exists() {
+        return;
+    }
+    let before = fs::read(backup.join("encryption.json")).ok();
+    let now = fs::read(dir.join("encryption.json")).ok();
+    if before.is_some() && before == now {
+        let _ = restore_rekey_backup(dir);
+    } else {
+        let _ = fs::remove_dir_all(&backup);
+    }
+}
+
+fn read_encryption_config(path: &Path) -> Option<EncryptionConfigFile> {
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// On start: settle an interrupted password change, bring back
+/// `encryption.json` from its spare copy if it is missing or damaged, and
+/// create the spare for vaults made before it existed.
+fn recover_vault(dir: &Path) {
+    let _vault = vault_write();
+    recover_interrupted_rekey(dir);
+    let main = dir.join("encryption.json");
+    let spare = dir.join(ENCRYPTION_SPARE_FILE);
+    match (read_encryption_config(&main).is_some(), read_encryption_config(&spare).is_some()) {
+        (false, true) => { let _ = fs::copy(&spare, &main); }
+        (true, false) => { let _ = fs::copy(&main, &spare); }
+        _ => {}
+    }
 }
 
 /// Recursively copy directory contents. Used by `encryption_setup` and
@@ -725,17 +871,14 @@ fn migrate_plaintext_to_encrypted(dir: &Path, key: &[u8; encryption::KEY_LEN]) -
         if !path.is_file() { continue; }
         if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
         let fname = path.file_name().and_then(|f| f.to_str()).unwrap_or("");
-        if fname == "encryption.json" { continue; }
+        if fname == "encryption.json" || fname == ENCRYPTION_SPARE_FILE { continue; }
 
         let plain = fs::read(&path).map_err(|e| sanitize_err(e, "migrate_read_failed"))?;
         let ct = encryption::encrypt(&plain, key)?;
         // Store without the double extension to match save_data convention.
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
         let target = path.with_file_name(format!("{}.enc", stem));
-        // Write to a temp first to avoid a half-written .enc if we crash.
-        let tmp = target.with_extension("enc.tmp");
-        fs::write(&tmp, &ct).map_err(|e| sanitize_err(e, "migrate_write_failed"))?;
-        fs::rename(&tmp, &target).map_err(|e| sanitize_err(e, "migrate_rename_failed"))?;
+        write_atomic(&target, &ct).map_err(|e| sanitize_err(e, "migrate_write_failed"))?;
         fs::remove_file(&path).map_err(|e| sanitize_err(e, "migrate_remove_failed"))?;
     }
 
@@ -763,9 +906,7 @@ fn migrate_documents_dir(docs_dir: &Path, key: &[u8; encryption::KEY_LEN]) -> Re
             let ct = encryption::encrypt(&plain, key)?;
             let fname = path.file_name().and_then(|f| f.to_str()).unwrap_or("").to_string();
             let target = client_path.join(format!("{}.enc", fname));
-            let tmp = target.with_extension("enc.tmp");
-            fs::write(&tmp, &ct).map_err(|e| sanitize_err(e, "migrate_write_failed"))?;
-            fs::rename(&tmp, &target).map_err(|e| sanitize_err(e, "migrate_rename_failed"))?;
+            write_atomic(&target, &ct).map_err(|e| sanitize_err(e, "migrate_write_failed"))?;
             fs::remove_file(&path).map_err(|e| sanitize_err(e, "migrate_remove_failed"))?;
         }
     }
@@ -785,6 +926,13 @@ fn rekey_all_files(
         let path = entry.path();
         if !path.is_file() { continue; }
         if path.extension().and_then(|e| e.to_str()) != Some("enc") { continue; }
+        // Quarantined files (`*.corrupt-<ts>.enc`) may not decrypt at all:
+        // re-encrypt them if possible, but never let them abort the change.
+        let quarantined = path.file_name().and_then(|f| f.to_str()).is_some_and(|f| f.contains(".corrupt-"));
+        if quarantined {
+            let _ = rekey_file(&path, old_key, new_key);
+            continue;
+        }
         rekey_file(&path, old_key, new_key)?;
     }
     // Documents.
@@ -799,7 +947,13 @@ fn rekey_all_files(
                 let path = entry.path();
                 if !path.is_file() { continue; }
                 if path.extension().and_then(|e| e.to_str()) != Some("enc") { continue; }
-                rekey_file(&path, old_key, new_key)?;
+                // A damaged document is unreadable with any key: leave it as it
+                // is instead of blocking every future password change. Any
+                // other failure (disk, permissions) aborts and rolls back.
+                match rekey_file(&path, old_key, new_key) {
+                    Err(e) if e == "decrypt_failed" || e == "invalid_ciphertext" => continue,
+                    other => other?,
+                }
             }
         }
     }
@@ -814,10 +968,7 @@ fn rekey_file(
     let ct = fs::read(path).map_err(|e| sanitize_err(e, "rekey_read_failed"))?;
     let pt = encryption::decrypt(&ct, old_key)?;
     let new_ct = encryption::encrypt(&pt, new_key)?;
-    let tmp = path.with_extension("enc.tmp");
-    fs::write(&tmp, &new_ct).map_err(|e| sanitize_err(e, "rekey_write_failed"))?;
-    fs::rename(&tmp, path).map_err(|e| sanitize_err(e, "rekey_rename_failed"))?;
-    Ok(())
+    write_atomic(path, &new_ct).map_err(|e| sanitize_err(e, "rekey_write_failed"))
 }
 
 // ============================================
@@ -855,6 +1006,7 @@ fn copy_file_to_documents(
     client_id: String,
     dest_filename: String,
 ) -> Result<String, String> {
+    let _vault = vault_read();
     validate_path_component(&client_id, "client_id")?;
     validate_path_component(&dest_filename, "dest_filename")?;
     let src = std::path::Path::new(&source_path);
@@ -890,7 +1042,7 @@ fn copy_file_to_documents(
         let plain = fs::read(src).map_err(|e| e.to_string())?;
         let ct = encryption::encrypt(&plain, &key_bytes)?;
         let dest_path = dest_dir.join(format!("{}.enc", dest_filename));
-        fs::write(&dest_path, &ct).map_err(|e| e.to_string())?;
+        write_atomic(&dest_path, &ct).map_err(|e| e.to_string())?;
         Ok(format!("{}|{}", dest_path.to_string_lossy(), size))
     } else {
         let dest_path = dest_dir.join(&dest_filename);
@@ -901,6 +1053,7 @@ fn copy_file_to_documents(
 
 #[tauri::command(async)]
 fn read_file_as_base64(app_handle: tauri::AppHandle, path: String) -> Result<String, String> {
+    let _vault = vault_read();
     // Security: only allow reading from documents directory
     let docs_root = get_data_dir(&app_handle).join("documents");
     fs::create_dir_all(&docs_root).map_err(|e| e.to_string())?;
@@ -927,6 +1080,7 @@ fn read_file_as_base64(app_handle: tauri::AppHandle, path: String) -> Result<Str
 
 #[tauri::command]
 fn delete_document_file(app_handle: tauri::AppHandle, path: String) -> Result<(), String> {
+    let _vault = vault_read();
     // Security: only allow deleting from documents directory
     let docs_root = get_data_dir(&app_handle).join("documents");
     fs::create_dir_all(&docs_root).map_err(|e| e.to_string())?;
@@ -951,6 +1105,7 @@ fn delete_document_file(app_handle: tauri::AppHandle, path: String) -> Result<()
 
 #[tauri::command]
 fn delete_documents_directory(app_handle: tauri::AppHandle, client_id: String) -> Result<(), String> {
+    let _vault = vault_read();
     validate_path_component(&client_id, "client_id")?;
     let dir = get_documents_dir(&app_handle, &client_id);
     if dir.exists() {
@@ -967,6 +1122,7 @@ fn save_bytes_to_documents(
     dest_filename: String,
     base64_data: String,
 ) -> Result<String, String> {
+    let _vault = vault_read();
     validate_path_component(&client_id, "client_id")?;
     validate_path_component(&dest_filename, "dest_filename")?;
     // base64 inflates by 4/3; reject before allocating the decoded buffer.
@@ -1001,7 +1157,7 @@ fn save_bytes_to_documents(
         bytes
     };
 
-    fs::write(&dest_path, &to_write).map_err(|e| e.to_string())?;
+    write_atomic(&dest_path, &to_write).map_err(|e| e.to_string())?;
 
     Ok(dest_path.to_string_lossy().to_string())
 }
@@ -1114,6 +1270,123 @@ mod recipes_tests {
     }
 }
 
+#[cfg(test)]
+mod vault_tests {
+    use super::*;
+
+    /// Fresh scratch dir under the system temp dir.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("nutripolo-test-{}-{}", name, std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("documents").join("c1")).unwrap();
+        dir
+    }
+
+    fn key(byte: u8) -> [u8; encryption::KEY_LEN] { [byte; encryption::KEY_LEN] }
+
+    fn write_enc(path: &Path, text: &str, k: &[u8; encryption::KEY_LEN]) {
+        write_atomic(path, &encryption::encrypt(text.as_bytes(), k).unwrap()).unwrap();
+    }
+
+    fn read_enc(path: &Path, k: &[u8; encryption::KEY_LEN]) -> Option<String> {
+        let ct = fs::read(path).ok()?;
+        encryption::decrypt(&ct, k).ok().map(|pt| String::from_utf8(pt).unwrap())
+    }
+
+    #[test]
+    fn a_failed_rekey_puts_every_file_back_on_the_old_key() {
+        let dir = scratch("rekey-fail");
+        let (old, new) = (key(1), key(2));
+        fs::write(dir.join("encryption.json"), "old-config").unwrap();
+        write_enc(&dir.join("nutripolo-storage.enc"), "datos", &old);
+        write_enc(&dir.join("documents").join("c1").join("informe.pdf.enc"), "pdf", &old);
+        // A document that cannot be overwritten makes the rekey fail half-way
+        let locked = dir.join("documents").join("c1").join("zz-bloqueado.pdf.enc");
+        write_enc(&locked, "pdf", &old);
+        let mut perms = fs::metadata(&locked).unwrap().permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&locked, perms).unwrap();
+
+        let backup = dir.join(REKEY_BACKUP_DIR);
+        copy_dir_recursive(&dir, &backup, &backup).unwrap();
+        assert!(rekey_all_files(&dir, &old, &new).is_err());
+        // The storage file was already re-encrypted with the new key…
+        assert!(read_enc(&dir.join("nutripolo-storage.enc"), &old).is_none());
+
+        let mut perms = fs::metadata(&locked).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        fs::set_permissions(&locked, perms).unwrap();
+        restore_rekey_backup(&dir).unwrap();
+        // …and is back on the old one, like everything else
+        assert_eq!(read_enc(&dir.join("nutripolo-storage.enc"), &old).as_deref(), Some("datos"));
+        assert_eq!(read_enc(&dir.join("documents").join("c1").join("informe.pdf.enc"), &old).as_deref(), Some("pdf"));
+        assert!(!backup.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn damaged_documents_do_not_abort_a_rekey() {
+        let dir = scratch("rekey-damaged-doc");
+        let (old, new) = (key(1), key(2));
+        fs::write(dir.join("documents").join("c1").join("roto.pdf.enc"), b"garbage").unwrap();
+        write_enc(&dir.join("documents").join("c1").join("sano.pdf.enc"), "pdf", &old);
+        assert!(rekey_all_files(&dir, &old, &new).is_ok());
+        assert_eq!(read_enc(&dir.join("documents").join("c1").join("sano.pdf.enc"), &new).as_deref(), Some("pdf"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn quarantined_files_do_not_abort_a_rekey() {
+        let dir = scratch("rekey-quarantine");
+        let (old, new) = (key(1), key(2));
+        write_enc(&dir.join("nutripolo-storage.enc"), "datos", &old);
+        fs::write(dir.join("nutripolo-storage.corrupt-123.enc"), b"garbage").unwrap();
+        assert!(rekey_all_files(&dir, &old, &new).is_ok());
+        assert_eq!(read_enc(&dir.join("nutripolo-storage.enc"), &new).as_deref(), Some("datos"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_interrupted_rekey_is_settled_on_start() {
+        let (old, new) = (key(1), key(2));
+
+        // Cut short before the new config was written: back to the snapshot
+        let dir = scratch("rekey-interrupted");
+        fs::write(dir.join("encryption.json"), "old-config").unwrap();
+        write_enc(&dir.join("nutripolo-storage.enc"), "datos", &old);
+        let backup = dir.join(REKEY_BACKUP_DIR);
+        copy_dir_recursive(&dir, &backup, &backup).unwrap();
+        write_enc(&dir.join("nutripolo-storage.enc"), "datos", &new);
+        recover_interrupted_rekey(&dir);
+        assert_eq!(read_enc(&dir.join("nutripolo-storage.enc"), &old).as_deref(), Some("datos"));
+        assert!(!backup.exists());
+
+        // Finished but the snapshot was not removed yet: keep the new state
+        copy_dir_recursive(&dir, &backup, &backup).unwrap();
+        write_enc(&dir.join("nutripolo-storage.enc"), "datos", &new);
+        fs::write(dir.join("encryption.json"), "new-config").unwrap();
+        recover_interrupted_rekey(&dir);
+        assert_eq!(read_enc(&dir.join("nutripolo-storage.enc"), &new).as_deref(), Some("datos"));
+        assert!(!backup.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_lost_encryption_config_comes_back_from_its_spare() {
+        let dir = scratch("spare-config");
+        let cfg = serde_json::to_string(&EncryptionConfigFile { version: 1, salt: vec![7; 32], verify_blob: vec![1, 2, 3] }).unwrap();
+        fs::write(dir.join("encryption.json"), &cfg).unwrap();
+        recover_vault(&dir);
+        assert_eq!(fs::read_to_string(dir.join(ENCRYPTION_SPARE_FILE)).unwrap(), cfg);
+
+        fs::write(dir.join("encryption.json"), "").unwrap(); // truncated by a power cut
+        recover_vault(&dir);
+        assert_eq!(fs::read_to_string(dir.join("encryption.json")).unwrap(), cfg);
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
+
 // ============================================
 // BACKGROUND MODE (tray + autostart)
 // ============================================
@@ -1132,16 +1405,31 @@ fn show_main_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Bumped by every quit request and by `cancel_quit`: a forced exit only
+/// fires if nothing happened since its own request.
+static QUIT_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// Ask the frontend to flush pending writes and call `quit_app` (tray "Quit",
 /// or closing the window without close-to-tray); exit anyway if it does not
-/// answer in time.
+/// answer in time, unless it called `cancel_quit`.
 fn request_quit(app: &tauri::AppHandle) {
+    let seq = QUIT_SEQ.fetch_add(1, Ordering::SeqCst) + 1;
     let _ = app.emit_all("tray-quit", ());
     let handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        handle.exit(0);
+        if QUIT_SEQ.load(Ordering::SeqCst) == seq {
+            handle.exit(0);
+        }
     });
+}
+
+/// The frontend could not save everything, or a form has unsaved changes:
+/// stay open and show the window so the user can decide.
+#[tauri::command]
+fn cancel_quit(app_handle: tauri::AppHandle) {
+    QUIT_SEQ.fetch_add(1, Ordering::SeqCst);
+    show_main_window(&app_handle);
 }
 
 fn auto_launch() -> Result<auto_launch::AutoLaunch, String> {
@@ -1220,6 +1508,7 @@ fn main() {
         })
         .setup(|app| {
             clear_viewer_temp_dir(&app.handle());
+            recover_vault(&get_data_dir(&app.handle()));
             // The window starts hidden (tauri.conf.json). An autostart stays in
             // the tray, unless the data is encrypted: then nothing can run until
             // the user unlocks, so show the unlock screen.
@@ -1234,6 +1523,7 @@ fn main() {
             load_data,
             delete_data,
             quarantine_data,
+            list_data_keys,
             open_file,
             send_email_smtp,
             test_smtp_connection,
@@ -1269,6 +1559,7 @@ fn main() {
             autostart_is_enabled,
             autostart_set,
             configure_tray,
+            cancel_quit,
             quit_app
         ])
         .run(tauri::generate_context!())

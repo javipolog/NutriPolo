@@ -1,44 +1,83 @@
 import React, { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { AlertTriangle, History, RotateCcw, FilePlus, Loader2 } from 'lucide-react';
-import useStore, { clearLoadFailure, flushAllPending } from '../stores/store';
+import useStore, { clearLoadFailure, flushAllPending, STORE_KEYS } from '../stores/store';
+import { useConfirm } from './UI';
+
+const BACKUP_ERRORS = {
+  not_a_backup: 'La copia está dañada o no es una copia de NutriPolo.',
+  backup_newer: 'La copia es de una versión más nueva de NutriPolo.',
+};
+
+const formatDay = (iso) => iso.slice(0, 10).split('-').reverse().join('/');
 
 /**
  * LoadErrorScreen — shown when the main data file exists but cannot be read
  * (corrupt JSON, failed decryption…). Writes are blocked while it is shown,
  * so the empty default state can never overwrite the real file. The user
- * can retry, restore an automatic backup, or start empty; the last two move
- * the unreadable file aside (`*.corrupt-<timestamp>`) instead of deleting it.
+ * can retry, restore an automatic backup, or start empty.
+ *
+ * A backup is read and checked before anything moves: if it fails, the
+ * unreadable file stays in place and writes stay blocked, so "Reintentar"
+ * is always safe. Only then is the file moved aside (`*.corrupt-<timestamp>`,
+ * never deleted).
  */
 export const LoadErrorScreen = ({ failure, onResolved }) => {
-  const restoreFromAutoBackup = useStore(s => s.restoreFromAutoBackup);
+  const loadAutoBackup = useStore(s => s.loadAutoBackup);
+  const applyBackup = useStore(s => s.applyBackup);
   const getAutoBackupInfo = useStore(s => s.getAutoBackupInfo);
+  const { confirm, ConfirmDialog } = useConfirm();
   const [backups, setBackups] = useState([]);
+  const [safety, setSafety] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    getAutoBackupInfo().then(info => setBackups([...(info.dates || [])].reverse()));
+    getAutoBackupInfo().then(info => {
+      setBackups([...(info.dates || [])].reverse());
+      setSafety(info.safety);
+    });
   }, [getAutoBackupInfo]);
 
-  const run = async (restoreDate) => {
+  const run = async (restoreKey) => {
+    if (!restoreKey && !(await confirm({
+      title: 'Empezar sin datos',
+      message: 'La aplicación se abrirá vacía. El archivo que no se puede leer se guarda aparte (no se borra), por si se puede recuperar más adelante.',
+      danger: true,
+      confirmText: 'Empezar vacía',
+    }))) return;
     setBusy(true);
     setError('');
     try {
-      await invoke('quarantine_data', { key: failure.key });
+      const backup = restoreKey ? await loadAutoBackup(restoreKey) : null;
+      // The store is saved in parts: all of them are set aside (renamed, not
+      // deleted), so the restored data never mixes with what was there.
+      for (const key of STORE_KEYS) await invoke('quarantine_data', { key });
       clearLoadFailure();
-      if (restoreDate) await restoreFromAutoBackup(restoreDate);
+      if (backup) await applyBackup(backup, { safety: false });
       else useStore.setState({});   // persist the empty state
-      await flushAllPending();
+      if (!(await flushAllPending())) throw new Error('No se han podido guardar los datos. Comprueba que hay espacio en el disco.');
       onResolved();
     } catch (e) {
-      setError(String(e?.message || e));
+      setError(BACKUP_ERRORS[e?.code] || String(e?.message || e));
       setBusy(false);
     }
   };
 
+  const backupButton = (key, label) => (
+    <button
+      key={key}
+      onClick={() => run(key)}
+      disabled={busy}
+      className="w-full text-left px-3 py-1.5 text-sm text-sage-800 rounded-button hover:bg-wellness-50 disabled:opacity-60"
+    >
+      {label}
+    </button>
+  );
+
   return (
     <div className="min-h-screen bg-sage-50 flex items-center justify-center p-6">
+      {ConfirmDialog}
       <div className="w-full max-w-md bg-white rounded-soft shadow-lg border border-sage-200 p-8 space-y-5">
         <div className="flex flex-col items-center text-center">
           <div className="w-14 h-14 rounded-full bg-danger-light flex items-center justify-center mb-3">
@@ -52,7 +91,7 @@ export const LoadErrorScreen = ({ failure, onResolved }) => {
           <p className="text-[11px] text-sage-500 mt-2 font-mono break-all">{failure.error}</p>
         </div>
 
-        {error && <p className="text-xs text-danger text-center">{error}</p>}
+        {error && <p role="alert" className="text-xs text-danger text-center">{error}</p>}
 
         <div className="space-y-2">
           <button
@@ -63,21 +102,13 @@ export const LoadErrorScreen = ({ failure, onResolved }) => {
             <RotateCcw size={14} /> Reintentar
           </button>
 
-          {backups.length > 0 && (
+          {(backups.length > 0 || safety) && (
             <div className="border border-sage-200 rounded-soft p-3 space-y-1.5">
               <p className="text-xs font-medium text-sage-700 flex items-center gap-1.5">
                 <History size={13} /> Restaurar una copia automática
               </p>
-              {backups.map(date => (
-                <button
-                  key={date}
-                  onClick={() => run(date)}
-                  disabled={busy}
-                  className="w-full text-left px-3 py-1.5 text-sm text-sage-800 rounded-button hover:bg-wellness-50 disabled:opacity-60"
-                >
-                  Copia del {date.split('-').reverse().join('/')}
-                </button>
-              ))}
+              {backups.map(date => backupButton(date, `Copia del ${formatDay(date)}`))}
+              {safety && backupButton('safety', `Copia previa a la última restauración, actualización o cambio (${formatDay(safety.date)})`)}
             </div>
           )}
 

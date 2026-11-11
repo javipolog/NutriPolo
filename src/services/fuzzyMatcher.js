@@ -34,6 +34,21 @@ export function normalize(s) {
 
 // ── Patient name extraction from Google Calendar event summary ────────────────
 
+// Words that describe the appointment, never the patient ("Nutrición - Ana",
+// "Valoración: Ana", "Ana - 1ª visita online").
+const TYPE_TOKENS = new Set([
+  'consulta', 'cita', 'revision', 'seguimiento', 'urgencia', 'primera', 'visita', '1a', '1ª', 'nueva', 'nuevo',
+  'nutricion', 'nutricional', 'nutricionista', 'dietista', 'dietetica', 'dieta', 'valoracion', 'control',
+  'online', 'videollamada', 'video', 'presencial', 'telefonica', 'llamada', 'sesion', 'bono', 'pack',
+  'mensual', 'inicial', 'de', 'del', 'la', 'el', 'y',
+]);
+
+/** Whether `part` is only an appointment-type label ("Nutrición", "1ª visita online", "10:30"). */
+function isTypeLabel(part) {
+  const tokens = normalize(part).replace(/[^\p{L}\p{N}ª ]/gu, ' ').split(/\s+/).filter(Boolean);
+  return tokens.length > 0 && tokens.every(t => TYPE_TOKENS.has(t) || /^\d/.test(t));
+}
+
 /**
  * Strip clinic boilerplate from an event summary to extract a raw patient name.
  *
@@ -57,9 +72,13 @@ export function extractPatientName(summary) {
   // Strip time patterns (10:00, 10:30h, 10h)
   s = s.replace(/\b\d{1,2}[:h]\d{0,2}h?\b/gi, '');
 
-  // Strip " - <trailing note>" suffix that remains after the prefix was removed
-  // (a dash with a space on one side, so "García-López" stays whole)
-  s = s.replace(/(\s+[-–]\s*|\s*[-–]\s+).*$/, '');
+  // Of the parts around a spaced dash or a colon ("Nutrición - Ana Ruiz",
+  // "Ana Ruiz - 1ª visita", "Valoración: Ana Ruiz"), keep the first one that
+  // is not just an appointment-type label: the type word must never become
+  // the patient, or every "Nutrición - …" event would be one suggestion.
+  // A dash needs a space on one side, so "García-López" stays whole.
+  const parts = s.split(/\s+[-–:]\s*|\s*[-–:]\s+/).map(x => x.trim()).filter(Boolean);
+  s = parts.find(x => !isTypeLabel(x)) || '';
 
   // Strip room / box references
   s = s.replace(/\b(sala|box|room|consulta)\s*\d+\b/gi, '');
@@ -244,6 +263,7 @@ const NOISE_TITLES = [
 /** Appointment words with no patient name in them. */
 const GENERIC_TITLES = new Set([
   'consulta', 'cita', 'revision', 'seguimiento', 'urgencia', 'primera visita', 'visita', 'paciente', 'nuevo paciente',
+  'nutricion', 'valoracion', 'online', 'videollamada', 'control',
 ]);
 
 /** True for events that block time instead of naming a patient: no title or a NOISE_TITLES one. */
@@ -276,6 +296,17 @@ export function buildClientIndex(clients) {
     add(byPhone, normalizePhone(c.whatsapp), c.id);
   }
   return { clients: clients || [], byId: new Map((clients || []).map(c => [c.id, c])), byName, byEmail, byPhone };
+}
+
+/**
+ * Whether the name in a title can be this client: close enough overall, or
+ * only part of the name ("Lucía" for "Lucía Ferrer Soto").
+ */
+function nameFits(rawName, clientName, threshold) {
+  if (fuzzyScore(rawName, clientName) >= threshold) return true;
+  const own = new Set(nameKey(clientName).split(' '));
+  const words = nameKey(rawName).split(' ').filter(Boolean);
+  return words.length > 0 && words.every(w => own.has(w));
 }
 
 const candidate = (index, id, rawName) => {
@@ -334,7 +365,14 @@ function decidePatient(event, index, { autoThreshold = 0.92, suggestThreshold = 
     // A family may share a phone or an email: the name settles it.
     const both = byContact.filter(id => byName.includes(id));
     if (byContact.length === 1 && (!byName.length || both.length)) {
-      return { ...base, result: 'assign', clienteId: byContact[0], via: viaOf.get(byContact[0]), score: 1 };
+      const only = byContact[0];
+      // A name in the title that is not this client's ("Consulta - Laura
+      // Pérez" booked with her mother's phone) is someone else, maybe a new
+      // patient: propose it instead of linking it on its own.
+      if (hasName && !both.length && !nameFits(rawName, index.byId.get(only)?.nombre, suggestThreshold)) {
+        return { ...base, result: 'review', candidates: [candidate(index, only, base.rawName)] };
+      }
+      return { ...base, result: 'assign', clienteId: only, via: viaOf.get(only), score: 1 };
     }
     if (both.length === 1) return { ...base, result: 'assign', clienteId: both[0], via: viaOf.get(both[0]), score: 1 };
     // Contact and name point to different clients, or several share it.

@@ -226,6 +226,7 @@ const LegacyPlanEditorModal = ({ plan, defaultClientId, onClose }) => {
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? t.plan_edit : t.plan_new_title}
       size="xl"
@@ -434,10 +435,10 @@ const PlansList = () => {
   }, [nutritionPlans, filterEstado]);
 
   const handleDelete = async (plan) => {
-    const ok = await confirm(t.plan_confirm_delete.replace('{name}', plan.nombre));
+    const ok = await confirm({ message: t.plan_confirm_delete.replace('{name}', plan.nombre), danger: true, confirmText: t.delete });
     if (!ok) return;
     deleteNutritionPlan(plan.id);
-    toast.success(t.plan_deleted);
+    toast.success(t.plan_deleted, 8000, { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_plan', plan.id) });
   };
 
   return (
@@ -480,7 +481,12 @@ const PlansList = () => {
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sage-900">{plan.nombre}</p>
+                  <p className="font-medium text-sage-900 flex items-center gap-2">
+                    {plan.nombre}
+                    {isPlanificacion && plan.tipo === 'deportiva' && (
+                      <span className="text-[11px] px-2 py-0.5 rounded-badge font-medium bg-terra-50 text-terra-700">{t.sp_badge}</span>
+                    )}
+                  </p>
                   <p className="text-xs text-sage-500 mt-0.5">{client?.nombre || '—'}</p>
                   <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-sage-400">
                     {plan.fechaInicio && <span>{formatDate(plan.fechaInicio)}{plan.fechaFin ? ` → ${formatDate(plan.fechaFin)}` : ''}</span>}

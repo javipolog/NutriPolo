@@ -3,7 +3,7 @@ import { Button, Modal, Input, Textarea, SegmentedControl, Combobox, useToast, u
 import useStore, { todayISO, canPushToCalendar, changedFields } from '../stores/store';
 import { useT, useLocale } from '../i18n';
 import { AlertTriangle, CheckCircle2, Mail, MessageCircle, Trash2 } from 'lucide-react';
-import { googleCalendar, shortGcalError } from '../services/googleCalendarService';
+import { googleCalendar, shortGcalError, notesGoToGoogle } from '../services/googleCalendarService';
 import { reminderSlot } from '../services/reminderService';
 import { useReminderActions } from '../hooks/useReminderActions';
 import { SendEmailModal } from './SendEmailModal';
@@ -17,6 +17,11 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   const unlinkAutoMatch = useStore(s => s.unlinkAutoMatch);
   const patientSuggestions = useStore(s => s.patientSuggestions);
   const config = useStore(s => s.config);
+  // The client notes of this appointment are written to Google (shown under the field)
+  const notesShared = (() => {
+    const calId = googleCalendar.pushTargetFor(config.googleCalendar, consultation || { clienteId: null });
+    return !!calId && notesGoToGoogle(config.googleCalendar, calId);
+  })();
   const t = useT();
   const locale = useLocale();
   const toast = useToast();
@@ -64,8 +69,10 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     clienteId: defaultClientId || '',
     fecha: defaultDate || todayISO(),
     hora: defaultHora || '09:00',
-    locationId: config.locations?.[0]?.id || '',
-    tipo: config.consultationTypes?.[0] || 'Primera visita',
+    // Defaults only for a new appointment: on an existing one (an imported one
+    // has none) they would count as an edit and be pushed to Google
+    locationId: consultation ? '' : (config.locations?.[0]?.id || ''),
+    tipo: consultation ? '' : (config.consultationTypes?.[0] || 'Primera visita'),
     duracion: config.defaultConsultationDuration || 45,
     estado: 'programada',
     notasPrivadas: '',
@@ -109,7 +116,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
     onClose();
     const { remote } = await googleCalendar.deleteConsultation(consultation.id);
     if (remote === 'pending') toast.info(t.consultation_deleted_gcal_pending);
-    else toast.success(t.consultation_deleted);
+    else toast.success(t.consultation_deleted, 8000, { label: t.undo_action, onClick: () => useStore.getState().undoDeletion('delete_consultation', consultation.id) });
   };
 
   const handleInlineConfirm = () => {
@@ -167,6 +174,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={isEdit ? t.consultation_edit : t.new_consultation}
       size="lg"
@@ -281,6 +289,7 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_location}</label>
             <select value={form.locationId} onChange={e => set('locationId', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400">
+              {!form.locationId && <option value="">{t.not_specified}</option>}
               {(config.locations || []).map(loc => (
                 <option key={loc.id} value={loc.id}>{loc.name}</option>
               ))}
@@ -290,9 +299,12 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_type}</label>
             <select value={form.tipo} onChange={e => set('tipo', e.target.value)}
               className="w-full px-3 py-2 text-sm border border-sage-300 rounded-button bg-white text-sage-700 focus:outline-none focus:border-wellness-400">
+              {!form.tipo && <option value="">{t.not_specified}</option>}
               {(config.consultationTypes || []).map(tp => (
                 <option key={tp} value={tp}>{tp}</option>
               ))}
+              {/* A type no longer in Settings stays visible */}
+              {form.tipo && !(config.consultationTypes || []).includes(form.tipo) && <option value={form.tipo}>{form.tipo}</option>}
             </select>
           </div>
         </div>
@@ -317,6 +329,8 @@ export const ConsultationModal = ({ consultation, defaultClientId, defaultDate, 
           <div>
             <label className="block text-xs font-medium text-sage-600 mb-1">{t.consultation_client_notes}</label>
             <Textarea value={form.notasCliente} onChange={e => set('notasCliente', e.target.value)} rows={3} placeholder={t.consultation_client_notes_placeholder} />
+            {/* Where these notes end up (see notesGoToGoogle) */}
+            {notesShared && <p className="text-[11px] text-warning mt-1">{t.consultation_notes_to_google}</p>}
           </div>
         </div>
 

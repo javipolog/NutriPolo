@@ -18,7 +18,7 @@
 import { resolveTemplate } from './emailService';
 import {
   consultationStart, clientLanguage, channelContact, normalizeWhatsAppPhone, whatsAppUrl,
-  openExternal, MAX_AUTO_ATTEMPTS,
+  openExternal, MAX_AUTO_ATTEMPTS, mayHaveBeenSent,
 } from './reminderService';
 
 export const REVIEW_CHANNELS = ['email', 'whatsapp'];
@@ -168,8 +168,14 @@ export function reviewState({ consultation, client, channel, config, now, histor
   const rv = getReviewConfig(config);
   const record = consultation.reviewRequest?.[channel];
   if (record) {
-    if (record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS) return 'error';
-    return record.status;
+    const stale = record.status === 'sending' && now - new Date(record.at).getTime() > SENDING_STALE_MS;
+    if (!stale && record.status !== 'error') return record.status;
+    // A failed attempt is retried on its own: not once the client has opted
+    // out or has been asked by another channel / consultation meanwhile.
+    if (client?.recordatorios?.review === false) return 'opted_out';
+    if (alreadyAsked(consultation, channel, history)) return 'already_asked';
+    if (!channelContact(channel, client, config)) return 'no_contact';
+    return 'error';
   }
   if (client?.recordatorios?.review === false) return 'opted_out';
   if (alreadyAsked(consultation, channel, history)) return 'already_asked';
@@ -201,6 +207,7 @@ export function getReviewCandidates({ consultations, history = consultations, cl
   const entries = [];
   for (const consultation of consultations || []) {
     if (consultation.estado !== 'completada' && consultation.estado !== 'programada') continue;
+    if (consultation.allDay) continue;   // no real time: not a visit to ask about
     const client = consultation.clienteId ? clientsById.get(consultation.clienteId) : null;
     if (!client) continue;
     const end = consultationEnd(consultation, config);
@@ -230,7 +237,7 @@ export function getReviewCandidates({ consultations, history = consultations, cl
 export function isReviewAutoSendable(entry) {
   if (entry.channel !== 'email' || entry.consultation?.estado !== 'completada') return false;
   if (entry.state === 'due') return true;
-  return entry.state === 'error' && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
+  return entry.state === 'error' && !mayHaveBeenSent(entry.record) && (entry.record?.attempts || 0) < MAX_AUTO_ATTEMPTS;
 }
 
 export function reviewEmailTemplate(config, lang) {

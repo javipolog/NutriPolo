@@ -8,6 +8,7 @@ import {
   sendPlanEmail, sendAppointmentReminder, sendEmailSMTP, openMailClient, buildSmtpConfig,
 } from '../services/emailService';
 import { getReminderConfig, clientLanguage } from '../services/reminderService';
+import { reminderErrorText } from '../hooks/useReminderActions';
 import { useT } from '../i18n';
 
 const MODES = [
@@ -35,6 +36,10 @@ export const SendEmailModal = ({
   const toast = useToast();
 
   const [mode, setMode] = useState(initialMode);
+  // Only modes with something to send: never an invoice email without its
+  // invoice, nor the plan's PDF attached as "factura.pdf".
+  const hasData = { plan: !!plan, appointment: !!consultation, invoice: !!invoice, document: !!docRecord };
+  const modes = MODES.filter(m => m.id === initialMode || hasData[m.id]);
   const [lang, setLang] = useState(clientLanguage(client, config));
   // The password does not need to be in memory: sendEmailSMTP reads it from
   // the OS keyring when missing.
@@ -153,7 +158,7 @@ export const SendEmailModal = ({
         onSent?.({ mode, manual: !useSmtp });
         onClose();
       } else {
-        toast.error(result?.error || t.email_send_error);
+        toast.error(result?.error ? reminderErrorText(result.error, t) : t.email_send_error);
       }
     } catch (e) {
       toast.error(errMsg(e) || t.error_unknown);
@@ -165,6 +170,7 @@ export const SendEmailModal = ({
   return (
     <Modal
       open
+      guardChanges
       onClose={onClose}
       title={t.email_send_title}
       size="lg"
@@ -184,12 +190,14 @@ export const SendEmailModal = ({
     >
       <div className="space-y-4">
         {/* Mode selector */}
-        <SegmentedControl
-          className="w-full [&>button]:flex-1"
-          value={mode}
-          onChange={id => { setMode(id); resetTemplate(id, lang); }}
-          options={MODES.map(({ id, labelKey }) => ({ value: id, label: t[labelKey] }))}
-        />
+        {modes.length > 1 && (
+          <SegmentedControl
+            className="w-full [&>button]:flex-1"
+            value={mode}
+            onChange={id => { setMode(id); resetTemplate(id, lang); }}
+            options={modes.map(({ id, labelKey }) => ({ value: id, label: t[labelKey] }))}
+          />
+        )}
 
         {/* Client selector (if not pre-set) */}
         {!client && (
@@ -283,11 +291,16 @@ export const SendEmailModal = ({
           </label>
         </div>
 
-        {(pdfBytes || docPdfBytes) && (
+        {(pdfBytes || docPdfBytes) && (useSmtp ? (
           <p className="text-xs text-wellness-600 bg-wellness-50 px-3 py-1.5 rounded-button">
             {t.email_pdf_ready} {docRecord?.fileName ? `(${docRecord.fileName})` : ''}
           </p>
-        )}
+        ) : (
+          // Without SMTP the mail client opens from a link, which cannot carry a file
+          <p className="text-xs text-warning bg-warning-light px-3 py-1.5 rounded-button">
+            {t.email_pdf_manual}
+          </p>
+        ))}
       </div>
     </Modal>
   );

@@ -58,6 +58,7 @@ export const DocumentMetadataModal = ({ open, onClose, onSave, document, fileNam
   return (
     <Modal
       open={open}
+      guardChanges
       onClose={onClose}
       title={document ? t.doc_edit : t.doc_upload}
       size="md"
