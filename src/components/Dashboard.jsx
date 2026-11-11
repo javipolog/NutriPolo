@@ -132,7 +132,7 @@ const QuickStatsRow = ({ todayConsultations, activeClients, activePlans, expirin
     const now = new Date();
     const nowHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const todayCount = todayConsultations.filter(c => c.estado === 'programada' || c.estado === 'completada').length;
-    const nextConsultation = todayConsultations.find(c => c.estado === 'programada' && (c.hora || '') >= nowHHMM);
+    const nextConsultation = todayConsultations.find(c => c.estado === 'programada' && !c.allDay && (c.hora || '') >= nowHHMM);
     const clientTrend = newClientsPrev > 0
         ? t.dashboard_new_this_month.replace('{n}', `${newClientsThisMonth >= newClientsPrev ? '+' : ''}${newClientsThisMonth - newClientsPrev}`)
         : newClientsThisMonth > 0 ? t.dashboard_new_this_month.replace('{n}', `+${newClientsThisMonth}`) : null;
@@ -221,7 +221,7 @@ const TodayAgenda = ({ consultations, clients, locations, onNavigate }) => {
                                 className={`flex items-center gap-4 py-3 first:pt-0 last:pb-0 ${client ? 'cursor-pointer hover:bg-sage-50 -mx-2 px-2 rounded-button' : ''}`}
                             >
                                 <span className="tabular-nums text-sm text-sage-900 font-semibold w-14 shrink-0">
-                                    {c.hora || '—'}
+                                    {c.allDay ? t.calendar_all_day : c.hora || '—'}
                                 </span>
                                 <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
                                 <div className="flex-1 min-w-0">
