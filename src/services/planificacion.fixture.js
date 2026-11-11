@@ -57,3 +57,67 @@ export function samplePlanificacion() {
   }));
   return p;
 }
+
+// Planificació esportiva d'exemple (inventada): opcions amb ajust de dia
+// d'entrenament, dues preses d'entrenament i pla de competició.
+export function sampleDeportiva() {
+  const p = samplePlanificacion();
+  p.tipo = 'deportiva';
+  p.deporte = { peso: '70', disciplina: 'Trail running y crossfit' };
+  p.objetivos = 'Mejora del rendimiento deportivo';
+  p.desayunos.opciones = [
+    { id: 'd1', titulo: 'Café con leche + cereales + plátano', alimentos: 'Café con leche entera (250 ml, sin azúcar)\nCornflakes sin azúcar (60 g)\n1 plátano mediano', nota: '', entreno: 'Cornflakes: 60 g → 90 g' },
+    { id: 'd2', titulo: 'Gachas de avena + cortado', alimentos: 'Café con 100 ml de leche entera\nCopos de avena (60 g)\n1 plátano a rodajas\nLeche entera (150 ml)', nota: '', entreno: 'Avena: 60 g → 90 g' },
+  ];
+  p.mediaManana.opciones = [
+    { id: 'm1', titulo: 'Bocadillo integral de pavo y tomate', alimentos: 'Pan integral (80 g)\nPechuga de pavo (80 g)\nTomate rallado\nAOVE (10 ml)', nota: '', entreno: 'Pan: 80 g → 120 g' },
+  ];
+  p.merienda.nota = 'En los días de descanso puedes incluir cereales integrales: como no vas a entrenar, no hace falta que sea de fácil digestión.';
+  p.sesiones = [
+    {
+      id: 's1', nombre: 'Crossfit', toma: 'Merienda', momento: 'pre', nota: '', productos: [],
+      pauta: { objetivo: 'Energía + algo de proteína', hidratos: 'Altos', hc: { min: '0,7', max: '1' }, proteina: 'Puede ser moderada', prot: { min: '', max: '' }, grasas: 'Moderadas-bajas', fibra: 'Moderada', volumen: 'Puedes tolerar más que antes de correr', tiempo: 'Al menos 1-2 h antes' },
+      opciones: [
+        { id: 'c1', titulo: 'Yogur proteico + cereales + plátano', alimentos: 'Yogur natural +proteínas (200 g)\nCornflakes sin azúcar (60 g)\n1 plátano', nota: '' },
+        { id: 'c2', titulo: 'Tortitas de arroz con mermelada y queso cottage', alimentos: 'Tortitas de arroz (4)\nMermelada (25 g)\nQueso cottage (100 g)', nota: '' },
+        { id: 'c3', titulo: 'Batido de plátano con yogur', alimentos: '1 plátano\nYogur alto en proteínas (200 g)', nota: '' },
+      ],
+    },
+    {
+      id: 's2', nombre: 'Carrera', toma: 'Merienda', momento: 'pre', productos: [],
+      nota: 'Si la merienda la haces después de entrenar, toma como referencia las de crossfit.',
+      pauta: { objetivo: 'Priorizar energía fácil de digerir', hidratos: 'Altos, sobre todo en series intensas', hc: { min: '0,7', max: '1' }, proteina: 'Menos importante', prot: { min: '', max: '' }, grasas: 'Bajas', fibra: 'Mejor baja', volumen: 'Mejor una toma ligera y simple', tiempo: 'Al menos 1-2 h antes' },
+      opciones: [
+        { id: 'r1', titulo: 'Tortitas de arroz con miel y plátano', alimentos: 'Tortitas de arroz (4)\nMiel (20 g)\n1 plátano a rodajas', nota: '' },
+        { id: 'r2', titulo: 'Pan blanco con miel y plátano', alimentos: 'Pan blanco de molde (2 rebanadas)\nMiel (25 g)\n1 plátano a rodajas', nota: '' },
+      ],
+    },
+  ];
+  p.cantidades.grupos[0] = { id: 'g0', titulo: 'Cereales, legumbres y tubérculos', texto: 'Pan: 80 g → 120 g\nPasta: 80 g → 100 g en seco\nPatata/boniato: 250 g → 350 g\nLegumbres: 80 g → 100 g en seco (250 g cocidas)\nFajitas: 2 grandes' };
+  p.competicion = {
+    nombre: 'Trail 14 km', fecha: '2026-12-20', duracion: '75',
+    previa: {
+      activo: true, objetivo: 'Llegar a la salida con las reservas de glucógeno llenas, bien hidratado y sin molestias digestivas.', hc: { min: '5', max: '7' },
+      menu: [
+        { id: 'pm1', ingesta: 'Desayuno', texto: 'Café con 250 ml de leche semidesnatada, 60 g de cereales sin azúcar y 1 plátano' },
+        { id: 'pm2', ingesta: 'Comida', texto: 'Arroz blanco (100 g) con pechuga de pollo a la plancha (150 g), 200 g de verduras y 10 g de aceite de oliva' },
+        { id: 'pm3', ingesta: 'Cena', texto: 'Pasta (100 g) con tomate natural (150 g) y 150 g de pescado blanco a la plancha' },
+      ],
+      hidratacion: 'Bebe agua de manera regular durante el día, con las comidas y según la sed.',
+    },
+    desayuno: {
+      activo: true, horas: '2', hc: { min: '1', max: '1,4' }, pautas: 'Mantén alimentos que ya conozcas\nEvita los cereales ricos en fibra',
+      opciones: [{ id: 'do1', titulo: 'Café con leche + cereales + plátano + agua', cantidad: 'Café con 250 ml de leche semidesnatada, cornflakes (70 g), 1 plátano maduro, agua (300-400 ml)' }],
+    },
+    cafeina: {
+      activo: true, mg: { min: '2', max: '3' }, intro: 'La cafeína puede mejorar el rendimiento en pruebas de resistencia',
+      protocolos: [{ id: 'cp1', titulo: 'Con tu café habitual', pasos: [{ id: 'x1', cuando: '2-3 h antes', que: 'Desayuno con café con leche' }, { id: 'x2', cuando: '40-60 min antes de salir', que: '100 mg de cafeína en pastilla' }] }],
+    },
+    durante: { activo: true, hcHora: '', texto: '', hidratacion: 'Bebe según la sed y las condiciones ambientales' },
+    recuperacion: {
+      activo: true, hc: { min: '1', max: '1,2' }, prot: { min: '0,25', max: '0,4' }, texto: 'Nada más cruzar la meta, repón líquidos y electrolitos',
+      opciones: [{ id: 'ro1', titulo: 'Bocadillo de jamón serrano + fruta', cantidad: '60-70 g de pan, 2 lonchas de jamón serrano, 1 pieza de fruta' }],
+    },
+  };
+  return p;
+}

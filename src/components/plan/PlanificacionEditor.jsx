@@ -2,7 +2,7 @@ import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   X, Save, Eye, EyeOff, Download, Plus, Trash2, Copy, ChevronUp, ChevronDown,
   ArrowLeftRight, ClipboardPaste, Eraser, Link2, ImagePlus, RotateCcw, Info, Coffee,
-  Apple, Cookie, Scale, CalendarDays, ShoppingBasket, Settings2, BookOpen, Mail,
+  Apple, Cookie, Scale, CalendarDays, ShoppingBasket, Settings2, BookOpen, Mail, Dumbbell, Trophy, Zap, GripVertical,
 } from 'lucide-react';
 import { SendEmailModal } from '../SendEmailModal';
 import { invoke } from '@tauri-apps/api/tauri';
@@ -11,53 +11,42 @@ import useStore, { todayISO, generateId, errMsg } from '../../stores/store';
 import { useT } from '../../i18n';
 import {
   createPlanificacion, latestPlanificacion, normalizePlanificacion, copyContent, buildDishIndex, collectOwnRecipes,
+  normalizeOrder, moveSection, moveSectionTo, isDefaultOrder, SECTION_ORDER,
   emptyOption, emptyDish, isDishEmpty, linesOf, safeUrl, planificacionStats, planFoods, dishKey,
   DEFAULT_CANTIDADES, DEFAULT_CANTIDADES_NOTA, WEEK_DAYS, MENU_SLOTS, MENU_VARIANTS, PLAN_FORMAT,
 } from '../../services/planificacion';
 import { imageFileToDataUrl, foodPhotoDataUrl, planPdfFileName } from '../../services/planPdf';
+import {
+  isDeportiva, pesoKg, DEFAULT_CANTIDADES_DEPORTE, DEFAULT_CANTIDADES_DEPORTE_NOTA, TIPO_DEPORTIVA, TIPO_GENERAL,
+} from '../../services/deportiva';
+import { parseDecimal } from '../../services/energia';
 import { foodMatcher, foodImageUrl, productName } from '../../services/foodCatalog';
 import { useFoodLibrary } from '../../hooks/useFoodLibrary';
 import { PdfPreview } from './PdfPreview';
 import { WebRecipePicker } from './WebRecipePicker';
 import { FoodCatalogPicker } from './FoodCatalogPicker';
 import { useWebRecipes } from '../../hooks/useWebRecipes';
+import { FIELD, LABEL, IconBtn, move, rowsFor } from './editorParts';
+import { SportGeneralFields, EntrenosEditor, CompeticionEditor, competicionCount } from './SportEditors';
 
-const FIELD = 'w-full text-sm text-sage-800 bg-white border border-sage-300 rounded-button px-3 py-2 placeholder-sage-400 focus:outline-none focus:border-wellness-400 focus:ring-2 focus:ring-wellness-400/10 transition-colors';
-const LABEL = 'block text-xs font-medium text-sage-600 mb-1';
 const NO_RECIPES = [];
 
+// `sport`: només a les planificacions esportives
 const SECTIONS = [
   { id: 'general',     icon: Settings2 },
   { id: 'desayunos',   icon: Coffee },
   { id: 'mediaManana', icon: Apple },
   { id: 'merienda',    icon: Cookie },
+  { id: 'entrenos',    icon: Dumbbell, sport: true },
   { id: 'cantidades',  icon: Scale },
   { id: 'menu',        icon: CalendarDays },
   { id: 'productos',   icon: ShoppingBasket },
+  { id: 'competicion', icon: Trophy, sport: true },
 ];
 
-const IconBtn = ({ icon: Icon, label, onClick, disabled, danger }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    disabled={disabled}
-    aria-label={label}
-    title={label}
-    className={`p-1.5 rounded-button text-sage-400 transition-colors disabled:opacity-30 disabled:cursor-not-allowed ${danger ? 'hover:text-danger hover:bg-danger-light' : 'hover:text-sage-700 hover:bg-sage-100'}`}
-  >
-    <Icon size={14} />
-  </button>
-);
-
-const move = (arr, i, d) => {
-  const j = i + d;
-  if (j < 0 || j >= arr.length) return arr;
-  const a = [...arr];
-  [a[i], a[j]] = [a[j], a[i]];
-  return a;
-};
-
-const rowsFor = (text, min = 3) => Math.max(min, String(text || '').split('\n').length + 1);
+// La guia de quantitats no s'ha tocat des de la plantilla (es pot canviar per la deportiva sense perdre res)
+const sameGuide = (grupos, defaults) => grupos.length === defaults.length
+  && grupos.every((g, i) => g.titulo === defaults[i].titulo && g.texto === defaults[i].texto);
 
 // ─────────────────────────────────────────────────────────────
 // Productes de la biblioteca com a xips seleccionables
@@ -90,7 +79,7 @@ const ProductChips = ({ selected = [], onChange }) => {
 // ─────────────────────────────────────────────────────────────
 // Esmorzars / mig matí / berenar
 // ─────────────────────────────────────────────────────────────
-const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
+const OptionSectionEditor = ({ value, onChange, dishIndex, sport = false }) => {
   const t = useT();
   const toast = useToast();
   const listId = useId();
@@ -156,6 +145,23 @@ const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
               placeholder={t.pf_option_note_ph}
             />
           </div>
+          {sport && (
+            <div>
+              <label className={`${LABEL} flex items-center gap-1`} htmlFor={`${o.id}-e`}>
+                <Zap size={12} className="text-terra-600" aria-hidden="true" />{t.sp_training_day}
+              </label>
+              <textarea
+                id={`${o.id}-e`}
+                value={o.entreno || ''}
+                onChange={e => updateOpt(o.id, { entreno: e.target.value })}
+                rows={rowsFor(o.entreno, 1)}
+                className={`${FIELD} resize-y`}
+                placeholder={t.sp_training_day_ph}
+                aria-describedby={`${o.id}-eh`}
+              />
+              <p id={`${o.id}-eh`} className="text-xs text-sage-500 mt-1">{t.sp_training_day_hint}</p>
+            </div>
+          )}
         </div>
       ))}
       <div className="flex flex-wrap gap-2">
@@ -196,7 +202,7 @@ const OptionSectionEditor = ({ value, onChange, dishIndex }) => {
 // ─────────────────────────────────────────────────────────────
 // Guia de quantitats
 // ─────────────────────────────────────────────────────────────
-const CantidadesEditor = ({ value, onChange }) => {
+const CantidadesEditor = ({ value, onChange, sport = false }) => {
   const t = useT();
   const { confirm, ConfirmDialog } = useConfirm();
   const grupos = value.grupos || [];
@@ -204,12 +210,19 @@ const CantidadesEditor = ({ value, onChange }) => {
   const update = (id, data) => setGrupos(grupos.map(g => (g.id === id ? { ...g, ...data } : g)));
 
   const restore = async () => {
-    if (!(await confirm({ message: t.pf_restore_confirm, danger: true }))) return;
-    onChange({ nota: DEFAULT_CANTIDADES_NOTA, grupos: DEFAULT_CANTIDADES.map(g => ({ ...g, id: generateId() })) });
+    if (!(await confirm({ message: sport ? t.sp_cantidades_restore_confirm : t.pf_restore_confirm, danger: true }))) return;
+    onChange(sport
+      ? { nota: DEFAULT_CANTIDADES_DEPORTE_NOTA, grupos: DEFAULT_CANTIDADES_DEPORTE.map(g => ({ ...g, id: generateId() })) }
+      : { nota: DEFAULT_CANTIDADES_NOTA, grupos: DEFAULT_CANTIDADES.map(g => ({ ...g, id: generateId() })) });
   };
 
   return (
     <div className="space-y-4">
+      {sport && (
+        <p className="text-sm text-sage-700 bg-terra-50 border border-terra-100 rounded-soft px-4 py-3 flex gap-2">
+          <Zap size={15} className="shrink-0 mt-0.5 text-terra-600" aria-hidden="true" />{t.sp_cantidades_hint}
+        </p>
+      )}
       <div className="grid gap-4 md:grid-cols-2">
         {grupos.map((g, i) => (
           <div key={g.id} className="bg-white border border-sage-200 rounded-soft p-4 space-y-3 shadow-card">
@@ -238,7 +251,7 @@ const CantidadesEditor = ({ value, onChange }) => {
       </div>
       <div className="flex flex-wrap gap-2">
         <Button variant="secondary" size="sm" icon={Plus} onClick={() => setGrupos([...grupos, { id: generateId(), titulo: '', texto: '' }])}>{t.pf_add_group}</Button>
-        <Button variant="ghost" size="sm" icon={RotateCcw} onClick={restore}>{t.pf_restore_default}</Button>
+        <Button variant="ghost" size="sm" icon={RotateCcw} onClick={restore}>{sport ? t.sp_cantidades_restore : t.pf_restore_default}</Button>
       </div>
       <div>
         <label className={LABEL} htmlFor="pf-cant-nota">{t.pf_note_bottom}</label>
@@ -670,7 +683,7 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
 // ─────────────────────────────────────────────────────────────
 // Dades generals
 // ─────────────────────────────────────────────────────────────
-const GeneralEditor = ({ form, patch, client, origin, onCopyFrom, otherPlans }) => {
+const GeneralEditor = ({ form, patch, client, origin, onCopyFrom, otherPlans, onTipo, lastWeight }) => {
   const t = useT();
   const [copyId, setCopyId] = useState('');
   return (
@@ -679,6 +692,7 @@ const GeneralEditor = ({ form, patch, client, origin, onCopyFrom, otherPlans }) 
         <Info size={15} className="shrink-0 mt-0.5 text-wellness-500" />
         <span>{origin ? t.pf_based_on.replace('{name}', origin) : t.pf_blank} {t.pf_autofill_hint}</span>
       </p>
+      <SportGeneralFields form={form} patch={patch} onTipo={onTipo} lastWeight={lastWeight} />
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <p className={LABEL}>{t.plan_client}</p>
@@ -751,10 +765,19 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   const addNutritionPlan = useStore(s => s.addNutritionPlan);
   const updateNutritionPlan = useStore(s => s.updateNutritionPlan);
 
+  // Últim pesatge amb pes d'un client: el pes de les xifres per kg
+  const weightOf = (clienteId) => {
+    const ms = useStore.getState().measurements
+      .filter(m => m.clienteId === clienteId && parseDecimal(m.peso))
+      .sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
+    const m = ms[ms.length - 1];
+    return m ? { peso: parseDecimal(m.peso), fecha: m.fecha } : null;
+  };
+
   const fresh = (clienteId) => {
     const base = basePlan || latestPlanificacion(plans, clienteId);
     return {
-      form: createPlanificacion({ clienteId, plans, base, today: todayISO() }),
+      form: createPlanificacion({ clienteId, plans, base, today: todayISO(), peso: weightOf(clienteId)?.peso }),
       origin: base?.nombre || null,
     };
   };
@@ -780,6 +803,10 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   const titleId = useId();
 
   const client = clients.find(c => c.id === form?.clienteId);
+  const measurements = useStore(s => s.measurements);
+  const lastWeight = useMemo(() => (form?.clienteId ? weightOf(form.clienteId) : null), [form?.clienteId, measurements]);
+  const sport = isDeportiva(form);
+  const peso = sport ? pesoKg(form) : null;
   const dishIndex = useMemo(() => buildDishIndex(ownRecipes, webRecipes), [ownRecipes, webRecipes]);
   const otherPlans = useMemo(() => plans
     .filter(p => p.formato === PLAN_FORMAT && p.id !== savedId)
@@ -836,11 +863,31 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
+  // General / deportiva. En passar a deportiva es posa el pes de l'últim
+  // pesatge i, si la guia de quantitats és la de la plantilla, la deportiva.
+  // En tornar a general no es perd res (les seccions esportives s'amaguen).
+  const setTipo = (tipo) => update(f => {
+    if (tipo !== TIPO_DEPORTIVA) return { ...f, tipo: TIPO_GENERAL };
+    const next = { ...f, tipo: TIPO_DEPORTIVA, deporte: { ...(f.deporte || {}) } };
+    if (!String(next.deporte.peso || '').trim() && lastWeight) next.deporte.peso = String(lastWeight.peso);
+    if (sameGuide(f.cantidades.grupos, DEFAULT_CANTIDADES)) {
+      next.cantidades = {
+        nota: f.cantidades.nota === DEFAULT_CANTIDADES_NOTA ? DEFAULT_CANTIDADES_DEPORTE_NOTA : f.cantidades.nota,
+        grupos: DEFAULT_CANTIDADES_DEPORTE.map(g => ({ ...g, id: generateId() })),
+      };
+    }
+    return next;
+  });
+
   const copyFrom = async (id) => {
     const src = plans.find(p => p.id === id);
     if (!src || !(await confirm({ message: t.pf_copy_confirm.replace('{name}', src.nombre), danger: true }))) return;
     addToBaseline(copyContent(src));
-    update(f => ({ ...f, ...copyContent(src) }));
+    // El pes no es copia (pot ser d'un altre client): es queda el d'aquesta o el de l'últim pesatge
+    update(f => {
+      const c = copyContent(src);
+      return { ...f, ...c, deporte: { ...c.deporte, peso: f.deporte?.peso || (lastWeight ? String(lastWeight.peso) : '') } };
+    });
     setState(s => ({ ...s, origin: src.nombre }));
     toast.success(t.pf_copy_done);
   };
@@ -883,8 +930,71 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
     if (id === 'menu') return stats.platos || null;
     if (id === 'productos') return form.productos.length || null;
     if (id === 'cantidades') return form.cantidades.grupos.length || null;
+    if (id === 'entrenos') return form.sesiones.length || null;
+    if (id === 'competicion') return competicionCount(form.competicion) || null;
     if (form[id]?.opciones) return form[id].opciones.filter(o => o.titulo?.trim()).length || null;
     return null;
+  };
+
+  // Seccions al menú lateral: Dades generals i després les altres en l'ordre del PDF.
+  // Mentre s'arrossega una secció, l'ordre és local (`dragOrder`) i la llista es
+  // reordena en viu; en deixar-la anar es desa. Amb esdeveniments de punter i
+  // no amb l'arrossegament HTML5, que Tauri talla a Windows (fileDropEnabled).
+  const sectionById = Object.fromEntries(SECTIONS.map(x => [x.id, x]));
+  const [dragOrder, setDragOrder] = useState(null);
+  const [dragId, setDragId] = useState(null);
+  const navIds = form
+    ? ['general', ...(dragOrder || normalizeOrder(form.orden)).filter(id => sectionById[id] && (!sectionById[id].sport || sport))]
+    : [];
+  const navRef = useRef(null);
+  const suppressClick = useRef(false);
+  const startDrag = (e, id) => {
+    if (e.button !== 0 || e.target.closest('input')) return;
+    const startY = e.clientY;
+    let order = null;
+    const onMove = (ev) => {
+      if (!order) {
+        if (Math.abs(ev.clientY - startY) < 5) return;
+        order = normalizeOrder(form.orden);
+        setDragId(id);
+        setDragOrder(order);
+        document.body.style.cursor = 'grabbing';
+      }
+      ev.preventDefault();
+      const items = [...(navRef.current?.querySelectorAll('[data-nav-item]') || [])];
+      if (!items.length) return;
+      const rects = items.map(el => el.getBoundingClientRect());
+      let i = rects.findIndex(r => ev.clientY < r.bottom);
+      if (i < 0) i = items.length - 1;
+      const target = items[i].dataset.navItem;
+      if (target !== id) {
+        order = moveSectionTo(order, id, target);
+        setDragOrder(order);
+      }
+    };
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      if (!order) return;
+      document.body.style.cursor = '';
+      suppressClick.current = true;
+      setTimeout(() => { suppressClick.current = false; }, 0);
+      if (order.join() !== normalizeOrder(form.orden).join()) patch('orden', order);
+      setDragOrder(null);
+      setDragId(null);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  };
+  // Mou una secció (per sobre de les amagades) i deixa el focus on era, perquè
+  // es pugui seguir movent amb el teclat
+  const moveNav = (id, dir, focusSel) => {
+    const next = moveSection(form.orden, id, dir, navIds);
+    if (next.join() === normalizeOrder(form.orden).join()) return;
+    patch('orden', next);
+    requestAnimationFrame(() => navRef.current?.querySelector(focusSel)?.focus());
   };
 
   const clientOptions = useMemo(() => [...clients]
@@ -953,19 +1063,40 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
         </div>
       ) : (
         <div className="flex-1 min-h-0 flex">
-          <nav aria-label={t.pf_edit_title} className="w-56 shrink-0 bg-white border-r border-sage-300 overflow-y-auto py-3">
+          <nav ref={navRef} aria-label={t.pf_edit_title} className="w-56 shrink-0 bg-white border-r border-sage-300 overflow-y-auto py-3 select-none">
             <ul className="space-y-0.5 px-2">
-              {SECTIONS.map(({ id, icon: Icon }) => {
+              {navIds.map((id) => {
+                const Icon = sectionById[id].icon;
                 const toggleable = id !== 'general';
                 const on = !toggleable || form.secciones[id];
                 const n = countFor(id);
+                const dragging = dragId === id;
                 return (
-                  <li key={id} className="flex items-center gap-1">
+                  <li
+                    key={id}
+                    data-nav-item={toggleable ? id : undefined}
+                    onPointerDown={toggleable ? e => startDrag(e, id) : undefined}
+                    className={`group relative flex items-center gap-1 rounded-button transition-shadow ${toggleable ? (dragId ? 'cursor-grabbing' : 'cursor-grab') : ''} ${dragging ? 'bg-white shadow-card-hover ring-1 ring-wellness-400 z-10' : ''}`}
+                  >
+                    {toggleable && (
+                      <GripVertical
+                        size={12}
+                        aria-hidden="true"
+                        className={`absolute -left-1.5 text-sage-400 transition-opacity ${dragging ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                      />
+                    )}
                     <button
                       type="button"
-                      onClick={() => setSection(id)}
+                      data-nav={id}
+                      onClick={() => { if (!suppressClick.current) setSection(id); }}
+                      onKeyDown={e => {
+                        if (!toggleable || !e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+                        e.preventDefault();
+                        moveNav(id, e.key === 'ArrowUp' ? -1 : 1, `[data-nav="${id}"]`);
+                      }}
                       aria-current={section === id ? 'page' : undefined}
-                      className={`flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2 rounded-button text-sm text-left transition-colors ${section === id ? 'bg-wellness-50 text-sage-900 font-medium' : 'text-sage-600 hover:bg-sage-100'}`}
+                      title={toggleable ? t.pf_section_move_hint : undefined}
+                      className={`flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2 rounded-button text-sm text-left transition-colors ${dragId ? 'cursor-grabbing' : ''} ${section === id ? 'bg-wellness-50 text-sage-900 font-medium' : `text-sage-600 ${dragId ? '' : 'hover:bg-sage-100'}`}`}
                     >
                       <Icon size={15} className={section === id ? 'text-wellness-500' : 'text-sage-400'} />
                       <span className={`truncate ${on ? '' : 'line-through text-sage-400'}`}>{sectionLabel(id)}</span>
@@ -985,18 +1116,34 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
                 );
               })}
             </ul>
+            {!isDefaultOrder(form.orden) && (
+              <div className="px-2 pt-3">
+                <Button variant="ghost" size="sm" icon={RotateCcw} onClick={() => patch('orden', [...SECTION_ORDER])}>{t.pf_section_order_reset}</Button>
+              </div>
+            )}
           </nav>
 
           <main className="flex-1 min-w-0 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-6 py-6 space-y-5">
               <h3 className="font-serif text-title text-sage-900">{sectionLabel(section)}</h3>
               {section === 'general' && (
-                <GeneralEditor form={form} patch={patch} client={client} origin={origin} onCopyFrom={copyFrom} otherPlans={otherPlans} />
+                <GeneralEditor form={form} patch={patch} client={client} origin={origin} onCopyFrom={copyFrom} otherPlans={otherPlans} onTipo={setTipo} lastWeight={lastWeight} />
               )}
               {['desayunos', 'mediaManana', 'merienda'].includes(section) && (
-                <OptionSectionEditor key={section} value={form[section]} onChange={v => patch(section, v)} dishIndex={dishIndex} />
+                <OptionSectionEditor key={section} value={form[section]} onChange={v => patch(section, v)} dishIndex={dishIndex} sport={sport} />
               )}
-              {section === 'cantidades' && <CantidadesEditor value={form.cantidades} onChange={v => patch('cantidades', v)} />}
+              {section === 'entrenos' && sport && (
+                <EntrenosEditor
+                  value={form.sesiones}
+                  onChange={v => patch('sesiones', v)}
+                  peso={peso}
+                  renderOptions={(ses, onSes) => (
+                    <OptionSectionEditor key={ses.id} value={ses} onChange={onSes} dishIndex={dishIndex} />
+                  )}
+                />
+              )}
+              {section === 'competicion' && sport && <CompeticionEditor value={form.competicion} onChange={v => patch('competicion', v)} peso={peso} />}
+              {section === 'cantidades' && <CantidadesEditor value={form.cantidades} onChange={v => patch('cantidades', v)} sport={sport} />}
               {section === 'menu' && <MenuEditor value={form.menu} onChange={v => patch('menu', v)} dishIndex={dishIndex} />}
               {section === 'productos' && <ProductsEditor selected={form.productos} onChange={ids => patch('productos', ids)} foods={planFoods(form)} />}
             </div>
