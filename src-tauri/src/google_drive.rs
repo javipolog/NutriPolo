@@ -129,8 +129,10 @@ pub async fn gdrive_list_files(access_token: String, folder_id: String) -> Resul
 /// Write `content` (JSON) as `name` in the folder: replaces the file `file_id`
 /// when given (one file per day, updated during the day), otherwise creates
 /// it. A `file_id` that no longer exists (deleted in Drive) is created again.
+/// Refused (`drive_encrypted`) while at-rest encryption is on.
 #[tauri::command]
 pub async fn gdrive_upload_file(
+    app_handle: tauri::AppHandle,
     access_token: String,
     folder_id: String,
     name: String,
@@ -139,6 +141,11 @@ pub async fn gdrive_upload_file(
 ) -> Result<DriveFile, String> {
     valid_id(&folder_id)?;
     valid_name(&name)?;
+    // The data is encrypted at rest: it never leaves in plain text, whatever
+    // the frontend decided before (encryption may have just been turned on).
+    if crate::encryption_is_enabled_internal(&app_handle) {
+        return Err("drive_encrypted".to_string());
+    }
     if let Some(id) = file_id.as_deref() {
         valid_id(id)?;
         let resp = drive_client()
