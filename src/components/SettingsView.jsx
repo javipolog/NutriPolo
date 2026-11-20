@@ -13,6 +13,7 @@ import { testSmtpConnection } from '../services/emailService';
 import { googleCalendar, formatSyncStats, formatSyncErrors } from '../services/googleCalendarService';
 import { useT, useLocale, plural } from '../i18n';
 import { RemindersSection } from './settings/RemindersSection';
+import { DriveBackupSection } from './settings/DriveBackupSection';
 import { isValidIban, formatIban, DEFAULT_VAT_EXEMPTION_TEXT } from '../services/invoicing';
 import { invoke } from '@tauri-apps/api/tauri';
 
@@ -477,6 +478,14 @@ const GoogleCalendarSection = () => {
     }
     setLoading(true);
     try {
+      // Set up before (expired session, or a new permission such as Drive):
+      // reconnect keeping the per-calendar settings.
+      if ((gcal.calendars || []).length > 0) {
+        setCalendars(await googleCalendar.reconnect());
+        toast.success(t.gcal_reconnected);
+        return;
+      }
+
       // Step 1: start OAuth — backend opens browser and waits for redirect code
       const authResult = await googleCalendar.startAuth(clientId.trim(), clientSecret.trim());
       const code = authResult.code;
@@ -525,23 +534,6 @@ const GoogleCalendarSection = () => {
         return base;
       });
 
-      // Reconnecting after an expired session: keep the per-calendar settings.
-      const previous = new Map((gcal.calendars || []).map(c => [c.id, c]));
-      if (previous.size > 0) {
-        const merged = newCalendars.map(c => previous.has(c.id)
-          ? { ...previous.get(c.id), name: c.name, color: c.color, accessRole: c.accessRole }
-          : c);
-        const keepDefault = merged.some(c => c.id === gcal.defaultPushCalendarId) ? gcal.defaultPushCalendarId : null;
-        setGcal({
-          connected: true, needsReauth: false,
-          clientId: clientId.trim(), clientSecret: clientSecret.trim(),
-          accessToken, refreshToken, expiresAt, grantedScopes,
-          calendars: merged, defaultPushCalendarId: keepDefault, userEmail,
-        });
-        toast.success(t.gcal_reconnected);
-        return;
-      }
-
       // Auto-detect NutriPolo calendar: set as bidirectional push target if writable
       const nutripoloIdx = newCalendars.findIndex(
         c => c.name && c.name.toLowerCase().includes('nutripolo')
@@ -576,7 +568,8 @@ const GoogleCalendarSection = () => {
         toast.success(t.gcal_connected_pick);
       }
     } catch (e) {
-      toast.error(t.gcal_connect_error.replace('{error}', e?.message || String(e)));
+      if (e?.message === 'gcal_scope_missing') toast.error(t.gcal_scope_missing);
+      else toast.error(t.gcal_connect_error.replace('{error}', e?.message || String(e)));
     } finally {
       setLoading(false);
     }
@@ -1830,6 +1823,13 @@ const SettingsIndex = ({ lang }) => {
 
 export const SettingsView = () => {
   const config = useStore(s => s.config);
+  // Opened from a notice (e.g. "Reconnect Google"): go to that section
+  useEffect(() => {
+    const focus = useStore.getState().settingsFocus;
+    if (!focus) return;
+    useStore.setState({ settingsFocus: null });
+    requestAnimationFrame(() => document.getElementById(focus)?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }, []);
   const updateConfig = useStore(s => s.updateConfig);
   const appTheme = useStore(s => s.appTheme);
   const setAppTheme = useStore(s => s.setAppTheme);
@@ -2120,7 +2120,7 @@ export const SettingsView = () => {
       </Section>
 
       {/* Google Calendar */}
-      <Section title={
+      <Section id="settings-gcal" title={
         <span className="flex items-center gap-1.5">
           <Calendar size={14} />
           Google Calendar
@@ -2130,7 +2130,7 @@ export const SettingsView = () => {
       </Section>
 
       {/* Data & Backups */}
-      <Section title={
+      <Section id="settings-data" title={
         <span className="flex items-center gap-1.5">
           <ShieldCheck size={14} />
           {t.settings_data}
@@ -2175,6 +2175,9 @@ export const SettingsView = () => {
           )}
           <p className="text-xs text-sage-400 italic">{t.backup_auto_data_only}</p>
         </div>
+
+        {/* Copy in Google Drive */}
+        <DriveBackupSection onRestored={(result) => { reportKeptInvoices(result.keptInvoices); refreshBackupInfo(); }} />
 
         {/* Manual backup (ZIP) */}
         <div className="border-t border-sage-100 pt-4 space-y-3">

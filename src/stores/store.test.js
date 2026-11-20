@@ -126,6 +126,71 @@ describe('persistence', () => {
     await useStore.persist.rehydrate();
     expect(useStore.getState().clients.map(c => c.nombre)).toEqual(['Ana']);
   });
+
+  // Saved in parts with one client and one appointment, like a real install
+  const splitFiles = () => {
+    for (const k of Object.keys(saved)) delete saved[k];
+    saved['nutripolo-storage'] = JSON.stringify({ version: 17, state: { config: { nombre: 'Raquel' } }, split: true });
+    for (const k of ['measurements', 'plans', 'invoices', 'documents', 'suggestions', 'personal-events', 'library-products']) saved[`nutripolo-${k}`] = '[]';
+    saved['nutripolo-library'] = JSON.stringify({ recetas: [{ id: 'r1', titulo: 'Crema' }] });
+    saved['nutripolo-clients'] = JSON.stringify([{ id: 'k1', nombre: 'Ana' }]);
+    saved['nutripolo-consultations'] = JSON.stringify([{ id: 'c1' }]);
+  };
+
+  it('never saves the empty initial state while the read data is being put in place', async () => {
+    splitFiles();
+    useStore.setState(initial, true);
+    const loading = useStore.persist.rehydrate();
+    // Changes at every step of the load, as background jobs can make them
+    for (let i = 0; i < 40 && !useStore.persist.hasHydrated(); i++) {
+      useStore.getState().setSidebarCollapsed(i % 2 === 0);
+      await Promise.resolve();
+    }
+    await loading;
+    await flushAllPending(); await flushAllPending();
+    expect(JSON.parse(saved['nutripolo-clients'])).toEqual([{ id: 'k1', nombre: 'Ana' }]);
+    expect(JSON.parse(saved['nutripolo-storage']).state.config.nombre).toBe('Raquel');
+  });
+
+  it('takes the parts over a main file without them that has lost the patients (stale or reset copy)', async () => {
+    splitFiles();
+    // A whole-store main file with the settings but empty lists (an older version
+    // that does not know the parts saved it): loading it would empty the parts.
+    saved['nutripolo-storage'] = JSON.stringify({ version: 17, state: { config: { nombre: 'Raquel' }, clients: [], consultations: [], nutritionPlans: [], invoices: [] } });
+    await useStore.persist.rehydrate();
+    expect(useStore.getState().clients.map(c => c.nombre)).toEqual(['Ana']);
+    expect(useStore.getState().consultations.map(c => c.id)).toEqual(['c1']);
+    expect(useStore.getState().planLibrary.recetas.map(r => r.titulo)).toEqual(['Crema']);
+    expect(useStore.getState().config.nombre).toBe('Raquel');
+
+    useStore.getState().setSidebarCollapsed(true);
+    await flushAllPending(); await flushAllPending();
+    expect(JSON.parse(saved['nutripolo-clients'])).toHaveLength(1);
+    expect(JSON.parse(saved['nutripolo-consultations'])).toHaveLength(1);
+  });
+
+  it('keeps a safety copy before saving patients or appointments that had data as empty', async () => {
+    splitFiles();
+    await useStore.persist.rehydrate();
+    useStore.setState({ clients: [], consultations: [] });
+    await flushAllPending(); await flushAllPending();
+    expect(JSON.parse(saved['nutripolo-clients'])).toEqual([]);
+    const safety = readBackup(JSON.parse(files['backup-safety']));
+    expect(safety.counts).toMatchObject({ clients: 1, consultations: 1 });
+    expect(JSON.parse(files['backup-safety-info']).reason).toBe('emptied');
+  });
+
+  it('does not start empty when the main file is gone but the parts are there', async () => {
+    splitFiles();
+    delete saved['nutripolo-storage'];
+    const { getLoadFailure, clearLoadFailure } = await import('./store');
+    await useStore.persist.rehydrate();
+    expect(getLoadFailure()).toMatchObject({ key: 'nutripolo-storage', error: 'missing' });
+    useStore.getState().setSidebarCollapsed(true);
+    await flushAllPending();
+    expect(JSON.parse(saved['nutripolo-clients'])).toHaveLength(1);
+    clearLoadFailure();
+  });
 });
 
 describe('changedFields', () => {
@@ -458,6 +523,31 @@ describe('backups', () => {
     expect(info.dates[0]).toBe('2026-10-02');   // the oldest one was rotated out
     expect(files['backup-2026-10-01']).toBeUndefined();
     expect(JSON.parse(files['backup-manifest'])).toEqual(info.dates);
+  });
+
+  it('keeps today\'s copy up to date after changes, not only once a day', async () => {
+    useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana' }], lastBackupDate: null });
+    await useStore.getState().runAutoBackup();
+    const key = `backup-${todayISO()}`;
+    useStore.setState({ clients: [{ id: 'k1', nombre: 'Ana' }, { id: 'k2', nombre: 'Berta' }] });
+    expect(await useStore.getState().runAutoBackup()).toEqual({ ok: true, skipped: true });
+    expect(JSON.parse(files[key]).data.clients).toHaveLength(1);
+
+    expect(await useStore.getState().runAutoBackup({ refresh: true })).toEqual({ ok: true });
+    expect(JSON.parse(files[key]).data.clients).toHaveLength(2);
+    expect(files['backup-safety']).toBeUndefined();
+  });
+
+  it('keeps today\'s copy apart before a sudden drop replaces it', async () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({ id: `k${i}` }));
+    useStore.setState({ clients: many, consultations: [{ id: 'c1' }], lastBackupDate: null });
+    await useStore.getState().runAutoBackup();
+    useStore.setState({ clients: many.slice(0, 3), consultations: [{ id: 'c1' }] });
+    await useStore.getState().runAutoBackup({ refresh: true });
+
+    expect(JSON.parse(files[`backup-${todayISO()}`]).data.clients).toHaveLength(3);
+    expect(JSON.parse(files['backup-safety']).data.clients).toHaveLength(12);
+    expect(JSON.parse(files['backup-safety-info']).reason).toBe('shrink');
   });
 });
 

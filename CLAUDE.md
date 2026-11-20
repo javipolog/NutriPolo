@@ -53,6 +53,7 @@ nutripolo-app/
 │   │   ├── ConsultationModal.jsx     # Modal creacio/edicio consultes + GCal push
 │   │   ├── ConsultationsView.jsx     # Llistat de consultes
 │   │   ├── Dashboard.jsx             # Vista principal amb estadistiques
+│   │   ├── DriveBackupBanner.jsx     # Avís a l'Inici mentre la còpia a Drive no funciona (reconnectar amb un clic)
 │   │   ├── DocumentMetadataModal.jsx # Modal metadades de documents
 │   │   ├── InvoiceModal.jsx          # Modal creacio/edicio factures
 │   │   ├── Invoices.jsx              # Llistat de factures
@@ -73,6 +74,7 @@ nutripolo-app/
 │   │   ├── SettingsView.jsx          # Configuracio de l'app
 │   │   ├── settings/RemindersSection.jsx # Ajustos de recordatoris + editor de plantilles
 │   │   ├── settings/ReviewRequestsSection.jsx # Ajustos de ressenyes de Google
+│   │   ├── settings/DriveBackupSection.jsx # Còpia a Google Drive (interruptor, estat, pujar, restaurar)
 │   │   ├── UnlockScreen.jsx          # Desbloqueig (xifratge AES-256)
 │   │   └── UI.jsx                    # Components base reutilitzables (toast, confirm, etc.)
 │   │
@@ -84,6 +86,8 @@ nutripolo-app/
 │   │   └── useNow.js                 # Rellotge que es refresca
 │   │
 │   ├── services/                     # Serveis de negoci
+│   │   ├── backupPolicy.js           # Regles de les còpies: recomptes, caiguda brusca, fitxers de Drive (pur, amb tests)
+│   │   ├── driveBackupService.js     # Còpia a Google Drive (pujar, llistar, restaurar)
 │   │   ├── documentService.js        # Upload/open/delete documents via Tauri
 │   │   ├── emailService.js           # Enviament d'emails via SMTP
 │   │   ├── googleCalendarService.js  # Sync bidireccional amb Google Calendar
@@ -122,7 +126,8 @@ nutripolo-app/
 │   ├── src/
 │   │   ├── main.rs                   # Comandes IPC: save/load, email SMTP, documents, keyring
 │   │   ├── encryption.rs             # AES-256-GCM + Argon2id
-│   │   └── google_calendar.rs        # OAuth2 + API Google Calendar
+│   │   ├── google_calendar.rs        # OAuth2 + API Google Calendar
+│   │   └── google_drive.rs           # Còpia a Google Drive (scope drive.file)
 │   ├── icons/                        # Icones de l'aplicacio
 │   ├── Cargo.toml                    # Dependencies Rust
 │   └── tauri.conf.json               # Configuracio Tauri + CSP + bundle
@@ -211,6 +216,13 @@ fn gcal_create_event(token, calendar_id, event_json) -> Result<String, String>  
 fn gcal_update_event(token, calendar_id, event_id, event_json) -> Result<String, String>  // PATCH
 fn gcal_delete_event(token, calendar_id, event_id) -> Result<(), String>
 
+// Google Drive (modul google_drive, scope drive.file: només la carpeta i els fitxers que crea l'app)
+fn gdrive_find_or_create_folder(token, name) -> Result<String, String>
+fn gdrive_list_files(token, folder_id) -> Result<Vec<DriveFile>, String>
+fn gdrive_upload_file(token, folder_id, name, content, file_id?) -> Result<DriveFile, String>  // amb file_id el reescriu; si ja no hi és, el crea
+fn gdrive_download_file(token, file_id) -> Result<String, String>
+fn gdrive_delete_file(token, file_id) -> Result<(), String>
+
 // Receptari de la web (nomes nutripoloraquel.com: /wp-json/wp/v2/receta i /receta/...)
 fn recipes_fetch(path) -> Result<String, String>
 
@@ -238,12 +250,13 @@ fn cancel_quit()                                      // el JS es queda obert (c
 - Migracions a `migrateStore` (STORE_VERSION); `config` es fusiona amb els valors per defecte en hidratar
 - Si el fitxer de dades no es pot llegir, les escriptures queden bloquejades (`getLoadFailure`); també un `.enc` sense `encryption.json` (`not_unlocked`). `LoadErrorScreen` llegeix i valida la còpia abans de moure el fitxer a quarantena
 - `flushAllPending()` torna `true` si tot és al disc. Sortir i instal·lar una actualització no continuen si no (ni amb un formulari amb canvis: `setUnsavedWork` / `hasUnsavedWork` a `UI.jsx`, que ja fan servir `Modal guardChanges` i l'editor de planificacions). El bloqueig automàtic, en aquests casos, tapa la pantalla amb `ScreenLock` (sense recarregar, la clau segueix en memòria per poder desar) en lloc de no bloquejar
-- Còpies automàtiques: una al dia des de `useBackgroundJobs` (també amb l'app a la safata), 7 a la rotació, mai d'un store buit; la llista surt dels fitxers (`list_data_keys`), no només del manifest. Restaurar o importar: `readBackup` valida (rebutja altres JSON i versions més noves), es desa abans `backup-safety` ("Abans de l'última restauració") i es conserven les factures posteriors a la còpia i l'estat dels recordatoris (`restoredState`)
+- Còpies automàtiques: una per dia des de `useBackgroundJobs` (també amb l'app a la safata), 7 a la rotació, mai d'un store buit; la del dia es reescriu un minut després de cada canvi (`runAutoBackup({ refresh: true })`, 5 com a molt) i, si la nova sembla una caiguda brusca (`looksShrunk`: una llista buida o una de 10+ reduïda a la meitat), abans es desa l'anterior a `backup-safety` (`reason: 'shrink'`); la llista surt dels fitxers (`list_data_keys`), no només del manifest. Restaurar o importar: `readBackup` valida (rebutja altres JSON i versions més noves), es desa abans `backup-safety` ("Abans de l'última restauració") i es conserven les factures posteriors a la còpia i l'estat dels recordatoris (`restoredState`)
+- Còpia a Google Drive (`driveBackupService`, `config.driveBackup.enabled`, estat a `driveBackup`): mateixa connexió de Google, carpeta «NutriPolo - Copias de seguridad», un fitxer per dia (`nutripolo-copia-AAAA-MM-DD.json`) reescrit 3 min després dels canvis (15 com a molt, mai més sovint que cada 10) i un cop si l'última té més de 12 h; 30 dies. Una caiguda brusca respecte a l'última pujada va a un fitxer apart amb l'hora i el del dia no es toca. Cal reconnectar Google per donar el permís de Drive i tenir l'API de Drive activada al projecte de Google Cloud. Es pot restaurar des d'Ajustes. Mentre no funciona (sense connectar, caducada, sense permís, errors o més d'un dia sense còpia: `driveBackupAlert`) hi ha un avís a l'Inici que només es pot ajornar 4 h; si Google ja estava configurat reconnecta amb un clic (`googleCalendar.reconnect`, que també fa servir Ajustes) i, si no, obre Ajustes a la secció (`openSettingsAt`). En obrir l'app, un avís més si fa 3 dies (o mai) que no hi ha còpia. La connexió amb Google no és obligatòria: l'app ha de funcionar sense xarxa
 - Xifratge (Rust): totes les lectures/escriptures prenen `VAULT` (RwLock) i l'activació / canvi de contrasenya l'agafen en exclusiva. El canvi de contrasenya és transaccional (`backup_pre_rekey`: si falla es restaura; a l'arrencada `recover_vault` resol un canvi tallat). `encryption.json` té una còpia a `encryption.backup.json`. `write_atomic` fa `sync_all` abans del rename
 - Canvis de sincronitzacio o de recordatoris no han de tocar `localUpdatedAt` (si no, es fa push a Google)
 
 ### Google Calendar
-- Scopes minims: `calendar.events` + `calendar.calendarlist.readonly`; OAuth loopback a `127.0.0.1` amb PKCE + `state`
+- Scopes minims: `calendar.events` + `calendar.calendarlist.readonly` + `drive.file` (còpia a Drive); OAuth loopback a `127.0.0.1` amb PKCE + `state`
 - Totes les escriptures a Google (push, esborrat, sync) passen per una sola cua a `googleCalendarService`
 - Escriptures del sync: `updateConsultation(id, data, { sync: true })`; les de l'usuari descarten els camps de sync (`SYNC_FIELDS`) i actualitzen `localUpdatedAt`
 - Esdeveniments creats amb id determinista (`googleEventIdFor`) → mai duplicats
@@ -342,7 +355,7 @@ Les dades es guarden localment a:
 Windows: C:\Users\<usuari>\AppData\Roaming\com.nutripolo.app\
 ```
 
-El store es desa per parts (`STORE_PARTS` a `store.js`): `nutripolo-clients`, `-consultations`, `-measurements`, `-plans`, `-invoices`, `-documents`, `-suggestions`, `-personal-events`, `-library` i `-library-products` (les fotos), més `nutripolo-storage` amb la resta (config, sync, preferències) i la marca `split`. Cada canvi reescriu només les parts que han canviat per referència; canviar de vista no escriu res. Fins que totes les parts s'han escrit un cop, `nutripolo-storage` conserva el store sencer (migració des del fitxer únic); un fitxer `split` amb una part que falta és un error de càrrega. No s'escriu res abans d'acabar la càrrega (`storeLoaded`).
+El store es desa per parts (`STORE_PARTS` a `store.js`): `nutripolo-clients`, `-consultations`, `-measurements`, `-plans`, `-invoices`, `-documents`, `-suggestions`, `-personal-events`, `-library` i `-library-products` (les fotos), més `nutripolo-storage` amb la resta (config, sync, preferències) i la marca `split`. Cada canvi reescriu només les parts que han canviat per referència; canviar de vista no escriu res. Fins que totes les parts s'han escrit un cop, `nutripolo-storage` conserva el store sencer (migració des del fitxer únic); un fitxer `split` amb una part que falta és un error de càrrega. No s'escriu res fins que el que s'ha llegit ja és a l'estat (`storeLoaded`, a `onRehydrateStorage`). Mai s'arrenca buit amb dades al disc: un principal sense `split` amb pacients, consultes, plans o factures buits mentre la part del costat en té es carrega amb les parts (`partsOverStaleMain`), i un principal absent amb parts al disc és un error de càrrega. Si una d'aquestes quatre llistes passa de tenir dades a buida, abans es desa el que hi havia a `backup-safety` (`reason: 'emptied'`).
 Documents dels clients es guarden a `documents/<clientId>/`.
 
 ---

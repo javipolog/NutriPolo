@@ -3,6 +3,7 @@
 
 mod encryption;
 mod google_calendar;
+mod google_drive;
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -1550,6 +1551,11 @@ fn main() {
             google_calendar::gcal_create_event,
             google_calendar::gcal_update_event,
             google_calendar::gcal_delete_event,
+            google_drive::gdrive_find_or_create_folder,
+            google_drive::gdrive_list_files,
+            google_drive::gdrive_upload_file,
+            google_drive::gdrive_download_file,
+            google_drive::gdrive_delete_file,
             copy_file_to_documents,
             read_file_as_base64,
             delete_document_file,

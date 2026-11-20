@@ -5,6 +5,8 @@ import { getReminderCandidates, getReminderConfig, isAutoSendable, isQuietTime, 
 import { getReviewCandidates, getReviewConfig, isReviewAutoSendable, reviewState } from '../services/reviewRequestService';
 import { deliverEmailReminder, deliverReviewEmail } from './useReminderActions';
 import { plural, useT } from '../i18n';
+import { driveBackupStatus, uploadDriveBackup } from '../services/driveBackupService';
+import { driveBackupAlert, driveNoticeOnOpen } from '../services/backupPolicy';
 
 const TICK_MS = 5 * 60 * 1000;
 
@@ -16,6 +18,20 @@ let reauthNotified = false;
 let backupFailureNotified = false;
 // Same for "reminders held: the calendar is not up to date".
 let staleNotified = false;
+// And for "the copy in Google Drive failed".
+let driveFailureNotified = false;
+
+// Data whose change refreshes the copies (what a backup holds, see backupCollections).
+const BACKED_UP_FIELDS = ['clients', 'measurements', 'consultations', 'nutritionPlans', 'services', 'invoices',
+  'clientDocuments', 'emailTemplates', 'planLibrary', 'patientSuggestions', 'sentByEvent'];
+const LOCAL_DELAY_MS = 60 * 1000;
+const LOCAL_MAX_WAIT_MS = 5 * 60 * 1000;
+const DRIVE_CHECK_MS = 60 * 1000;
+const DRIVE_QUIET_MS = 3 * 60 * 1000;
+const DRIVE_MAX_WAIT_MS = 15 * 60 * 1000;
+const DRIVE_STALE_MS = 12 * 60 * 60 * 1000;
+const DRIVE_MIN_INTERVAL_MS = 10 * 60 * 1000;   // a few MB each: not more often than this
+const DRIVE_ERROR_RETRY_MS = 60 * 60 * 1000;
 
 /** Discreet notice after a sync left new patients in the inbox, with a shortcut to it. */
 export function notifySuggestions(toast, t, n) {
@@ -130,7 +146,9 @@ async function runReviewEmails() {
  * Background work that must run while the app is open, whatever view is on
  * screen. Mounted once by AppContent (i.e. after hydration and unlock).
  *
- *  - Daily automatic backup, checked now and every 5 min (also offline).
+ *  - Daily automatic backup, checked now and every 5 min (also offline),
+ *    and today's copy refreshed a minute after every change.
+ *  - Copy in Google Drive a few minutes after changes (driveBackupService).
  *  - Google Calendar auto-sync (when connected + autoSync), every 5 min.
  *  - Automatic email reminders and Google review requests, every 5 min
  *    (after the sync, when enabled).
@@ -164,6 +182,90 @@ export function useBackgroundJobs({ toast }) {
     backup();
     const interval = setInterval(backup, TICK_MS);
     return () => clearInterval(interval);
+  }, []);
+
+  // Copies that follow the data: today's local copy is rewritten a minute
+  // after the last change (5 at most while changes keep coming), and the
+  // copy in Google Drive 3 minutes after (15 at most, never more often than
+  // every 10). Drive also gets one when its last copy is older than 12 hours.
+  useEffect(() => {
+    if (typeof window.__TAURI_IPC__ !== 'function') return undefined;
+    let localTimer = null;
+    let localFirstChange = 0;
+    let driveDirtySince = 0;
+    let driveLastChange = 0;
+
+    const refreshLocal = async () => {
+      localTimer = null;
+      localFirstChange = 0;
+      const result = await useStore.getState().runAutoBackup({ refresh: true });
+      if (result?.ok === false && !backupFailureNotified) {
+        backupFailureNotified = true;
+        toastRef.current.error(tRef.current.backup_auto_failed.replace('{error}', result.error), 15000);
+      }
+    };
+
+    const unsubscribe = useStore.subscribe((state, prev) => {
+      if (!BACKED_UP_FIELDS.some(k => state[k] !== prev[k])) return;
+      const now = Date.now();
+      // Local: debounced, but never more than LOCAL_MAX_WAIT behind
+      if (!localFirstChange) localFirstChange = now;
+      clearTimeout(localTimer);
+      const wait = Math.max(0, Math.min(LOCAL_DELAY_MS, localFirstChange + LOCAL_MAX_WAIT_MS - now));
+      localTimer = setTimeout(refreshLocal, wait);
+      // Drive: picked up by the check below
+      if (!driveDirtySince) driveDirtySince = now;
+      driveLastChange = now;
+    });
+
+    const checkDrive = async () => {
+      if (!navigator.onLine || !driveBackupStatus().available) return;
+      const st = useStore.getState().driveBackup || {};
+      const now = Date.now();
+      // Errors that need the user (permission, API off, full Drive): not every minute
+      if (st.lastError && st.lastError !== 'drive_network' && st.lastErrorAt && now - new Date(st.lastErrorAt).getTime() < DRIVE_ERROR_RETRY_MS) return;
+      const sinceUpload = st.lastUploadAt ? now - new Date(st.lastUploadAt).getTime() : Infinity;
+      const stale = sinceUpload > DRIVE_STALE_MS;
+      const due = driveDirtySince && sinceUpload >= DRIVE_MIN_INTERVAL_MS
+        && (now - driveLastChange >= DRIVE_QUIET_MS || now - driveDirtySince >= DRIVE_MAX_WAIT_MS);
+      if (!stale && !due) return;
+      driveDirtySince = 0;
+      const result = await uploadDriveBackup();
+      if (result?.ok === false && !result.skipped && result.error !== 'drive_network' && !driveFailureNotified) {
+        driveFailureNotified = true;
+        toastRef.current.error(tRef.current.drive_backup_failed.replace('{error}', tRef.current[result.error] || result.error), 15000);
+      } else if (result?.ok) {
+        driveFailureNotified = false;
+      }
+    };
+    // On opening: if the Drive copy is not working and there has been none for
+    // days (or ever), say it once, besides the notice on the Dashboard.
+    const openNotice = setTimeout(() => {
+      const state = useStore.getState();
+      const alert = driveBackupAlert({ reason: driveBackupStatus(state).reason, drive: state.driveBackup || {} });
+      if (!driveNoticeOnOpen(alert, state.driveBackup || {})) return;
+      toastRef.current.warning(tRef.current.drive_notice_open, 15000, {
+        label: tRef.current.drive_notice_action,
+        onClick: () => useStore.getState().setCurrentView('dashboard'),
+      });
+    }, 90_000);   // after the first upload attempt
+    const driveInterval = setInterval(checkDrive, DRIVE_CHECK_MS);
+    const firstDrive = setTimeout(checkDrive, 30_000);   // after the first sync settles
+    window.addEventListener('online', checkDrive);
+
+    // Closing the window for good: try to give today's copy the last changes (best effort)
+    const onQuit = () => { if (localTimer) { clearTimeout(localTimer); refreshLocal(); } };
+    window.addEventListener('beforeunload', onQuit);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(localTimer);
+      clearInterval(driveInterval);
+      clearTimeout(firstDrive);
+      clearTimeout(openNotice);
+      window.removeEventListener('online', checkDrive);
+      window.removeEventListener('beforeunload', onQuit);
+    };
   }, []);
 
   useEffect(() => {

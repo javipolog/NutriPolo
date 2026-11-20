@@ -17,6 +17,7 @@ import { ClientModal } from './ClientModal';
 import { InvoiceModal } from './InvoiceModal';
 import { billedConsultationIds } from '../services/invoicing';
 import { PlanEditorModal } from './NutritionPlanEditor';
+import { DriveBackupBanner } from './DriveBackupBanner';
 import { useT, useLocale, plural } from '../i18n';
 
 /* ============================================
@@ -697,6 +698,8 @@ export const Dashboard = () => {
     return (
         <div className="space-y-6 animate-fadeIn pb-8">
             <DashboardHeader nombre={config?.nombre} onCreate={setCreating} />
+
+            <DriveBackupBanner />
 
             <QuickStatsRow
                 todayConsultations={todayConsultations}
