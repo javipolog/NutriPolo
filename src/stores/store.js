@@ -2370,7 +2370,7 @@ const useStore = create(
       lastBackupDate: null,
       // Status of the Google Drive copy (driveBackupService): folder, last
       // upload, file written today, counts of the last upload, last error code.
-      driveBackup: { folderId: null, lastUploadAt: null, lastFile: null, lastCounts: null, target: null, lastError: null, lastErrorAt: null },
+      driveBackup: { folderId: null, lastUploadAt: null, lastFile: null, lastCounts: null, target: null, lastError: null, lastErrorAt: null, vaultEncrypted: false },
       setDriveBackupState: (patch) => set(s => ({ driveBackup: { ...s.driveBackup, ...patch } })),
 
       // Today's copy in the rotation of 7 days. Without `refresh`, once a day

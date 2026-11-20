@@ -219,7 +219,9 @@ export function useBackgroundJobs({ toast }) {
     });
 
     const checkDrive = async () => {
-      if (!navigator.onLine || !driveBackupStatus().available) return;
+      const reason = driveBackupStatus().reason;
+      // Held by encryption: still tried, so it starts again once encryption is off
+      if (!navigator.onLine || (reason && reason !== 'encrypted')) return;
       const st = useStore.getState().driveBackup || {};
       const now = Date.now();
       // Errors that need the user (permission, API off, full Drive): not every minute

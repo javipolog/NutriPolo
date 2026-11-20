@@ -89,6 +89,7 @@ describe('Drive copy notice', () => {
 
   it('respects the copy switched off, and is quiet while it works', () => {
     expect(driveBackupAlert({ reason: 'disabled', now })).toBeNull();
+    expect(driveBackupAlert({ reason: 'encrypted', now })).toBeNull();
     expect(driveBackupAlert({ reason: null, drive: { lastUploadAt: hoursAgo(2) }, now })).toBeNull();
     // Offline for a while: only once it is a day behind
     expect(driveBackupAlert({ reason: null, drive: { lastUploadAt: hoursAgo(5), lastError: 'drive_network' }, now })).toBeNull();

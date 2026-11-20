@@ -15,10 +15,13 @@ import {
  *   not_connected  Google is not connected
  *   needs_reauth   the Google connection expired
  *   no_scope       connected without the Drive permission (reconnect)
+ *   encrypted      the data is encrypted at rest: the copy would leave it in
+ *                  plain text in Drive, so it does not run
  */
 export function driveBackupStatus(state = useStore.getState()) {
   const gc = state.config?.googleCalendar || {};
   if (state.config?.driveBackup?.enabled === false) return { available: false, reason: 'disabled' };
+  if (state.driveBackup?.vaultEncrypted) return { available: false, reason: 'encrypted' };
   if (gc.needsReauth) return { available: false, reason: 'needs_reauth' };
   if (!gc.connected) return { available: false, reason: 'not_connected' };
   if (!hasDriveScope(gc.grantedScopes)) return { available: false, reason: 'no_scope' };
@@ -59,6 +62,11 @@ let running = null;
 export function uploadDriveBackup() {
   if (running) return running;
   running = (async () => {
+    // With at-rest encryption on, never send the data out in plain text
+    const encrypted = await invoke('encryption_is_enabled').then(Boolean).catch(() => false);
+    if (!!useStore.getState().driveBackup?.vaultEncrypted !== encrypted) {
+      useStore.getState().setDriveBackupState({ vaultEncrypted: encrypted });
+    }
     const state = useStore.getState();
     const status = driveBackupStatus(state);
     if (!status.available) return { ok: false, skipped: true, reason: status.reason };

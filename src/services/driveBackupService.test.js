@@ -25,6 +25,7 @@ vi.mock('@tauri-apps/api/tauri', () => ({
       }
       case 'gdrive_delete_file': delete drive.files[args.fileId]; return null;
       case 'gdrive_download_file': return drive.files[args.fileId].content;
+      case 'encryption_is_enabled': return drive.encrypted;
       default: return null;
     }
   }),
@@ -52,7 +53,7 @@ const filesNamed = () => Object.values(drive.files).map(f => f.name).sort();
 const contentOf = (name) => JSON.parse(Object.values(drive.files).find(f => f.name === name).content);
 
 beforeEach(() => {
-  drive.folders = {}; drive.files = {}; drive.nextId = 1;
+  drive.folders = {}; drive.files = {}; drive.nextId = 1; drive.encrypted = false;
   useStore.setState({ ...initial, config: connected(), clients: many(12), consultations: [{ id: 'c1' }] }, true);
 });
 
@@ -107,6 +108,14 @@ describe('Google Drive copy', () => {
     const [copy] = await listDriveCopies();
     const backup = await loadDriveCopy(copy.id);
     expect(backup.counts).toMatchObject({ clients: 12, consultations: 1 });
+  });
+
+  it('never uploads the data in plain text when it is encrypted at rest', async () => {
+    drive.encrypted = true;
+    expect(await uploadDriveBackup()).toMatchObject({ ok: false, skipped: true, reason: 'encrypted' });
+    expect(filesNamed()).toEqual([]);
+    drive.encrypted = false;
+    expect(await uploadDriveBackup()).toEqual({ ok: true });
   });
 
   it('waits for the Drive permission, and does nothing with no data or switched off', async () => {

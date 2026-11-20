@@ -99,7 +99,8 @@ export const DRIVE_OPEN_NOTICE_MS = 3 * 24 * 60 * 60 * 1000;
  *   { reason: 'stale', since }   no copy for more than a day (e.g. offline for long)
  */
 export function driveBackupAlert({ reason, drive = {}, now = Date.now() }) {
-  if (reason === 'disabled') return null;
+  // Off on purpose, or held because the data is encrypted (said in Settings)
+  if (reason === 'disabled' || reason === 'encrypted') return null;
   if (reason) return { reason };
   if (drive.lastError && drive.lastError !== 'drive_network') return { reason: 'error', error: drive.lastError };
   if (drive.lastUploadAt && now - Date.parse(drive.lastUploadAt) > DRIVE_ALERT_STALE_MS) {
