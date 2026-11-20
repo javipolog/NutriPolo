@@ -28,6 +28,11 @@ export function driveBackupStatus(state = useStore.getState()) {
   return { available: true, reason: null };
 }
 
+/** Whether the data is encrypted at rest. If it cannot be told, taken as yes: never risk plain text. */
+const vaultEncrypted = () => invoke('encryption_is_enabled').then(Boolean).catch(() => true);
+
+const isEncryptedRefusal = (e) => String(e?.message || e).includes('drive_encrypted');
+
 const hhmm = (d = new Date()) => `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
 
 async function backupFolder(token, { fresh = false } = {}) {
@@ -63,7 +68,7 @@ export function uploadDriveBackup() {
   if (running) return running;
   running = (async () => {
     // With at-rest encryption on, never send the data out in plain text
-    const encrypted = await invoke('encryption_is_enabled').then(Boolean).catch(() => false);
+    const encrypted = await vaultEncrypted();
     if (!!useStore.getState().driveBackup?.vaultEncrypted !== encrypted) {
       useStore.getState().setDriveBackupState({ vaultEncrypted: encrypted });
     }
@@ -88,6 +93,13 @@ export function uploadDriveBackup() {
         target = { date: today, name };
       }
       const fileId = files.find(f => f.name === name)?.id || null;
+      // Encryption may have been turned on while the token and the folder
+      // were fetched: check again right before the data leaves (the backend
+      // refuses too, at the moment of sending).
+      if (await vaultEncrypted()) {
+        setStatus({ vaultEncrypted: true });
+        return { ok: false, skipped: true, reason: 'encrypted' };
+      }
       await invoke('gdrive_upload_file', { accessToken: token, folderId, name, content: JSON.stringify(snapshot), fileId });
 
       for (const old of driveFilesToPrune(files, today)) {
@@ -96,6 +108,10 @@ export function uploadDriveBackup() {
       setStatus({ lastUploadAt: new Date().toISOString(), lastFile: name, lastCounts: counts, target, lastError: null, lastErrorAt: null });
       return { ok: true };
     } catch (e) {
+      if (isEncryptedRefusal(e)) {
+        setStatus({ vaultEncrypted: true });
+        return { ok: false, skipped: true, reason: 'encrypted' };
+      }
       const code = driveErrorCode(e);
       setStatus({ lastError: code, lastErrorAt: new Date().toISOString() });
       if (import.meta.env.DEV) console.warn('[Drive backup]', e);
