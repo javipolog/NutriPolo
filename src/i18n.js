@@ -956,6 +956,10 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novedades en NutriPolo v{version}',
+    whats_new_drive_title:         'Copia de tus datos en Google Drive',
+    whats_new_drive_desc:          'Unos minutos después de cada cambio se guarda una copia en tu Google Drive, en la carpeta «NutriPolo - Copias de seguridad», y se guardan 30 días. Para activarla, vuelve a conectar Google (te lo pide el aviso del Inicio) y permite el acceso a Drive. Se restaura desde Ajustes → Datos y copias.',
+    whats_new_safety_title:        'Tus datos, más protegidos',
+    whats_new_safety_desc:         'La copia automática del día ya no se hace una sola vez: se actualiza sola un minuto después de cada cambio. Y la app no puede volver a abrirse vacía guardando encima de tus datos: si algo vaciara tus pacientes, consultas, planes o facturas, antes guarda una copia de lo que había («Copia previa…» en Ajustes).',
     whats_new_sport_title:         'Planificaciones de nutrición deportiva',
     whats_new_sport_desc:          'En Datos generales de la planificación elige «Deportiva». Cada opción puede llevar el aumento de los días de entreno, hay tomas antes y después de entrenar con su pauta (hidratos y proteína por kg, calculados con el peso), la guía de cantidades marca en naranja la ración de entreno y puedes añadir un plan de competición: día previo, desayuno, cafeína, durante la prueba y recuperación.',
     whats_new_order_title:         'Ordena las secciones del PDF',
@@ -2557,6 +2561,10 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'Novetats a NutriPolo v{version}',
+    whats_new_drive_title:         'Còpia de les teves dades a Google Drive',
+    whats_new_drive_desc:          "Uns minuts després de cada canvi es desa una còpia al teu Google Drive, a la carpeta «NutriPolo - Copias de seguridad», i es guarden 30 dies. Per activar-la, torna a connectar Google (t'ho demana l'avís de l'Inici) i permet l'accés a Drive. Es restaura des d'Ajustos → Dades i còpies.",
+    whats_new_safety_title:        'Les teves dades, més protegides',
+    whats_new_safety_desc:         "La còpia automàtica del dia ja no es fa un sol cop: s'actualitza sola un minut després de cada canvi. I l'app no pot tornar a obrir-se buida desant a sobre de les teves dades: si alguna cosa buidés els teus pacients, consultes, plans o factures, abans desa una còpia del que hi havia («Còpia prèvia…» a Ajustos).",
     whats_new_sport_title:         'Planificacions de nutrició esportiva',
     whats_new_sport_desc:          'A Dades generals de la planificació tria «Esportiva». Cada opció pot portar l\'augment dels dies d\'entrenament, hi ha preses abans i després d\'entrenar amb la seva pauta (hidrats i proteïna per kg, calculats amb el pes), la guia de quantitats marca en taronja la ració d\'entrenament i pots afegir un pla de competició: dia previ, esmorzar, cafeïna, durant la prova i recuperació.',
     whats_new_order_title:         'Ordena les seccions del PDF',
@@ -4160,6 +4168,10 @@ export const TRANSLATIONS = {
 
     // App shell (v1.10.1)
     whats_new_title:         'What\'s new in NutriPolo v{version}',
+    whats_new_drive_title:         'A copy of your data in Google Drive',
+    whats_new_drive_desc:          'A few minutes after every change a copy is saved in your Google Drive, in the "NutriPolo - Copias de seguridad" folder, and 30 days are kept. To turn it on, reconnect Google (the notice on the Dashboard asks you) and allow Drive access. Restore it from Settings → Data and backups.',
+    whats_new_safety_title:        'Your data, better protected',
+    whats_new_safety_desc:         'The daily automatic copy is no longer made just once: it updates itself a minute after every change. And the app can no longer open empty and save over your data: if anything emptied your clients, appointments, plans or invoices, a copy of what was there is saved first ("Previous copy…" in Settings).',
     whats_new_sport_title:         'Sports nutrition plans',
     whats_new_sport_desc:          'In the plan\'s General section choose "Sports". Each option can carry the training-day increase, there are snacks before and after training with their guidance (carbohydrates and protein per kg, worked out from the weight), the portion guide shows the training portion in orange, and you can add a competition plan: the day before, breakfast, caffeine, during the event and recovery.',
     whats_new_order_title:         'Reorder the PDF sections',
