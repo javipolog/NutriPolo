@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/tauri';
 import { extractPatientName, normalize as fuzzyNormalize, findBestMatches } from '../services/fuzzyMatcher.js';
 import { DEFAULT_REMINDER_CONFIG, reminderSlot } from '../services/reminderService.js';
+import { backupCounts, looksShrunk } from '../services/backupPolicy.js';
 import { PLAN_FORMAT, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes, replaceSeedRecipes } from '../services/planificacion.js';
 import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
 import RECETAS_V15_A_NUEVAS from '../data/recetasPlanificacionesV15.json';
@@ -127,7 +128,8 @@ export const STORE_KEYS = [MAIN_KEY, ...STORE_PARTS.map(p => p.key)];
 const PART_FIELDS = new Set(STORE_PARTS.map(p => p.field).filter(Boolean));
 const mainState = (st) => Object.fromEntries(Object.entries(st).filter(([k]) => !PART_FIELDS.has(k)));
 
-let storeLoaded = false;         // getItem has read the files (nothing is written before)
+let storeLoaded = false;         // the files are read and in the state (nothing is written before)
+let loadDone = false;            // getItem has read the files; storeLoaded once they are in the state
 let splitReady = false;          // the main file on disk is the small `split` one
 const lastDeps = {};             // per key: references of the data last queued
 const partsWritten = new Set();  // parts written at least once since loading
@@ -167,11 +169,73 @@ async function saveBeforeUpdate(state, version) {
   } catch { /* outside Tauri, or the disk: the load goes on */ }
 }
 
+/** Read a part without reporting errors (null if it is not there or unreadable). */
+async function peekRaw(name) {
+  if (!isTauri()) return localStorage.getItem(name);
+  try { return await invoke('load_data', { key: name }); } catch { return null; }
+}
+
+/** Nothing worth keeping: null, [] or an object made only of those ({ recetas: [], alimentos: {} }). */
+const isBlank = (v) => v == null
+  || (Array.isArray(v) ? v.length === 0 : typeof v === 'object' && Object.values(v).every(isBlank));
+
+const CORE_PART_FIELDS = ['clients', 'consultations', 'nutritionPlans', 'invoices'];
+
+/**
+ * A main file without the `split` mark is the whole store (before v1.19, or
+ * the migration half-way) and wins over the part files. But if its patients,
+ * appointments, plans or invoices are empty while the part file beside it has
+ * them, it is a stale or reset copy (e.g. written by an older version that does
+ * not know the parts): loading it as is would write those empty lists over the
+ * real data on the next change. Then the part files are taken.
+ * Returns the state to load, or null to load the main file as it is.
+ */
+async function partsOverStaleMain(mainStore) {
+  if (!mainStore || typeof mainStore !== 'object') return null;
+  const onDisk = {};
+  for (const part of STORE_PARTS) {
+    const raw = await peekRaw(part.key);
+    if (raw == null) continue;
+    try { onDisk[part.key] = JSON.parse(raw); } catch { /* unreadable: keep the main file's */ }
+  }
+  const stale = STORE_PARTS.some(p => CORE_PART_FIELDS.includes(p.field)
+    && isBlank(p.get(mainStore)) && !isBlank(onDisk[p.key]));
+  if (!stale) return null;
+  const state = { ...mainStore };
+  for (const part of STORE_PARTS) {
+    if (part.key in onDisk) part.put(state, onDisk[part.key]);
+  }
+  return state;
+}
+
+/** Any part file on disk (the store was saved in parts at some point). */
+async function anyPartOnDisk() {
+  const partKeys = STORE_PARTS.map(p => p.key);
+  if (!isTauri()) return partKeys.some(k => localStorage.getItem(k) != null);
+  const keys = await invoke('list_data_keys', { prefix: 'nutripolo-' }).catch(() => []);
+  return Array.isArray(keys) && keys.some(k => partKeys.includes(k));
+}
+
+/**
+ * Patients, appointments, plans or invoices that had data and are about to be
+ * saved empty: keep what there was in the safety copy first ("previous copy"
+ * in Settings and on the load error screen), whatever emptied them. Fired
+ * before the debounced write of the empty list, so it reaches the disk first.
+ */
+function saveEmptiedSafetyCopy(state) {
+  const date = new Date().toISOString();
+  const data = { config: configForBackup(state.config), ...backupCollections(state) };
+  invoke('save_data', { key: SAFETY_BACKUP_KEY, value: JSON.stringify({ version: STORE_VERSION, date, data }) })
+    .then(() => invoke('save_data', { key: SAFETY_INFO_KEY, value: JSON.stringify({ date, reason: 'emptied' }) }))
+    .catch(() => { /* outside Tauri, or the disk: the write goes on */ });
+}
+
 // Persist storage for zustand (objects in, objects out).
 const tauriStorage = {
   // A JSON parse error throws: the persist middleware reports it as a load failure.
   getItem: async (name) => {
     storeLoaded = false;
+    loadDone = false;
     // What is on disk becomes the state: writes queued from the state it
     // replaces must not land on top of it.
     for (const key of STORE_KEYS) { clearTimeout(writeTimers[key]); delete writeTimers[key]; delete writeQueue[key]; }
@@ -180,13 +244,26 @@ const tauriStorage = {
       splitReady = false;
       partsWritten.clear();
       for (const key of STORE_KEYS) delete lastDeps[key];
-      storeLoaded = true;
+      loadDone = true;
     };
     const raw = await loadRaw(name);
-    if (raw == null) { startOver(); return null; }   // first launch (or loadFailure)
+    if (raw == null) {
+      // First launch, or loadFailure. A main file that is gone while the
+      // parts are there is not a first launch: starting empty would write
+      // empty lists over them on the next change.
+      if (!loadFailure && await anyPartOnDisk()) loadFailure = { key: name, error: 'missing' };
+      startOver();
+      return null;
+    }
     const main = JSON.parse(raw);
     // Single file (before v1.19): the next change writes every part
-    if (!main?.split) { startOver(); await saveBeforeUpdate(main?.state, main?.version); return main; }
+    if (!main?.split) {
+      const fromParts = await partsOverStaleMain(main?.state);
+      startOver();
+      if (fromParts) return { ...main, state: fromParts };
+      await saveBeforeUpdate(main?.state, main?.version);
+      return main;
+    }
     const state = { ...main.state };
     for (const part of STORE_PARTS) {
       const partRaw = await loadRaw(part.key);
@@ -207,7 +284,7 @@ const tauriStorage = {
     splitReady = true;
     for (const part of STORE_PARTS) lastDeps[part.key] = part.deps(state);
     await saveBeforeUpdate(state, main.version);
-    storeLoaded = true;
+    loadDone = true;
     return { ...main, state };
   },
   // `value` is the persisted object ({ state, version }). Zustand calls this on
@@ -221,13 +298,19 @@ const tauriStorage = {
     lastValue = value;
     const { state, version } = value;
     let changed = false;
+    let emptied = null;
     for (const part of STORE_PARTS) {
       const deps = part.deps(state);
       if (sameDeps(lastDeps[part.key], deps)) continue;
+      const before = lastDeps[part.key]?.[0];
+      if (CORE_PART_FIELDS.includes(part.field) && Array.isArray(before) && before.length > 0 && isBlank(part.get(state))) {
+        (emptied ||= {})[part.field] = before;
+      }
       lastDeps[part.key] = deps;
       queueWrite(part.key, part.get(state));
       changed = true;
     }
+    if (emptied) saveEmptiedSafetyCopy({ ...state, ...emptied });
     const main = mainState(state);
     const mainDeps = [version, ...entriesOf(main)];
     // The small main file only when its own data changed; while it still holds
@@ -1189,6 +1272,15 @@ async function listAutoBackupDates() {
   return [...new Set(dates)].filter(d => AUTO_BACKUP_DATE.test(d)).sort();
 }
 
+let autoBackupQueue = Promise.resolve();
+
+/** The data as a backup file ({ version, date, data }), e.g. for the copy in Google Drive. */
+export function currentBackupSnapshot() {
+  return backupSnapshot(useStore.getState());
+}
+
+export { hasData };
+
 function backupSnapshot(s) {
   return { version: STORE_VERSION, date: new Date().toISOString(), data: { config: configForBackup(s.config), ...backupCollections(s) } };
 }
@@ -1337,6 +1429,9 @@ const useStore = create(
         // Each entry: { id, dayOfWeek: 0-6 (0=Lun), startHour: 8-20, endHour: 8-20, label?: string }
         autoLockMinutes: 0, // 0 = disabled; otherwise lock the vault after N min of inactivity
         closeToTray: true,  // closing the window keeps the app running in the tray
+        // Copy of the data in the user's Google Drive (needs Google connected
+        // with the Drive permission); status in `driveBackup` below.
+        driveBackup: { enabled: true },
       },
       updateConfig: (updates) => set(s => ({ config: { ...s.config, ...updates } })),
 
@@ -2157,8 +2252,10 @@ const useStore = create(
       clientFilters: { estado: 'all', objetivo: 'all' },
       consultationFilters: { dateRange: 'week', locationId: 'all', tipo: 'all', estado: 'all' },
       plansSection: 'plans', // Planes tab: 'plans' | 'foods' | 'recipes'
+      settingsFocus: null,   // id of the Settings section to scroll to on opening it (not saved)
 
       setCurrentView: (view) => set({ currentView: view }),
+      openSettingsAt: (sectionId) => set({ currentView: 'settings', settingsFocus: sectionId }),
       setPlansSection: (section) => set({ plansSection: section }),
       setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
       setAppTheme: (theme) => set({ appTheme: theme }),
@@ -2271,29 +2368,55 @@ const useStore = create(
 
       // ---- BACKUP ----
       lastBackupDate: null,
+      // Status of the Google Drive copy (driveBackupService): folder, last
+      // upload, file written today, counts of the last upload, last error code.
+      driveBackup: { folderId: null, lastUploadAt: null, lastFile: null, lastCounts: null, target: null, lastError: null, lastErrorAt: null, vaultEncrypted: false },
+      setDriveBackupState: (patch) => set(s => ({ driveBackup: { ...s.driveBackup, ...patch } })),
 
-      // Once a day, also while the app lives in the tray (useBackgroundJobs
-      // calls it every few minutes). Returns { ok, skipped?, error? }.
-      runAutoBackup: async () => {
-        const today = todayISO();
-        const s = get();
-        if (s.lastBackupDate === today) return { ok: true, skipped: true };
-        // A backup of nothing (e.g. right after "start empty") would push a
-        // real one out of the rotation.
-        if (!hasData(s)) return { ok: true, skipped: true };
-        try {
-          const dates = await listAutoBackupDates();
-          await invoke('save_data', { key: `backup-${today}`, value: JSON.stringify(backupSnapshot(s)) });
-          const keep = [...dates.filter(d => d !== today), today].slice(-7);
-          await invoke('save_data', { key: 'backup-manifest', value: JSON.stringify(keep) });
-          for (const old of dates.filter(d => !keep.includes(d))) {
-            await invoke('delete_data', { key: `backup-${old}` }).catch(() => {});
+      // Today's copy in the rotation of 7 days. Without `refresh`, once a day
+      // (useBackgroundJobs checks every few minutes, also in the tray); with
+      // `refresh`, today's copy is rewritten with the current data (shortly
+      // after every change), so a copy is never more than a minute behind.
+      // Before a copy that looks like a sudden drop replaces today's, the one
+      // it replaces is kept as the safety copy. Returns { ok, skipped?, error? }.
+      runAutoBackup: ({ refresh = false } = {}) => {
+        // One at a time: the daily check and a refresh must not interleave.
+        const run = autoBackupQueue.then(async () => {
+          const today = todayISO();
+          const s = get();
+          const doneToday = s.lastBackupDate === today;
+          if (doneToday && !refresh) return { ok: true, skipped: true };
+          // A backup of nothing (e.g. right after "start empty") would push a
+          // real one out of the rotation.
+          if (!hasData(s)) return { ok: true, skipped: true };
+          try {
+            const key = `backup-${today}`;
+            const snapshot = backupSnapshot(s);
+            const counts = backupCounts(snapshot.data);
+            const dates = await listAutoBackupDates();
+            if (dates.includes(today)) {
+              const previousRaw = await invoke('load_data', { key }).catch(() => null);
+              let previous = null;
+              try { previous = previousRaw ? backupCounts(JSON.parse(previousRaw).data) : null; } catch { /* unreadable: replaced */ }
+              if (looksShrunk(previous, counts)) {
+                await invoke('save_data', { key: SAFETY_BACKUP_KEY, value: previousRaw });
+                await invoke('save_data', { key: SAFETY_INFO_KEY, value: JSON.stringify({ date: new Date().toISOString(), reason: 'shrink' }) });
+              }
+            }
+            await invoke('save_data', { key, value: JSON.stringify(snapshot) });
+            const keep = [...dates.filter(d => d !== today), today].slice(-7);
+            await invoke('save_data', { key: 'backup-manifest', value: JSON.stringify(keep) });
+            for (const old of dates.filter(d => !keep.includes(d))) {
+              await invoke('delete_data', { key: `backup-${old}` }).catch(() => {});
+            }
+            if (!doneToday) set({ lastBackupDate: today });
+            return { ok: true };
+          } catch (e) {
+            return { ok: false, error: String(e?.message || e) };
           }
-          set({ lastBackupDate: today });
-          return { ok: true };
-        } catch (e) {
-          return { ok: false, error: String(e?.message || e) };
-        }
+        });
+        autoBackupQueue = run.catch(() => {});
+        return run;
       },
 
       // { count, lastDate, dates, safety: { date } | null }
@@ -2503,6 +2626,7 @@ const useStore = create(
           emailTemplates: s.emailTemplates,
           planLibrary: s.planLibrary,
           lastBackupDate: s.lastBackupDate,
+          driveBackup: s.driveBackup,
           sentByEvent: s.sentByEvent,
           sidebarCollapsed: s.sidebarCollapsed,
           appTheme: s.appTheme,
@@ -2511,6 +2635,10 @@ const useStore = create(
         };
       },
       onRehydrateStorage: () => (state, error) => {
+        // Writes start only now, with what was read already in the state: a
+        // change in between (getItem done, state not replaced yet) would
+        // otherwise save the empty initial state over the files.
+        storeLoaded = loadDone && !error;
         if (error && !loadFailure) {
           loadFailure = { key: 'nutripolo-storage', error: String(error?.message || error) };
         }

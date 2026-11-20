@@ -51,6 +51,12 @@ vi.mock('@tauri-apps/api/tauri', () => ({
         if (existing) events.set(args.eventId, { id: args.eventId, status: 'cancelled', start_datetime: '', end_datetime: '', updated: stamp() });
         return null;
       }
+      case 'gcal_start_auth':
+        return { code: 'code', redirect_uri: 'http://127.0.0.1:1/', code_verifier: 'v' };
+      case 'gcal_exchange_token':
+        return google.token;
+      case 'gcal_list_calendars':
+        return google.calendarList || [];
       default:
         return null;
     }
@@ -761,5 +767,47 @@ describe('patient matching', () => {
     await sync();
     for (const c of useStore.getState().consultations) expect(c.localUpdatedAt).toBeUndefined();
     expect(googleWrites()).toEqual([]);
+  });
+});
+
+
+describe('reconnecting Google in one click', () => {
+  const DRIVE = 'https://www.googleapis.com/auth/drive.file';
+  const EVENTS = 'https://www.googleapis.com/auth/calendar.events';
+  const setGc = (gc) => useStore.setState(s => ({ config: { ...s.config, googleCalendar: gc } }));
+
+  it("keeps each calendar's settings and stores the new permissions", async () => {
+    setGc({
+      clientId: 'id', clientSecret: 'secret', connected: false, needsReauth: true, grantedScopes: EVENTS,
+      calendars: [{ id: 'cal-np', name: 'NutriPolo', syncMode: 'bidirectional', locationId: 'loc1' }],
+      defaultPushCalendarId: 'cal-np',
+    });
+    google.token = { access_token: 'new', refresh_token: 'refresh', expires_in: 3600, scope: `${EVENTS} ${DRIVE}` };
+    google.calendarList = [
+      { id: 'cal-np', summary: 'NutriPolo App', background_color: '#fff', access_role: 'owner', primary: false },
+      { id: 'me@example.com', summary: 'Personal', background_color: '#000', access_role: 'owner', primary: true },
+    ];
+    const { googleCalendar } = await import('./googleCalendarService');
+    expect(googleCalendar.canReconnect()).toBe(true);
+    await googleCalendar.reconnect();
+
+    const gc = useStore.getState().config.googleCalendar;
+    expect(gc).toMatchObject({ connected: true, needsReauth: false, accessToken: 'new', refreshToken: 'refresh', grantedScopes: `${EVENTS} ${DRIVE}`, defaultPushCalendarId: 'cal-np', userEmail: 'me@example.com' });
+    expect(gc.calendars.find(c => c.id === 'cal-np')).toMatchObject({ name: 'NutriPolo App', syncMode: 'bidirectional', locationId: 'loc1' });
+    expect(gc.calendars.find(c => c.id === 'me@example.com').syncMode).toBe('disabled');
+  });
+
+  it('refuses a connection without the calendar permission, and leaves things as they were', async () => {
+    setGc({ clientId: 'id', clientSecret: 'secret', connected: false, needsReauth: true, calendars: [{ id: 'cal-np' }] });
+    google.token = { access_token: 'x', expires_in: 3600, scope: DRIVE };
+    const { googleCalendar } = await import('./googleCalendarService');
+    await expect(googleCalendar.reconnect()).rejects.toThrow('gcal_scope_missing');
+    expect(useStore.getState().config.googleCalendar.needsReauth).toBe(true);
+  });
+
+  it('needs a first set-up before one-click reconnect', async () => {
+    const { googleCalendar } = await import('./googleCalendarService');
+    expect(googleCalendar.canReconnect({ clientId: 'id', clientSecret: 's', calendars: [] })).toBe(false);
+    expect(googleCalendar.canReconnect({ calendars: [{ id: 'a' }] })).toBe(false);
   });
 });

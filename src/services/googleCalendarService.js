@@ -19,7 +19,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/tauri';
-import useStore, { canPushToCalendar, getLoadFailure, localISODate } from '../stores/store';
+import useStore, { canPushToCalendar, getLoadFailure, localISODate, inferCalendarPurpose } from '../stores/store';
 import { buildClientIndex, matchPatient, normalizeEmail } from './fuzzyMatcher.js';
 
 /** Sync window: days before / after today. */
@@ -234,6 +234,60 @@ export const googleCalendar = {
 
   async revokeToken(token) {
     return invoke('gcal_revoke_token', { token });
+  },
+
+  /** Whether Google can be reconnected in one click: it was set up before (credentials and calendars kept). */
+  canReconnect(gc = useStore.getState().config.googleCalendar || {}) {
+    return !!(gc.clientId && gc.clientSecret && (gc.calendars || []).length > 0);
+  },
+
+  /**
+   * Connect again with the stored credentials (expired session, or to grant
+   * a new permission such as Drive): Google's consent page opens in the
+   * browser; the per-calendar settings are kept. Throws
+   * Error('gcal_scope_missing') if the calendar permission was unticked.
+   * Returns the calendar list.
+   */
+  async reconnect() {
+    const gc = useStore.getState().config.googleCalendar || {};
+    const clientId = (gc.clientId || '').trim();
+    const clientSecret = (gc.clientSecret || '').trim();
+    const auth = await this.startAuth(clientId, clientSecret);
+    const token = await this.exchangeToken(clientId, clientSecret, auth.code,
+      auth.redirect_uri || 'urn:ietf:wg:oauth:2.0:oob', auth.code_verifier);
+    if (token.scope && !this.hasRequiredScope(token.scope)) {
+      this.revokeToken(token.access_token).catch(() => {});
+      throw new Error('gcal_scope_missing');
+    }
+    const calList = await this.listCalendars(token.access_token);
+    const store = useStore.getState();
+    // Consultations of calendars this account cannot see become local records
+    store.detachConsultationsFromCalendars(calList.map(c => c.id));
+    const current = store.config.googleCalendar || {};
+    const previous = new Map((current.calendars || []).map(c => [c.id, c]));
+    const calendars = calList.map(c => previous.has(c.id)
+      ? { ...previous.get(c.id), name: c.summary, color: c.background_color, accessRole: c.access_role }
+      : {
+        id: c.id, name: c.summary, color: c.background_color, accessRole: c.access_role, syncMode: 'disabled',
+        purpose: inferCalendarPurpose({ id: c.id, name: c.summary, syncMode: 'disabled' }),
+        lastKnownRemoteCount: null, lastKnownRemoteSyncAt: null, massDeletePending: null,
+        fuzzyAutoThreshold: 0.92, fuzzySuggestThreshold: 0.75,
+      });
+    const primary = calList.find(c => c.primary) || calList[0];
+    store.updateConfig({
+      googleCalendar: {
+        ...current,
+        connected: true, needsReauth: false, clientId, clientSecret,
+        accessToken: token.access_token,
+        refreshToken: token.refresh_token || current.refreshToken || '',
+        expiresAt: Date.now() + token.expires_in * 1000,
+        grantedScopes: token.scope || '',
+        calendars,
+        defaultPushCalendarId: calendars.some(c => c.id === current.defaultPushCalendarId) ? current.defaultPushCalendarId : null,
+        userEmail: primary?.id || current.userEmail || '',
+      },
+    });
+    return calList;
   },
 
   /** True when the granted scopes let the app edit events. */

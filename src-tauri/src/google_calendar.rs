@@ -11,9 +11,11 @@ use base64::Engine as _;
 
 /// Least-privilege scopes: create / edit / delete events on any calendar the
 /// user can write to, and read the calendar list. No access to calendar
-/// settings, sharing (ACLs) or deleting whole calendars.
+/// settings, sharing (ACLs) or deleting whole calendars. `drive.file`: the
+/// backup copy in Drive, limited to the files the app creates itself.
 const OAUTH_SCOPES: &str = "https://www.googleapis.com/auth/calendar.events \
-                            https://www.googleapis.com/auth/calendar.calendarlist.readonly";
+                            https://www.googleapis.com/auth/calendar.calendarlist.readonly \
+                            https://www.googleapis.com/auth/drive.file";
 
 /// How long the loopback server waits for Google to redirect back.
 const AUTH_TIMEOUT: Duration = Duration::from_secs(180);
@@ -352,7 +354,7 @@ fn build_event_body(event: &CalendarEvent) -> serde_json::Value {
 /// Uniform API error: `"<op> failed (<status>) [<reason>]: <message>"`.
 /// The JS side parses the status and reason to decide whether to retry.
 /// Non-JSON bodies (e.g. an HTML 502 page) keep the status.
-fn format_api_error(op: &str, status: u16, body: &str) -> String {
+pub(crate) fn format_api_error(op: &str, status: u16, body: &str) -> String {
     let json: serde_json::Value = serde_json::from_str(body).unwrap_or(serde_json::Value::Null);
     let reason = json["error"]["errors"][0]["reason"]
         .as_str()
@@ -377,7 +379,7 @@ fn http_client() -> &'static reqwest::Client {
 
 /// Send a Google API request and return the parsed JSON body (Null when
 /// empty). Network failures carry no status, so the caller retries them.
-async fn send_json(op: &str, request: reqwest::RequestBuilder) -> Result<serde_json::Value, String> {
+pub(crate) async fn send_json(op: &str, request: reqwest::RequestBuilder) -> Result<serde_json::Value, String> {
     let resp = request
         .send()
         .await
@@ -438,7 +440,7 @@ async fn token_request(params: &[(&str, &str)], failure_code: &str) -> Result<To
 }
 
 /// Simple percent-encoder for URL components.
-fn url_encode(s: &str) -> String {
+pub(crate) fn url_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for byte in s.bytes() {
         match byte {

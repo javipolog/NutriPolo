@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
-import { Home, Calendar, Users, ClipboardList, Receipt, Package, BookOpen, Settings, Dumbbell, GripVertical, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
+import { Home, Calendar, Users, ClipboardList, Receipt, Package, BookOpen, Settings, Cloud, ShieldCheck, Search, ChevronLeft, ChevronRight, AlertTriangle, X, Download, RefreshCw } from 'lucide-react';
 import { Spinner, ToastProvider, ErrorBoundary, Modal, Button, ConfirmModal, useToast, useConfirm, useDialogA11y, hasOpenDialog, hasUnsavedWork } from './components/UI';
 import { CommandPalette } from './components/CommandPalette';
 import { UnlockScreen } from './components/UnlockScreen';
@@ -15,7 +15,7 @@ import { countPendingReminders } from './components/RemindersPanel';
 // ============================================
 // WHAT'S NEW MODAL
 // ============================================
-const APP_VERSION = '1.19.0';
+const APP_VERSION = '1.19.1';
 
 const WhatsNewModal = () => {
   const [open, setOpen] = useState(false);
@@ -37,9 +37,8 @@ const WhatsNewModal = () => {
     <Modal open={open} onClose={handleClose} title={t.whats_new_title.replace('{version}', APP_VERSION)} size="sm">
       <div className="space-y-4">
         {[
-          [Dumbbell, 'whats_new_sport'],
-          [GripVertical, 'whats_new_order'],
-          [Receipt, 'whats_new_invoicing'],
+          [Cloud, 'whats_new_drive'],
+          [ShieldCheck, 'whats_new_safety'],
         ].map(([Icon, key]) => (
           <div key={key} className="flex items-start gap-3 p-3 bg-wellness-50 border border-wellness-200 rounded-soft">
             <Icon size={20} className="text-wellness-500 mt-0.5 shrink-0" />
