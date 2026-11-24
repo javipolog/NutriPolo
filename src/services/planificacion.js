@@ -163,39 +163,6 @@ export function copyContent(src) {
   };
 }
 
-/** Seccions que es poden copiar d'una planificació (les esportives, només d'una esportiva). */
-export function copyableSections(src) {
-  return SECTION_ORDER.filter(k => (k !== 'entrenos' && k !== 'competicion') || isDeportiva(src));
-}
-
-/**
- * Copia a `target` només les seccions `keys` de `src` (ids nous); la resta de
- * `target` no es toca. Si es copien totes, també el supermercat, l'ordre i el
- * tipus, com una còpia sencera. Copiar entrenaments o competició d'una
- * esportiva fa esportiva la de destinació. El pes no es copia mai (pot ser
- * d'un altre client): es queda el de `target` o, si no en té, `peso`.
- */
-export function copySections(target, src, keys, { peso = '' } = {}) {
-  const c = copyContent(src);
-  const pick = new Set(keys);
-  const next = { ...target, secciones: { ...DEFAULT_SECCIONES, ...(target.secciones || {}) } };
-  SECTION_ORDER.forEach(k => {
-    if (!pick.has(k)) return;
-    const field = k === 'entrenos' ? 'sesiones' : k;
-    next[field] = c[field];
-    next.secciones[k] = c.secciones[k];
-  });
-  if (copyableSections(src).every(k => pick.has(k))) {
-    Object.assign(next, { supermercado: c.supermercado, orden: c.orden, tipo: c.tipo, deporte: c.deporte });
-  } else if (c.tipo === TIPO_DEPORTIVA && (pick.has('entrenos') || pick.has('competicion'))) {
-    next.tipo = TIPO_DEPORTIVA;
-    next.deporte = { ...emptyDeporte(), ...(target.deporte || {}) };
-    if (!String(next.deporte.disciplina || '').trim()) next.deporte.disciplina = c.deporte.disciplina;
-  }
-  next.deporte = { ...emptyDeporte(), ...(next.deporte || {}), peso: target.deporte?.peso || (peso ? String(peso) : '') };
-  return next;
-}
-
 /** Garanteix els 7 dies amb A/B per dinar i sopar, conservant el que hi hagi. */
 export function normalizeWeek(dias) {
   const byId = Object.fromEntries((dias || []).map(d => [d.id, d]));
