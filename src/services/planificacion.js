@@ -169,8 +169,8 @@ export function copyableSections(src) {
 
 /**
  * Copia a `target` només les seccions `keys` de `src` (ids nous); la resta de
- * `target` no es toca. Si es copien totes, també l'ordre i el tipus, com una
- * còpia sencera. Copiar entrenaments o competició d'una
+ * `target` no es toca. Si es copien totes, és una còpia sencera: també l'ordre,
+ * el tipus i les seccions esportives (buides si `src` és general). Copiar entrenaments o competició d'una
  * esportiva fa esportiva la de destinació. El pes no es copia mai (pot ser
  * d'un altre client): es queda el de `target` o, si no en té, `peso`.
  */
@@ -185,7 +185,11 @@ export function copySections(target, src, keys, { peso = '' } = {}) {
     next.secciones[k] = c.secciones[k];
   });
   if (copyableSections(src).every(k => pick.has(k))) {
-    Object.assign(next, { orden: c.orden, tipo: c.tipo, deporte: c.deporte });
+    // Còpia sencera: també les seccions esportives (buides si l'origen és general),
+    // perquè no en quedin d'amagades que tornin en passar a esportiva
+    Object.assign(next, { orden: c.orden, tipo: c.tipo, deporte: c.deporte, sesiones: c.sesiones, competicion: c.competicion });
+    next.secciones.entrenos = c.secciones.entrenos;
+    next.secciones.competicion = c.secciones.competicion;
   } else if (c.tipo === TIPO_DEPORTIVA && (pick.has('entrenos') || pick.has('competicion'))) {
     next.tipo = TIPO_DEPORTIVA;
     next.deporte = { ...emptyDeporte(), ...(target.deporte || {}) };

@@ -107,6 +107,14 @@ describe('copySections', () => {
     expect(out.productos).toEqual([]);
   });
 
+  it('a full copy from a general plan clears the sport sections of a sport plan', () => {
+    const src = samplePlanificacion();
+    const out = copySections(normalizePlanificacion(sampleDeportiva()), src, copyableSections(src));
+    expect(out.tipo).toBe('general');
+    expect(out.sesiones).toEqual([]);
+    expect(out.competicion).toBeNull();
+  });
+
   it('offers sport sections only from a sport plan, and never copies the weight', () => {
     expect(copyableSections(samplePlanificacion())).not.toContain('entrenos');
     const sport = sampleDeportiva();
