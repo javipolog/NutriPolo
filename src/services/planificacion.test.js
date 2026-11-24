@@ -3,11 +3,11 @@ import {
   PLAN_FORMAT, WEEK_DAYS, linesOf, nextPlanNumber, latestPlanificacion, createPlanificacion,
   copyContent, normalizeWeek, visibleSections, planificacionStats, isDishEmpty, safeUrl, buildDishIndex,
   summarizeIngredients, collectOwnRecipes, mergeOwnRecipes, addMissingRecipes, planFoods, dishKey,
-  seedSignature, replaceSeedRecipes,
+  seedSignature, replaceSeedRecipes, copySections, copyableSections, normalizePlanificacion,
 } from './planificacion';
 import RECETAS_PLANIFICACIONES from '../data/recetasPlanificaciones.json';
 import RECETAS_V15_A_NUEVAS from '../data/recetasPlanificacionesV15.json';
-import { samplePlanificacion } from './planificacion.fixture';
+import { samplePlanificacion, sampleDeportiva } from './planificacion.fixture';
 
 const plan = (over) => ({ formato: PLAN_FORMAT, clienteId: 'c1', ...over });
 
@@ -48,7 +48,6 @@ describe('createPlanificacion', () => {
     expect(p).toMatchObject({ formato: PLAN_FORMAT, numero: 2, nombre: 'Planificación 2', estado: 'borrador', fechaInicio: '2026-10-29' });
     expect(p.menu.dias.map(d => d.id)).toEqual(WEEK_DAYS);
     expect(p.cantidades.grupos.length).toBeGreaterThan(0);
-    expect(p.supermercado).toBe('Mercadona');
   });
 
   it('copies the content of the base with fresh ids and its own metadata', () => {
@@ -66,6 +65,62 @@ describe('createPlanificacion', () => {
     p.productos.push('pr2');
     expect(base.menu.dias[0].comida.a.titulo).toBe('Rostidera de sepia + ensalada');
     expect(base.productos).toEqual(['pr1']);
+  });
+});
+
+describe('copySections', () => {
+  // The plan being edited: its own breakfasts, menu, products and metadata
+  const target = () => normalizePlanificacion({
+    ...createPlanificacion({ clienteId: 'novio', plans: [], today: '2026-11-24' }),
+    nombre: 'Planificación 1',
+    productos: ['mine'],
+    desayunos: { opciones: [{ id: 'x', titulo: 'Tostada', alimentos: 'Pan' }], nota: '', productos: [] },
+  });
+
+  it('copies only the chosen sections and leaves the rest as it was', () => {
+    const src = { ...samplePlanificacion(), id: 'gemels', productos: ['theirs'] };
+    const before = target();
+    const out = copySections(before, src, ['menu', 'merienda']);
+    expect(out.menu.dias[0].comida.a.titulo).toBe('Rostidera de sepia + ensalada');
+    expect(out.merienda.opciones.map(o => o.titulo)).toEqual(src.merienda.opciones.map(o => o.titulo));
+    expect(out.merienda.opciones[0].id).not.toBe(src.merienda.opciones[0].id);
+    // Untouched
+    expect(out.desayunos).toBe(before.desayunos);
+    expect(out.productos).toEqual(['mine']);
+    expect(out).toMatchObject({ clienteId: 'novio', nombre: 'Planificación 1' });
+    // Editing the copy does not touch the original
+    out.menu.dias[0].comida.a.titulo = 'Otro';
+    expect(src.menu.dias[0].comida.a.titulo).toBe('Rostidera de sepia + ensalada');
+  });
+
+  it('carries the PDF visibility of a copied section only', () => {
+    const src = { ...samplePlanificacion(), secciones: { ...samplePlanificacion().secciones, menu: false, merienda: false } };
+    const out = copySections(target(), src, ['menu']);
+    expect(out.secciones.menu).toBe(false);
+    expect(out.secciones.merienda).toBe(true);
+  });
+
+  it('copying every section is the whole copy, as before', () => {
+    const src = { ...samplePlanificacion(), orden: ['menu', 'desayunos'] };
+    const out = copySections(target(), src, copyableSections(src));
+    expect(out.orden[0]).toBe('menu');
+    expect(out.productos).toEqual([]);
+  });
+
+  it('offers sport sections only from a sport plan, and never copies the weight', () => {
+    expect(copyableSections(samplePlanificacion())).not.toContain('entrenos');
+    const sport = sampleDeportiva();
+    expect(copyableSections(sport)).toEqual(expect.arrayContaining(['entrenos', 'competicion']));
+
+    // Breakfasts only: the general plan stays general
+    expect(copySections(target(), sport, ['desayunos']).tipo).toBe('general');
+
+    // Training sessions: it becomes a sport plan with its own weight
+    const out = copySections(target(), sport, ['entrenos'], { peso: 82.5 });
+    expect(out.tipo).toBe('deportiva');
+    expect(out.sesiones.map(x => x.nombre)).toEqual(sport.sesiones.map(x => x.nombre));
+    expect(out.deporte).toEqual({ peso: '82.5', disciplina: sport.deporte.disciplina });
+    expect(copySections({ ...target(), deporte: { peso: '60', disciplina: '' } }, sport, copyableSections(sport), { peso: 82.5 }).deporte.peso).toBe('60');
   });
 });
 

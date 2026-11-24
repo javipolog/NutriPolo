@@ -145,7 +145,7 @@ const INDEX_DESC = {
   cantidades:  () => 'Lo que es una ración para ti. No es el máximo diario: es la cantidad que pones cada vez que tomas ese alimento.',
   competicion: (p) => `Qué comer el día antes${p.competicion?.nombre ? ` de ${p.competicion.nombre}` : ''}, el mismo día, durante la prueba y después.`,
   menu:        () => 'De lunes a domingo, con dos opciones (A y B) por comida y cena. Los platos subrayados te llevan a la receta.',
-  productos:   (p) => `Productos que aparecen en tu menú${p.supermercado ? `, de ${p.supermercado}` : ''}.`,
+  productos:   () => 'Productos que aparecen en tu menú.',
 };
 
 const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -625,7 +625,7 @@ export async function generatePlanificacionPDF(plan, client, config, { products 
     const { width: W } = page.getSize();
     const m = MARGIN;
     const meta = metaFor(key);
-    const sub = key === 'productos' && p.supermercado ? `Los de tu planificación son de ${p.supermercado}.` : meta.sub;
+    const sub = meta.sub;
     const showSub = sub && !continued;
     const h = HERO_H;
     const ts = T.title;
