@@ -6,7 +6,7 @@ Aplicacio d'escriptori per a Windows 11 per a la gestio de consultes de nutricio
 
 **Autor:** Javier Polo Garcia
 **Llicencia:** MIT
-**Versio:** 1.19.1
+**Versio:** 1.19.2
 **Identificador:** com.nutripolo.app
 
 ---
