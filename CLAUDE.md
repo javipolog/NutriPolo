@@ -96,6 +96,7 @@ nutripolo-app/
 │   │   ├── genericFoods.js           # Aliments genèrics amb foto (pur, amb tests)
 │   │   ├── fuzzyMatcher.js           # Quin pacient es cada cita importada (pur, amb tests)
 │   │   ├── pdfFonts.js               # Fonts dels PDF (Onest) i fetch amb cache
+│   │   ├── pdfLogo.js                # Marca NutriPolo vectorial per als PDF (planificacions i factures)
 │   │   ├── invoicing.js              # Factures: esborrany → emesa, rectificatives, llibre d'ingressos (pur, amb tests)
 │   │   ├── pdfInvoiceGenerator.js    # Generacio PDF factures (pdf-lib)
 │   │   ├── pdfPlanGenerator.js       # Generacio PDF plans antics per àpats (pdf-lib)
@@ -283,6 +284,7 @@ fn cancel_quit()                                      // el JS es queda obert (c
 - Regles a `services/invoicing.js` (pures, amb tests). Una factura és **esborrany** (sense número, editable i esborrable) fins que s'**emet** (`issueInvoice`): llavors pren el número següent de la seva sèrie i any (`NP-AAAA-NNN`, rectificatives `R-AAAA-NNN`) i desa les dades de l'emissora i de la clienta tal com són aquell dia (`emisor`, `destinatario`). El PDF d'una emesa surt sempre d'aquestes dades, encara que la fitxa canviï o s'esborri
 - Una emesa no s'edita ni s'esborra: només `PAYMENT_FIELDS` (estat de cobrament, `fechaCobro`, forma de pagament). Per corregir-la: «Rectificar» (`createCorrectiveDraft`, línies en negatiu i `motivoRectificacion`); si l'anul·la sencera, l'original passa a `anulada` i allibera les seves consultes (`billedConsultationIds`)
 - Abans d'emetre (`issueProblems`): NIF propi; amb IRPF, NIF i adreça de la clienta; data no anterior a l'última de la sèrie; motiu a les rectificatives
+- PDF (`pdfInvoiceGenerator.js`): marca (logo d'Ajustos o la de NutriPolo) i títol «Factura» amb número i data, professional | client, taula de conceptes (continua a la pàgina següent), forma de pagament (IBAN si és transferència) al costat dels totals, i a sota rectificació, notes i exempció. Escala `T`, colors del disseny triat (`validateDesign`); la miniatura d'Ajustos (`InvoiceDesignSection`) l'imita i s'ha de canviar amb ell
 - IVA 0 % → menció d'exempció al PDF (`config.textoExencionIva`, si és buit `DEFAULT_VAT_EXEMPTION_TEXT`). IBAN a Ajustos (`isValidIban`), surt amb transferència
 - Llibre d'ingressos en CSV (`incomeBookCsv`: `;`, coma decimal, BOM) i xifres del període per any/trimestre (`periodTotals`; les anul·lades a mà d'abans de la v17 no compten). La migració v17 dona per emeses les factures anteriors amb les dades d'aquell moment
 - Pendent de decidir amb el gestor: VeriFactu, mòdul de despeses, bons/packs vinculats a consultes, model 347

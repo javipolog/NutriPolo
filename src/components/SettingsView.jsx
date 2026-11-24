@@ -1577,73 +1577,87 @@ const InvoiceDesignSection = () => {
     </div>
   );
 
-  // ── HTML Preview ──
+  // ── HTML Preview (mirrors pdfInvoiceGenerator) ──
   const preview = () => {
     const c = design.colors;
+    const caps = { fontSize: 6, fontWeight: 600, letterSpacing: 0.8, textTransform: 'uppercase' };
+    const row = (label, value) => (
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 7, color: c.secondary, padding: '1px 8px' }}>
+        <span>{label}</span><span style={{ color: c.primary }}>{value}</span>
+      </div>
+    );
     return (
-      <div className="border border-sage-200 rounded-soft overflow-hidden bg-white" style={{ maxWidth: 360 }}>
-        <div style={{ transform: 'scale(0.55)', transformOrigin: 'top left', width: '182%', height: 320 }}>
-          {/* Accent bar */}
-          <div style={{ height: 6, background: c.accent }} />
-          {/* Header */}
-          <div style={{ padding: '12px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
+      <div className="border border-sage-200 rounded-soft overflow-hidden bg-white" style={{ maxWidth: 360, height: 182 }}>
+        <div style={{ transform: 'scale(0.55)', transformOrigin: 'top left', width: '182%', height: 330, fontFamily: 'Onest, sans-serif' }}>
+          <div style={{ height: 4, background: c.accent }} />
+          {/* Brand + title */}
+          <div style={{ padding: '14px 22px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               {design.logo?.data ? (
-                <img src={design.logo.data} alt="Logo" style={{ maxHeight: 36, maxWidth: 140 }} />
+                <img src={design.logo.data} alt="Logo" style={{ maxHeight: 34, maxWidth: 140 }} />
               ) : (
-                <span style={{ fontFamily: 'Onest, sans-serif', fontSize: 20, fontWeight: 700, color: c.accent, letterSpacing: 3 }}>NUTRIPOLO</span>
+                <img src="/icon-nutripolo.svg" alt="" style={{ width: 30, height: 30 }} />
               )}
-              {design.showTagline && (
-                <div style={{ fontSize: 7, color: c.muted, marginTop: 2 }}>{design.taglineText}</div>
-              )}
+              <div>
+                {!design.logo?.data && <div style={{ fontSize: 14, fontWeight: 700, color: c.primary, lineHeight: 1 }}>NutriPolo</div>}
+                {design.showTagline && <div style={{ fontSize: 7, color: c.muted, marginTop: 2 }}>{design.taglineText}</div>}
+              </div>
             </div>
-            <div style={{ textAlign: 'right', fontSize: 8, color: c.accent, fontWeight: 600 }}>
-              <div>N FACTURA</div>
-              <div style={{ color: c.primary }}>NP-2026-001</div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 17, fontWeight: 600, color: c.primary, lineHeight: 1 }}>Factura</div>
+              <div style={{ display: 'flex', gap: 14, marginTop: 6, fontSize: 7 }}>
+                <span style={{ ...caps, color: c.muted }}>Nº factura</span>
+                <span style={{ fontWeight: 600, color: c.primary }}>NP-2026-001</span>
+              </div>
             </div>
           </div>
-          {/* Section labels */}
-          <div style={{ padding: '0 20px', display: 'flex', gap: 20 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 8, fontWeight: 700, color: c.accent, borderBottom: `2px solid ${c.accentMid}`, paddingBottom: 3, marginBottom: 4 }}>PROFESIONAL</div>
-              <div style={{ fontSize: 7, color: c.primary }}>Raquel Polo Garcia</div>
-              <div style={{ fontSize: 7, color: c.secondary }}>NIF: 12345678A</div>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 8, fontWeight: 700, color: c.accent, borderBottom: `2px solid ${c.accentMid}`, paddingBottom: 3, marginBottom: 4 }}>CLIENTE</div>
-              <div style={{ fontSize: 7, color: c.primary }}>Maria Lopez</div>
-              <div style={{ fontSize: 7, color: c.secondary }}>NIF: 87654321B</div>
-            </div>
-          </div>
-          {/* Items table */}
-          <div style={{ padding: '10px 20px' }}>
-            <div style={{ display: 'flex', background: c.accentLight, padding: '4px 6px', fontSize: 7, fontWeight: 600, color: c.muted }}>
-              <span style={{ flex: 3 }}>SERVICIO</span>
-              <span style={{ flex: 1, textAlign: 'right' }}>CANT.</span>
-              <span style={{ flex: 1, textAlign: 'right' }}>PRECIO</span>
-              <span style={{ flex: 1, textAlign: 'right' }}>IMPORTE</span>
-            </div>
-            {[['Primera visita', '1', '60,00', '60,00'], ['Seguimiento', '2', '40,00', '80,00']].map(([desc, qty, price, amt], i) => (
-              <div key={i} style={{ display: 'flex', padding: '4px 6px', fontSize: 7, color: c.primary, background: i % 2 ? c.cardBg : 'transparent' }}>
-                <span style={{ flex: 3 }}>{desc}</span>
-                <span style={{ flex: 1, textAlign: 'right' }}>{qty}</span>
-                <span style={{ flex: 1, textAlign: 'right' }}>{price} &euro;</span>
-                <span style={{ flex: 1, textAlign: 'right' }}>{amt} &euro;</span>
+          <div style={{ margin: '0 22px', borderTop: `1px solid ${c.accentMid}` }} />
+          {/* Parties */}
+          <div style={{ padding: '10px 22px 0', display: 'flex', gap: 22 }}>
+            {[['Profesional', config.nombre || 'Tu nombre', 'NIF: 00000000T'], ['Cliente', 'María López', 'NIF: 11111111H']].map(([label, name, nif]) => (
+              <div key={label} style={{ flex: 1 }}>
+                <div style={{ ...caps, color: c.accentDark }}>{label}</div>
+                <div style={{ fontSize: 8, fontWeight: 600, color: c.primary, marginTop: 3 }}>{name}</div>
+                <div style={{ fontSize: 7, color: c.secondary }}>{nif}</div>
               </div>
             ))}
           </div>
-          {/* Totals */}
-          <div style={{ padding: '6px 20px' }}>
-            <div style={{ background: c.accentLight, padding: '6px 10px', borderRadius: 4, textAlign: 'right' }}>
-              <div style={{ fontSize: 7, color: c.secondary }}>Base: 140,00 &euro; &middot; IVA 21%: 29,40 &euro;</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: c.accentDark, marginTop: 2 }}>TOTAL: 169,40 &euro;</div>
+          {/* Lines */}
+          <div style={{ padding: '12px 22px 0' }}>
+            <div style={{ display: 'flex', ...caps, color: c.muted, paddingBottom: 4, borderBottom: `1px solid ${c.accent}` }}>
+              <span style={{ flex: 3 }}>Concepto</span>
+              <span style={{ flex: 1, textAlign: 'center' }}>Cant.</span>
+              <span style={{ flex: 1, textAlign: 'right' }}>Precio</span>
+              <span style={{ flex: 1, textAlign: 'right' }}>Importe</span>
+            </div>
+            {[['Primera visita', '1', '60,00', '60,00'], ['Seguimiento', '2', '40,00', '80,00']].map(([desc, qty, price, amt]) => (
+              <div key={desc} style={{ display: 'flex', padding: '5px 0', fontSize: 7, color: c.primary, borderBottom: '1px solid #ECE9E2' }}>
+                <span style={{ flex: 3 }}>{desc}</span>
+                <span style={{ flex: 1, textAlign: 'center', color: c.secondary }}>{qty}</span>
+                <span style={{ flex: 1, textAlign: 'right', color: c.secondary }}>{price} &euro;</span>
+                <span style={{ flex: 1, textAlign: 'right', fontWeight: 500 }}>{amt} &euro;</span>
+              </div>
+            ))}
+          </div>
+          {/* Payment + totals */}
+          <div style={{ padding: '10px 22px 0', display: 'flex', justifyContent: 'space-between', gap: 22 }}>
+            <div>
+              <div style={{ ...caps, color: c.muted }}>Forma de pago</div>
+              <div style={{ fontSize: 7, fontWeight: 600, color: c.primary, marginTop: 3 }}>Bizum</div>
+            </div>
+            <div style={{ width: 150 }}>
+              {row('Base imponible', '140,00 €')}
+              {row('IVA', 'Exento')}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: c.accentLight, borderRadius: 4, padding: '6px 8px', marginTop: 3 }}>
+                <span style={{ ...caps, color: c.accentDark }}>Total</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: c.accentDark }}>140,00 &euro;</span>
+              </div>
             </div>
           </div>
           {/* Footer */}
-          <div style={{ marginTop: 8, padding: '6px 20px', borderTop: `1px solid ${c.accentMid}`, fontSize: 6, color: c.muted, display: 'flex', justifyContent: 'space-between' }}>
-            <span>NUTRIPOLO</span>
-            <span>nutripoloraquel@gmail.com</span>
-            <span>Pag. 1 de 1</span>
+          <div style={{ margin: '16px 22px 0', paddingTop: 5, borderTop: '1px solid #D9D5CC', fontSize: 6, color: c.muted, display: 'flex', justifyContent: 'space-between' }}>
+            <span>{[config.nombre, config.email].filter(Boolean).join('  ·  ')}</span>
+            <span>Pág. 1 de 1</span>
           </div>
         </div>
       </div>
