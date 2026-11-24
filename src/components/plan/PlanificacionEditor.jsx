@@ -10,7 +10,8 @@ import { Button, SegmentedControl, Combobox, useToast, useConfirm, useDialogA11y
 import useStore, { todayISO, generateId, errMsg } from '../../stores/store';
 import { useT } from '../../i18n';
 import {
-  createPlanificacion, latestPlanificacion, normalizePlanificacion, copyContent, buildDishIndex, collectOwnRecipes,
+  createPlanificacion, latestPlanificacion, normalizePlanificacion, copyContent, copySections, copyableSections,
+  buildDishIndex, collectOwnRecipes,
   normalizeOrder, moveSection, moveSectionTo, isDefaultOrder, SECTION_ORDER,
   emptyOption, emptyDish, isDishEmpty, linesOf, safeUrl, planificacionStats, planFoods, dishKey,
   DEFAULT_CANTIDADES, DEFAULT_CANTIDADES_NOTA, WEEK_DAYS, MENU_SLOTS, MENU_VARIANTS, PLAN_FORMAT,
@@ -30,6 +31,17 @@ import { FIELD, LABEL, IconBtn, move, rowsFor } from './editorParts';
 import { SportGeneralFields, EntrenosEditor, CompeticionEditor, competicionCount } from './SportEditors';
 
 const NO_RECIPES = [];
+
+// Elements d'una secció (al menú lateral i en triar què copiar); null si és buida
+const sectionCount = (p, id) => {
+  if (id === 'menu') return planificacionStats(p).platos || null;
+  if (id === 'productos') return p.productos.length || null;
+  if (id === 'cantidades') return p.cantidades.grupos.length || null;
+  if (id === 'entrenos') return p.sesiones.length || null;
+  if (id === 'competicion') return competicionCount(p.competicion) || null;
+  if (p[id]?.opciones) return p[id].opciones.filter(o => o.titulo?.trim()).length || null;
+  return null;
+};
 
 // `sport`: només a les planificacions esportives
 const SECTIONS = [
@@ -685,7 +697,17 @@ const ProductsEditor = ({ selected, onChange, foods }) => {
 // ─────────────────────────────────────────────────────────────
 const GeneralEditor = ({ form, patch, client, origin, onCopyFrom, otherPlans, onTipo, lastWeight }) => {
   const t = useT();
+  const plans = useStore(s => s.nutritionPlans);
   const [copyId, setCopyId] = useState('');
+  // Seccions a copiar: cap de marcada, perquè no se substitueixi res sense voler
+  const [picked, setPicked] = useState([]);
+  const src = useMemo(() => {
+    const p = plans.find(x => x.id === copyId);
+    return p ? normalizePlanificacion(p) : null;
+  }, [plans, copyId]);
+  const copyKeys = src ? copyableSections(src) : [];
+  const allPicked = copyKeys.length > 0 && copyKeys.every(k => picked.includes(k));
+  const togglePick = (k) => setPicked(p => (p.includes(k) ? p.filter(x => x !== k) : [...p, k]));
   return (
     <div className="space-y-5">
       <p className="text-sm text-sage-600 bg-wellness-50 border border-wellness-100 rounded-soft px-4 py-3 flex gap-2">
@@ -734,10 +756,47 @@ const GeneralEditor = ({ form, patch, client, origin, onCopyFrom, otherPlans, on
           <p className={LABEL}>{t.pf_copy_from}</p>
           <div className="flex gap-2 items-start">
             <div className="flex-1">
-              <Combobox options={otherPlans} value={copyId} onChange={setCopyId} placeholder={t.pf_copy_from} />
+              <Combobox options={otherPlans} value={copyId} onChange={(id) => { setCopyId(id); setPicked([]); }} placeholder={t.pf_copy_from} />
             </div>
-            <Button variant="secondary" icon={Copy} disabled={!copyId} onClick={() => onCopyFrom(copyId)}>{t.pf_copy_apply}</Button>
+            <Button
+              variant="secondary"
+              icon={Copy}
+              disabled={!src || !picked.length}
+              onClick={async () => { if (await onCopyFrom(copyId, copyKeys.filter(k => picked.includes(k)))) setPicked([]); }}
+            >
+              {t.pf_copy_apply}
+            </Button>
           </div>
+          {src && (
+            <div className="mt-3" role="group" aria-labelledby="pf-copy-which">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p id="pf-copy-which" className="text-sm text-sage-600">{t.pf_copy_which}</p>
+                <button
+                  type="button"
+                  onClick={() => setPicked(allPicked ? [] : copyKeys)}
+                  className="text-sm font-medium text-wellness-600 hover:text-wellness-700 hover:underline"
+                >
+                  {allPicked ? t.pf_copy_none : t.pf_copy_all}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {copyKeys.map(k => {
+                  const on = picked.includes(k);
+                  const n = sectionCount(src, k);
+                  return (
+                    <label
+                      key={k}
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-button border text-sm cursor-pointer transition-colors ${on ? 'border-wellness-400 bg-wellness-50 text-sage-900' : 'border-sage-200 bg-white text-sage-700 hover:border-sage-300'}`}
+                    >
+                      <input type="checkbox" checked={on} onChange={() => togglePick(k)} className="w-4 h-4 accent-wellness-400" />
+                      {t[`pf_section_${k}`]}
+                      <span className="text-xs text-sage-500 tabular-nums">{n ?? '—'}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -879,17 +938,18 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
     return next;
   });
 
-  const copyFrom = async (id) => {
+  // Copia només les seccions triades d'una altra planificació; la resta no es toca
+  const copyFrom = async (id, keys) => {
     const src = plans.find(p => p.id === id);
-    if (!src || !(await confirm({ message: t.pf_copy_confirm.replace('{name}', src.nombre), danger: true }))) return;
+    if (!src || !keys?.length) return false;
+    const names = keys.map(sectionLabel).join(', ');
+    if (!(await confirm({ message: t.pf_copy_confirm.replace('{sections}', names).replace('{name}', src.nombre), danger: true }))) return false;
     addToBaseline(copyContent(src));
     // El pes no es copia (pot ser d'un altre client): es queda el d'aquesta o el de l'últim pesatge
-    update(f => {
-      const c = copyContent(src);
-      return { ...f, ...c, deporte: { ...c.deporte, peso: f.deporte?.peso || (lastWeight ? String(lastWeight.peso) : '') } };
-    });
+    update(f => copySections(f, src, keys, { peso: lastWeight?.peso }));
     setState(s => ({ ...s, origin: src.nombre }));
     toast.success(t.pf_copy_done);
+    return true;
   };
 
   const generate = async () => {
@@ -924,17 +984,7 @@ export const PlanificacionEditor = ({ plan, defaultClientId, basePlan, onClose }
   };
 
   const sectionLabel = (id) => t[`pf_section_${id}`];
-  const stats = form ? planificacionStats(form) : null;
-  const countFor = (id) => {
-    if (!form) return null;
-    if (id === 'menu') return stats.platos || null;
-    if (id === 'productos') return form.productos.length || null;
-    if (id === 'cantidades') return form.cantidades.grupos.length || null;
-    if (id === 'entrenos') return form.sesiones.length || null;
-    if (id === 'competicion') return competicionCount(form.competicion) || null;
-    if (form[id]?.opciones) return form[id].opciones.filter(o => o.titulo?.trim()).length || null;
-    return null;
-  };
+  const countFor = (id) => (form ? sectionCount(form, id) : null);
 
   // Seccions al menú lateral: Dades generals i després les altres en l'ordre del PDF.
   // Mentre s'arrossega una secció, l'ordre és local (`dragOrder`) i la llista es
