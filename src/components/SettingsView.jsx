@@ -1226,7 +1226,9 @@ const SecuritySection = () => {
       setSetupOpen(false);
       setNewPw(''); setConfirmPw(''); setAckLoss(false);
     } catch (e) {
-      toast.error(t.security_enable_error.replace('{error}', errMsg(e)));
+      const msg = errMsg(e);
+      // A copy to Google Drive was still being sent: encrypting waits for it
+      toast.error(t.security_enable_error.replace('{error}', msg === 'drive_upload_in_progress' ? t.security_drive_busy : msg));
     } finally {
       setBusy(false);
     }

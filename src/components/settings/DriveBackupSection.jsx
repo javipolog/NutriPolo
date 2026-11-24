@@ -4,7 +4,7 @@ import { Button, useToast, useConfirm } from '../UI';
 import useStore, { errMsg } from '../../stores/store';
 import { useT, useLocale } from '../../i18n';
 import { driveBackupStatus, uploadDriveBackup, listDriveCopies, loadDriveCopy } from '../../services/driveBackupService';
-import { driveFileDate, DRIVE_KEEP_DAYS } from '../../services/backupPolicy';
+import { driveFileDate, DRIVE_KEEP_DAYS, hasDriveScope } from '../../services/backupPolicy';
 import { googleCalendar } from '../../services/googleCalendarService';
 import { Toggle } from './SettingsFields';
 
@@ -24,6 +24,13 @@ export function DriveBackupSection({ onRestored }) {
   const updateConfig = useStore(s => s.updateConfig);
   const applyBackup = useStore(s => s.applyBackup);
   const canReconnect = useStore(s => googleCalendar.canReconnect(s.config.googleCalendar));
+  // Restoring only needs Google with the Drive permission: it stays available
+  // with the uploads switched off or held by encryption (it writes through
+  // the local store, encrypted when encryption is on).
+  const canRestore = useStore(s => {
+    const gc = s.config.googleCalendar || {};
+    return !!gc.connected && !gc.needsReauth && hasDriveScope(gc.grantedScopes);
+  });
   const [uploading, setUploading] = useState(false);
   const [copies, setCopies] = useState(null);
   const [selected, setSelected] = useState('');
@@ -131,33 +138,37 @@ export function DriveBackupSection({ onRestored }) {
           {drive.lastError && (
             <p role="alert" className="text-xs text-danger">{t[drive.lastError] || drive.lastError}</p>
           )}
-          <div className="flex flex-wrap items-center gap-2">
+        </>
+      )}
+      {(canRestore || (enabled && !reason)) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {enabled && !reason && (
             <Button variant="ghost" size="sm" icon={UploadCloud} onClick={uploadNow} disabled={uploading || busy}>
               {uploading ? <Loader2 size={13} className="animate-spin" /> : t.drive_backup_now}
             </Button>
-            {copies === null ? (
-              <Button variant="ghost" size="sm" icon={RotateCcw} onClick={showCopies} disabled={busy || uploading}>
-                {busy ? <Loader2 size={13} className="animate-spin" /> : t.drive_backup_restore}
+          )}
+          {copies === null ? (
+            <Button variant="ghost" size="sm" icon={RotateCcw} onClick={showCopies} disabled={busy || uploading}>
+              {busy ? <Loader2 size={13} className="animate-spin" /> : t.drive_backup_restore}
+            </Button>
+          ) : copies.length === 0 ? (
+            <span className="text-xs text-sage-500">{t.drive_backup_no_copies}</span>
+          ) : (
+            <>
+              <select
+                value={selected}
+                onChange={e => setSelected(e.target.value)}
+                aria-label={t.drive_backup_restore}
+                className="text-xs border border-sage-300 rounded-button px-2 py-1.5 bg-white text-sage-700 focus:border-wellness-400 focus:ring-1 focus:ring-wellness-400 outline-none"
+              >
+                {copies.map(f => <option key={f.id} value={f.id}>{copyLabel(f)}</option>)}
+              </select>
+              <Button variant="ghost" size="sm" icon={RotateCcw} onClick={restore} disabled={busy || !selected}>
+                {busy ? <Loader2 size={13} className="animate-spin" /> : t.backup_restore_action}
               </Button>
-            ) : copies.length === 0 ? (
-              <span className="text-xs text-sage-500">{t.drive_backup_no_copies}</span>
-            ) : (
-              <>
-                <select
-                  value={selected}
-                  onChange={e => setSelected(e.target.value)}
-                  aria-label={t.drive_backup_restore}
-                  className="text-xs border border-sage-300 rounded-button px-2 py-1.5 bg-white text-sage-700 focus:border-wellness-400 focus:ring-1 focus:ring-wellness-400 outline-none"
-                >
-                  {copies.map(f => <option key={f.id} value={f.id}>{copyLabel(f)}</option>)}
-                </select>
-                <Button variant="ghost" size="sm" icon={RotateCcw} onClick={restore} disabled={busy || !selected}>
-                  {busy ? <Loader2 size={13} className="animate-spin" /> : t.backup_restore_action}
-                </Button>
-              </>
-            )}
-          </div>
-        </>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

@@ -12,9 +12,11 @@ vi.mock('@tauri-apps/api/tauri', () => ({
         const fid = id(); drive.folders[fid] = args.name; return fid;
       }
       case 'gdrive_list_files':
+        if (drive.encryptWhileListing) drive.encrypted = true;
         if (!drive.folders[args.folderId]) throw 'Drive list failed (404) [notFound]: File not found';
         return Object.values(drive.files).filter(f => f.parent === args.folderId);
       case 'gdrive_upload_file': {
+        if (drive.backendEncrypted) throw 'drive_encrypted';
         if (args.fileId && drive.files[args.fileId]) {
           drive.files[args.fileId].content = args.content;
           return drive.files[args.fileId];
@@ -25,7 +27,9 @@ vi.mock('@tauri-apps/api/tauri', () => ({
       }
       case 'gdrive_delete_file': delete drive.files[args.fileId]; return null;
       case 'gdrive_download_file': return drive.files[args.fileId].content;
-      case 'encryption_is_enabled': return drive.encrypted;
+      case 'encryption_is_enabled':
+        if (drive.encryptionCheckFails) throw new Error('ipc');
+        return drive.encrypted;
       default: return null;
     }
   }),
@@ -54,6 +58,7 @@ const contentOf = (name) => JSON.parse(Object.values(drive.files).find(f => f.na
 
 beforeEach(() => {
   drive.folders = {}; drive.files = {}; drive.nextId = 1; drive.encrypted = false;
+  drive.encryptWhileListing = false; drive.backendEncrypted = false; drive.encryptionCheckFails = false;
   useStore.setState({ ...initial, config: connected(), clients: many(12), consultations: [{ id: 'c1' }] }, true);
 });
 
@@ -116,6 +121,25 @@ describe('Google Drive copy', () => {
     expect(filesNamed()).toEqual([]);
     drive.encrypted = false;
     expect(await uploadDriveBackup()).toEqual({ ok: true });
+  });
+
+  it('checks again right before sending: encryption turned on meanwhile stops the upload', async () => {
+    drive.encryptWhileListing = true;
+    expect(await uploadDriveBackup()).toMatchObject({ ok: false, skipped: true, reason: 'encrypted' });
+    expect(filesNamed()).toEqual([]);
+    expect(useStore.getState().driveBackup.vaultEncrypted).toBe(true);
+  });
+
+  it('takes the backend refusing an encrypted store as held, not as an error', async () => {
+    drive.backendEncrypted = true;
+    expect(await uploadDriveBackup()).toMatchObject({ ok: false, skipped: true, reason: 'encrypted' });
+    expect(useStore.getState().driveBackup.lastError).toBeNull();
+  });
+
+  it('does not upload when it cannot tell whether the data is encrypted', async () => {
+    drive.encryptionCheckFails = true;
+    expect(await uploadDriveBackup()).toMatchObject({ skipped: true, reason: 'encrypted' });
+    expect(filesNamed()).toEqual([]);
   });
 
   it('waits for the Drive permission, and does nothing with no data or switched off', async () => {

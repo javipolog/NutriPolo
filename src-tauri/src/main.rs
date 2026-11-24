@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tauri::{CustomMenuItem, Manager, SystemTray, SystemTrayEvent, SystemTrayMenu, SystemTrayMenuItem, WindowEvent};
 use base64::Engine as _;
@@ -71,6 +71,28 @@ fn validate_path_component(name: &str, label: &str) -> Result<(), String> {
         return Err(format!("invalid_{}", label));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod drive_gate_tests {
+    use super::*;
+
+    #[test]
+    fn uploads_and_encryption_setup_never_overlap() {
+        // An upload in flight holds the setup back
+        let upload = drive_upload_gate(|| false).expect("allowed before encryption");
+        assert!(hold_drive_uploads(std::time::Duration::from_millis(120)).is_err());
+        drop(upload);
+        // Once the setup is under way no upload starts, and none counts as in flight
+        let setup = hold_drive_uploads(std::time::Duration::from_millis(120)).expect("nothing in flight");
+        assert_eq!(drive_upload_gate(|| false).err().as_deref(), Some("drive_encrypted"));
+        assert_eq!(DRIVE_UPLOADS.load(Ordering::SeqCst), 0);
+        drop(setup);
+        // With encryption on, refused; after it, allowed again
+        assert!(drive_upload_gate(|| true).is_err());
+        assert!(drive_upload_gate(|| false).is_ok());
+        assert_eq!(DRIVE_UPLOADS.load(Ordering::SeqCst), 0);
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +170,63 @@ fn vault_read() -> RwLockReadGuard<'static, ()> {
 
 fn vault_write() -> RwLockWriteGuard<'static, ()> {
     VAULT.write().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Drive uploads in flight, and whether encryption is being turned on. The
+/// vault lock cannot be held across an upload (an await), so: an upload
+/// counts itself in and then checks; enabling encryption raises the flag and
+/// then waits for the count to reach zero. Either the upload sees the flag
+/// (refused) or the setup sees the upload (waits): nothing leaves in plain
+/// text once encryption starts.
+static DRIVE_UPLOADS: AtomicUsize = AtomicUsize::new(0);
+static ENCRYPTING: AtomicBool = AtomicBool::new(false);
+
+/// Held for the whole upload; counts it out when dropped.
+pub(crate) struct DriveUploadGuard;
+
+impl Drop for DriveUploadGuard {
+    fn drop(&mut self) {
+        DRIVE_UPLOADS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+fn drive_upload_gate(encrypted: impl FnOnce() -> bool) -> Result<DriveUploadGuard, String> {
+    DRIVE_UPLOADS.fetch_add(1, Ordering::SeqCst);
+    let guard = DriveUploadGuard;
+    if ENCRYPTING.load(Ordering::SeqCst) || encrypted() {
+        return Err("drive_encrypted".to_string());
+    }
+    Ok(guard)
+}
+
+/// Start a Drive upload, refused (`drive_encrypted`) while encryption is on
+/// or being turned on.
+pub(crate) fn begin_drive_upload(app_handle: &tauri::AppHandle) -> Result<DriveUploadGuard, String> {
+    drive_upload_gate(|| encryption_is_enabled_internal(app_handle))
+}
+
+/// Raised while encryption is being turned on; lowered when the setup ends.
+struct EncryptingGuard;
+
+impl Drop for EncryptingGuard {
+    fn drop(&mut self) {
+        ENCRYPTING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Stop new Drive uploads and wait for the ones in flight (their HTTP
+/// timeout is 180 s). Fails rather than encrypting with one still going.
+fn hold_drive_uploads(max_wait: std::time::Duration) -> Result<EncryptingGuard, String> {
+    ENCRYPTING.store(true, Ordering::SeqCst);
+    let guard = EncryptingGuard;
+    let start = std::time::Instant::now();
+    while DRIVE_UPLOADS.load(Ordering::SeqCst) > 0 {
+        if start.elapsed() > max_wait {
+            return Err("drive_upload_in_progress".to_string());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    Ok(guard)
 }
 
 #[tauri::command]
@@ -639,6 +718,8 @@ fn encryption_setup(app_handle: tauri::AppHandle, password: String) -> Result<()
     if password.len() < 8 {
         return Err("password_too_short".into());
     }
+    // No Drive upload may be sending plain text while the data gets encrypted
+    let _no_uploads = hold_drive_uploads(std::time::Duration::from_secs(200))?;
     let _vault = vault_write();
     let dir = get_data_dir(&app_handle);
     fs::create_dir_all(&dir).map_err(|e| sanitize_err(e, "data_dir_create_failed"))?;
