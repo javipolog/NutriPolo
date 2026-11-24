@@ -144,7 +144,6 @@ const cloneOptions = (sec) => ({
 /** Contingut (sense metadades) d'una planificació, copiat amb ids nous. */
 export function copyContent(src) {
   return {
-    supermercado: src.supermercado || '',
     secciones: { ...DEFAULT_SECCIONES, ...(src.secciones || {}) },
     desayunos: cloneOptions(src.desayunos),
     mediaManana: cloneOptions(src.mediaManana),
@@ -163,6 +162,43 @@ export function copyContent(src) {
   };
 }
 
+/** Seccions que es poden copiar d'una planificació (les esportives, només d'una esportiva). */
+export function copyableSections(src) {
+  return SECTION_ORDER.filter(k => (k !== 'entrenos' && k !== 'competicion') || isDeportiva(src));
+}
+
+/**
+ * Copia a `target` només les seccions `keys` de `src` (ids nous); la resta de
+ * `target` no es toca. Si es copien totes, és una còpia sencera: també l'ordre,
+ * el tipus i les seccions esportives (buides si `src` és general). Copiar entrenaments o competició d'una
+ * esportiva fa esportiva la de destinació. El pes no es copia mai (pot ser
+ * d'un altre client): es queda el de `target` o, si no en té, `peso`.
+ */
+export function copySections(target, src, keys, { peso = '' } = {}) {
+  const c = copyContent(src);
+  const pick = new Set(keys);
+  const next = { ...target, secciones: { ...DEFAULT_SECCIONES, ...(target.secciones || {}) } };
+  SECTION_ORDER.forEach(k => {
+    if (!pick.has(k)) return;
+    const field = k === 'entrenos' ? 'sesiones' : k;
+    next[field] = c[field];
+    next.secciones[k] = c.secciones[k];
+  });
+  if (copyableSections(src).every(k => pick.has(k))) {
+    // Còpia sencera: també les seccions esportives (buides si l'origen és general),
+    // perquè no en quedin d'amagades que tornin en passar a esportiva
+    Object.assign(next, { orden: c.orden, tipo: c.tipo, deporte: c.deporte, sesiones: c.sesiones, competicion: c.competicion });
+    next.secciones.entrenos = c.secciones.entrenos;
+    next.secciones.competicion = c.secciones.competicion;
+  } else if (c.tipo === TIPO_DEPORTIVA && (pick.has('entrenos') || pick.has('competicion'))) {
+    next.tipo = TIPO_DEPORTIVA;
+    next.deporte = { ...emptyDeporte(), ...(target.deporte || {}) };
+    if (!String(next.deporte.disciplina || '').trim()) next.deporte.disciplina = c.deporte.disciplina;
+  }
+  next.deporte = { ...emptyDeporte(), ...(next.deporte || {}), peso: target.deporte?.peso || (peso ? String(peso) : '') };
+  return next;
+}
+
 /** Garanteix els 7 dies amb A/B per dinar i sopar, conservant el que hi hagi. */
 export function normalizeWeek(dias) {
   const byId = Object.fromEntries((dias || []).map(d => [d.id, d]));
@@ -178,7 +214,6 @@ export function normalizeWeek(dias) {
 
 export function defaultContent() {
   return {
-    supermercado: 'Mercadona',
     secciones: { ...DEFAULT_SECCIONES },
     desayunos: { opciones: [emptyOption()], nota: '', productos: [] },
     mediaManana: { opciones: [emptyOption()], nota: '', productos: [] },
